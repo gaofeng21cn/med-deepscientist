@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, unquote
 
 from ...acp import OptionalACPBridge, build_session_descriptor, build_session_update, get_acp_bridge_status
 from ...bash_exec.service import DEFAULT_TERMINAL_SESSION_ID
+from ... import __version__ as DEEPSCIENTIST_VERSION
 from ...gitops import commit_detail, compare_refs, diff_file_between_refs, diff_file_for_commit, export_git_graph, list_branch_canvas, log_ref_history
 from ...memory import MemoryService
 from ...quest import QuestService
@@ -71,6 +72,7 @@ class ApiHandlers:
     def _inject_ui_runtime(self, payload: str) -> str:
         runtime_payload = {
             "surface": "quest",
+            "version": DEEPSCIENTIST_VERSION,
             "supports": {
                 "productApis": False,
                 "socketIo": False,
@@ -159,6 +161,13 @@ npm --prefix src/ui run build</pre>
             "pid": os.getpid(),
             "sessions": self.app.sessions.snapshot(),
         }
+
+    def system_update(self) -> dict:
+        return self.app.system_update_status()
+
+    def system_update_action(self, body: dict) -> dict:
+        action = str(body.get("action") or "").strip().lower()
+        return self.app.request_system_update(action=action)
 
     def cli_health(self) -> dict:
         online_channels = [
@@ -394,12 +403,20 @@ npm --prefix src/ui run build</pre>
     def quest_events(self, quest_id: str, path: str) -> dict:
         query = self.parse_query(path)
         after = int((query.get("after") or ["0"])[0] or "0")
+        before_raw = ((query.get("before") or [""])[0] or "").strip()
+        before = int(before_raw) if before_raw.isdigit() else None
         limit = int((query.get("limit") or ["200"])[0] or "200")
         tail_raw = ((query.get("tail") or ["0"])[0] or "0").strip().lower()
         tail = tail_raw in {"1", "true", "yes", "on"}
         format_name = ((query.get("format") or ["both"])[0] or "both").lower()
         session_id = ((query.get("session_id") or [f"quest:{quest_id}"])[0] or f"quest:{quest_id}")
-        payload = self._fresh_quest_service().events(quest_id, after=after, limit=limit, tail=tail)
+        payload = self._fresh_quest_service().events(
+            quest_id,
+            after=after,
+            before=before,
+            limit=limit,
+            tail=tail,
+        )
         if format_name in {"acp", "both"}:
             payload["acp_updates"] = [
                 build_session_update(

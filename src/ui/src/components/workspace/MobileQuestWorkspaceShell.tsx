@@ -121,6 +121,9 @@ function resolveDocumentRelativePath(
   if (documentId.startsWith('path::')) {
     return documentId.slice('path::'.length)
   }
+  if (documentId.startsWith('questpath::')) {
+    return documentId.slice('questpath::'.length)
+  }
   return document.title || documentId
 }
 
@@ -525,7 +528,7 @@ function MobileExplorerList({
             No files yet
           </div>
           <div className="mt-2 text-[13px] leading-6 text-[rgba(107,103,97,0.78)] dark:text-white/55">
-            {emptyLabel || 'Files and notes recorded during the quest will appear here.'}
+            {emptyLabel || 'Files and notes recorded during the project will appear here.'}
           </div>
         </div>
       </div>
@@ -571,7 +574,7 @@ function MobileExplorerPanel({
               Explorer
             </div>
             <div className="mt-1 text-[22px] font-semibold tracking-[-0.03em] text-[rgba(38,36,33,0.95)] dark:text-white">
-              {sourceMode === 'workspace' ? 'All quest files' : 'Documents first'}
+              {sourceMode === 'workspace' ? 'All project files' : 'Documents first'}
             </div>
             {sourceHint ? (
               <div className="mt-2 max-w-[32rem] text-[12px] leading-5 text-[rgba(107,103,97,0.78)] dark:text-white/55">
@@ -590,7 +593,7 @@ function MobileExplorerPanel({
             ) : null}
             {sourceMode === 'documents' && !loading ? (
               <div className="mt-1 text-[11px] leading-5 text-[rgba(107,103,97,0.78)] dark:text-white/55">
-                Showing indexed quest documents.
+                Showing indexed project documents.
               </div>
             ) : null}
           </div>
@@ -836,7 +839,7 @@ export function MobileQuestWorkspaceShell({
         .catch((error) => {
           if (cancelled || hasFallbackNodes) return
           setExplorerHint(
-            error instanceof Error ? error.message : 'Failed to load indexed quest documents.'
+            error instanceof Error ? error.message : 'Failed to load indexed project documents.'
           )
         })
     }
@@ -1003,6 +1006,9 @@ export function MobileQuestWorkspaceShell({
                     stopping={false}
                     showStopButton={showStopButton}
                     slashCommands={workspace.slashCommands}
+                    hasOlderHistory={workspace.hasOlderHistory}
+                    loadingOlderHistory={workspace.loadingOlderHistory}
+                    onLoadOlderHistory={workspace.loadOlderHistory}
                     onSubmit={workspace.submit}
                     onStopRun={workspace.stopRun}
                   />
@@ -1020,6 +1026,9 @@ export function MobileQuestWorkspaceShell({
                     stopping={false}
                     showStopButton={showStopButton}
                     slashCommands={workspace.slashCommands}
+                    hasOlderHistory={workspace.hasOlderHistory}
+                    loadingOlderHistory={workspace.loadingOlderHistory}
+                    onLoadOlderHistory={workspace.loadOlderHistory}
                     onSubmit={workspace.submit}
                     onStopRun={workspace.stopRun}
                   />
@@ -1065,7 +1074,7 @@ export function MobileQuestWorkspaceShell({
                     Canvas is ready
                   </div>
                   <div className="mt-2 text-[13px] leading-6 text-[rgba(107,103,97,0.78)] dark:text-white/55">
-                    Branches, runs, and artifact milestones will appear here as the quest evolves.
+                    Branches, runs, and artifact milestones will appear here as the project evolves.
                   </div>
                 </div>
               </div>

@@ -216,6 +216,14 @@ def test_git_branch_canvas_reads_artifacts_from_worktrees(temp_home: Path) -> No
         results="Accuracy dropped as expected.",
         metric_rows=[{"name": "acc", "value": 0.84}],
         evidence_paths=["experiments/analysis/ablation/result.json"],
+        evaluation_summary={
+            "takeaway": "The ablation removes the observed gain.",
+            "claim_update": "strengthens",
+            "baseline_relation": "better",
+            "comparability": "high",
+            "failure_mode": "none",
+            "next_action": "write",
+        },
     )
 
     app = DaemonApp(temp_home)
@@ -233,6 +241,7 @@ def test_git_branch_canvas_reads_artifacts_from_worktrees(temp_home: Path) -> No
     assert nodes[analysis_branch]["branch_kind"] == "analysis"
     assert nodes[analysis_branch]["latest_metric"]["key"] == "acc"
     assert nodes[analysis_branch]["worktree_root"] == campaign["slices"][0]["worktree_root"]
+    assert nodes[analysis_branch]["latest_result"]["evaluation_summary"]["next_action"] == "write"
 
 
 def test_git_branch_canvas_marks_breakthrough_and_metrics_timeline(temp_home: Path) -> None:
@@ -290,6 +299,14 @@ def test_git_branch_canvas_marks_breakthrough_and_metrics_timeline(temp_home: Pa
         results="Accuracy improved.",
         conclusion="Good enough for follow-up.",
         metric_rows=[{"metric_id": "acc", "value": 0.86}],
+        evaluation_summary={
+            "takeaway": "The graph test branch beats the baseline on accuracy.",
+            "claim_update": "strengthens",
+            "baseline_relation": "better",
+            "comparability": "high",
+            "failure_mode": "none",
+            "next_action": "analysis_campaign",
+        },
     )
 
     app = DaemonApp(temp_home)
@@ -300,6 +317,7 @@ def test_git_branch_canvas_marks_breakthrough_and_metrics_timeline(temp_home: Pa
     assert nodes[idea["branch"]]["breakthrough_level"] in {"minor", "major"}
     assert nodes[idea["branch"]]["latest_result"]["run_id"] == "main-graph-001"
     assert nodes[idea["branch"]]["latest_metric"]["delta_vs_baseline"] == pytest.approx(0.06)
+    assert nodes[idea["branch"]]["latest_result"]["evaluation_summary"]["claim_update"] == "strengthens"
 
     timeline = app.handlers.metrics_timeline(quest_id)
     assert timeline["primary_metric_id"] == "acc"

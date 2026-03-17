@@ -1,12 +1,6 @@
-import {
-  Bot,
-  MessageCircleMore,
-  MessagesSquare,
-  RadioTower,
-  Send,
-  Smartphone,
-  type LucideIcon,
-} from 'lucide-react'
+import type { ComponentType } from 'react'
+
+import { connectorBrandIcons } from './connectorBrandIcons'
 
 export type ConnectorName = 'qq' | 'telegram' | 'discord' | 'slack' | 'feishu' | 'whatsapp' | 'lingzhu'
 
@@ -36,7 +30,7 @@ export type ConnectorCatalogEntry = {
   name: ConnectorName
   label: string
   subtitle: string
-  icon: LucideIcon
+  icon: ComponentType<{ className?: string }>
   portalLabel: string
   portalUrl: string
   deliveryNote: string
@@ -95,10 +89,10 @@ const commonAccessFields: ConnectorField[] = [
   },
   {
     key: 'auto_bind_dm_to_active_quest',
-    label: 'Auto-bind DM to active quest',
+    label: 'Auto-bind DM to active project',
     kind: 'boolean',
-    description: 'If enabled, direct messages can automatically attach to the current active quest.',
-    whereToGet: 'Enable when 1:1 chats should continue the latest active quest by default.',
+    description: 'If enabled, direct messages can automatically attach to the current active project.',
+    whereToGet: 'Enable when 1:1 chats should continue the latest active project by default.',
   },
 ]
 
@@ -126,7 +120,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'telegram',
     label: 'Telegram',
     subtitle: 'Best for direct bot chats. Preferred runtime path is long polling, not public webhooks.',
-    icon: Send,
+    icon: connectorBrandIcons.telegram,
     portalLabel: 'Telegram Bot docs',
     portalUrl: 'https://core.telegram.org/bots',
     deliveryNote: 'Active send tests use `getMe` and direct Bot API sends when `bot_token` is configured.',
@@ -220,7 +214,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'discord',
     label: 'Discord',
     subtitle: 'Preferred runtime path is Gateway + REST, not public interaction callbacks.',
-    icon: MessageCircleMore,
+    icon: connectorBrandIcons.discord,
     portalLabel: 'Discord Developer Portal',
     portalUrl: 'https://discord.com/developers/applications',
     deliveryNote: 'Direct readiness checks use `users/@me`; runtime target discovery will come from gateway activity.',
@@ -324,7 +318,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'slack',
     label: 'Slack',
     subtitle: 'Preferred runtime path is Socket Mode, which avoids public event callbacks.',
-    icon: MessagesSquare,
+    icon: connectorBrandIcons.slack,
     portalLabel: 'Slack App dashboard',
     portalUrl: 'https://api.slack.com/apps',
     deliveryNote: 'Readiness checks use `auth.test`; Socket Mode additionally needs the App Token.',
@@ -435,7 +429,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'feishu',
     label: 'Feishu / Lark',
     subtitle: 'Preferred runtime path is long connection. Keep webhook secrets only as a legacy fallback.',
-    icon: Bot,
+    icon: connectorBrandIcons.feishu,
     portalLabel: 'Feishu Open Platform',
     portalUrl: 'https://open.feishu.cn/app',
     deliveryNote: 'Readiness checks use tenant token exchange. Legacy verification fields are optional unless you keep webhooks.',
@@ -548,7 +542,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'whatsapp',
     label: 'WhatsApp',
     subtitle: 'Preferred runtime path is a local session, not Meta Cloud API webhooks.',
-    icon: Smartphone,
+    icon: connectorBrandIcons.whatsapp,
     portalLabel: 'WhatsApp Cloud API docs',
     portalUrl: 'https://developers.facebook.com/docs/whatsapp/cloud-api/get-started/',
     deliveryNote: 'Local-session is the preferred design target. Meta Cloud API fields stay available only as a legacy fallback.',
@@ -702,7 +696,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'qq',
     label: 'QQ',
     subtitle: 'Official QQ bot workflow through the built-in gateway direct connection.',
-    icon: RadioTower,
+    icon: connectorBrandIcons.qq,
     portalLabel: 'Tencent QQ Bot Platform',
     portalUrl: 'https://bot.q.qq.com/',
     deliveryNote: 'Readiness checks exchange `access_token`, probe `/gateway`, and can actively send when you provide a user `openid` or group `group_openid`.',
@@ -789,14 +783,14 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
       },
       {
         id: 'access',
-        title: 'Quest binding',
-        description: 'QQ is often used for long-lived operator conversations, milestone push, and quest follow-up.',
+        title: 'Project binding',
+        description: 'QQ is often used for long-lived operator conversations, milestone push, and project follow-up.',
         fields: [
           {
             key: 'auto_bind_dm_to_active_quest',
-            label: 'Auto-bind DM to active quest',
+            label: 'Auto-bind DM to active project',
             kind: 'boolean',
-            description: 'If enabled, private QQ chats automatically follow the latest quest by default.',
+            description: 'If enabled, private QQ chats can automatically attach to the current active project.',
             whereToGet: 'Recommended when one operator mainly drives DeepScientist from QQ. This is enabled by default.',
           },
         ],
@@ -856,7 +850,7 @@ export const connectorCatalog: ConnectorCatalogEntry[] = [
     name: 'lingzhu',
     label: 'Lingzhu',
     subtitle: 'Rokid Lingzhu companion endpoint for OpenClaw SSE ingress and health probing.',
-    icon: Smartphone,
+    icon: connectorBrandIcons.lingzhu,
     portalLabel: 'Rokid developer forum',
     portalUrl: 'https://forum.rokid.com/post/detail/2831',
     deliveryNote: 'DeepScientist generates Lingzhu-ready endpoint values, a probe curl, and an OpenClaw config snippet. Real Lingzhu access still requires a public IP or public domain.',

@@ -7,6 +7,7 @@ import { connectorCatalog } from '@/components/settings/connectorCatalog'
 import { AnimatedCheckbox } from '@/components/ui/animated-checkbox'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { client } from '@/lib/api'
@@ -18,6 +19,7 @@ import {
   detectStartResearchIntensity,
   loadStartResearchHistory,
   loadStartResearchTemplate,
+  listReferenceStartResearchTemplates,
   listStartResearchIntensityPresets,
   resolveStartResearchContractFields,
   saveStartResearchDraft,
@@ -36,11 +38,11 @@ import type { BaselineRegistryEntry, ConnectorRecentConversation, ConnectorSnaps
 const copy = {
   en: {
     title: 'Start Research',
-    body: 'Fill the brief, review the kickoff prompt, then create the quest.',
+    body: 'Fill the brief, review the kickoff prompt, then create the project.',
     formTitle: 'Context Form',
     formHint: 'Each field adds concrete context for the first research round.',
     preview: 'Prompt preview',
-    previewBody: 'This is the exact kickoff content that will be written into the new quest.',
+    previewBody: 'This is the exact kickoff content that will be written into the new project.',
     manual: 'Manual edit active',
     manualTitle: 'Preview edited manually: form is now locked.',
     manualBody: 'Use “Restore form editing” to regenerate the prompt from the left form and unlock inputs.',
@@ -51,15 +53,15 @@ const copy = {
     noTemplates: 'No saved templates yet',
     useTemplate: 'Use template',
     latestDraft: 'latest draft',
-    questTarget: 'Quest target',
-    targetHint: 'This launch creates a new quest repository and seeds the first PI-facing request.',
-    targetMode: 'Quest repository',
-    targetModeValue: 'Create new quest',
+    questTarget: 'Project target',
+    targetHint: 'This launch creates a new project repository and seeds the first PI-facing request.',
+    targetMode: 'Project repository',
+    targetModeValue: 'Create new project',
     targetRunner: 'Runner',
     targetRunnerValue: 'Codex / local daemon',
     connectorDeliveryLabel: 'Connector delivery',
     connectorDeliveryHelp:
-      'Optional. Pick one enabled connector target to receive progress for this new quest immediately. Leave it empty to keep the default automatic binding behavior.',
+      'Optional. Pick one enabled connector target to receive progress for this new project immediately. Leave it empty to keep the default automatic binding behavior.',
     connectorDeliveryHint: 'At most one connector can be selected. Click again to clear the selection.',
     connectorSettingsAction: 'Open connector settings',
     connectorEmptyTitle: 'No enabled connector yet',
@@ -69,15 +71,20 @@ const copy = {
     connectorUnavailableBody:
       'Enabled connectors exist, but no active target is available yet. Send one message to that connector first, or set a default target in Settings.',
     connectorAutoModeLabel: 'No manual selection',
-    connectorAutoModeBody: 'Keep the current automatic binding behavior during quest creation.',
+    connectorAutoModeBody: 'Keep the current automatic binding behavior during project creation.',
     connectorSummaryLabel: 'Connector',
     connectorSummaryAuto: 'Automatic',
-    connectorSelectedHint: 'This target will be rebound to the new quest on create.',
+    connectorSelectedHint: 'This target will be rebound to the new project on create.',
     connectorSourceDefault: 'Default target',
     connectorSourceRecent: 'Recent conversation',
     connectorSourceLast: 'Latest conversation',
     connectorSourceDiscovered: 'Discovered target',
     connectorSourceUnavailable: 'Waiting for first message',
+    connectorSuggestTitle: 'Bind a connector first?',
+    connectorSuggestBody:
+      'For a smoother experience, it is recommended to configure at least one connector before starting research. Then milestones and progress can reach you outside the web workspace too.',
+    connectorSuggestLater: 'Not now',
+    connectorSuggestGo: 'Go',
     basics: 'Core research brief',
     references: 'Baseline & references',
     policy: 'Research contract',
@@ -86,7 +93,7 @@ const copy = {
       'Standard starts from the ordinary research loop. Custom is for continuing existing state, rebuttal / revision, or a user-defined brief.',
     customProfileLabel: 'Custom profile',
     customProfileHelp:
-      'Only shown in custom mode. Use it to tell the agent whether this quest should first audit existing state, handle rebuttal work, or follow a freeform brief.',
+      'Only shown in custom mode. Use it to tell the agent whether this project should first audit existing state, handle rebuttal work, or follow a freeform brief.',
     entryStateSummaryLabel: 'Existing state summary',
     entryStateSummaryHelp:
       'Briefly describe what already exists, such as a trusted baseline, finished main runs, analysis results, or a paper draft.',
@@ -94,7 +101,7 @@ const copy = {
       'Example: baseline is already trusted; one main experiment has finished; draft introduction and method sections already exist.',
     reviewSummaryLabel: 'Review / revision summary',
     reviewSummaryHelp:
-      'Use this when the quest is driven by reviewer comments, a revision request, or a meta-review.',
+      'Use this when the project is driven by reviewer comments, a revision request, or a meta-review.',
     reviewSummaryPlaceholder:
       'Example: reviewers asked for stronger ablations, one extra baseline, and a clearer limitation discussion.',
     customBriefLabel: 'Custom brief',
@@ -112,13 +119,13 @@ const copy = {
     derivedPolicyHint: 'These fields are inferred automatically from the selected intensity and baseline choice.',
     derivedPolicyBudgetLabel: 'Round budget',
     objectives: 'Goals',
-    titleLabel: 'Quest title',
+    titleLabel: 'Project title',
     titlePlaceholder: 'A short human-readable research title',
-    titleHelp: 'This is the display title shown in the workspace and quest cards.',
-    repoLabel: 'Quest ID',
+    titleHelp: 'This is the display title shown in the workspace and project cards.',
+    repoLabel: 'Project ID',
     repoPlaceholder: 'Default: next sequential id such as 001, 002, 003',
-    repoHelp: 'By default runtime allocates the next sequential quest id. You can override it manually when needed.',
-    repoLoading: 'Loading next quest id…',
+    repoHelp: 'By default runtime allocates the next sequential project id. You can override it manually when needed.',
+    repoLoading: 'Loading next project id…',
     repoAutoAssigned: 'Assigned by runtime on create',
     goalLabel: 'Primary research request',
     goalPlaceholder: 'State the core scientific question, target paper, hypothesis, and what success would look like.',
@@ -126,7 +133,7 @@ const copy = {
     baselineRoot: 'Reusable baseline',
     baselineRootPlaceholder: 'Select a reusable baseline entry (optional)',
     baselineRootHelp:
-      'Pick a previously confirmed reusable baseline entry from the global registry. Runtime will attach and confirm it before the new quest starts.',
+      'Pick a previously confirmed reusable baseline entry from the global registry. Runtime will attach and confirm it before the new project starts.',
     baselineVariant: 'Baseline variant',
     baselineVariantHelp: 'Optional: choose a specific baseline variant when the entry contains multiple variants.',
     baselineUrls: 'Baseline links',
@@ -139,11 +146,11 @@ const copy = {
     runtimeConstraintsPlaceholder: 'Budget, hardware, privacy, storage, data access, or deadline constraints',
     runtimeConstraintsHelp: 'Anything here becomes a hard operating rule for the first research round.',
     objectivesLabel: 'Goals',
-    objectivesPlaceholder: 'Describe what this quest should achieve in the first meaningful research cycle.',
+    objectivesPlaceholder: 'Describe what this project should achieve in the first meaningful research cycle.',
     objectivesHelp: 'Use short bullet-like lines such as establish baseline, choose direction, or produce an analysis-ready result.',
     researchPaperLabel: 'Research paper',
     researchPaperHelp:
-      'Default on. Keep this enabled when the quest must continue into analysis, outline, drafting, and paper bundle work. Turn it off when the quest should pursue the strongest justified algorithmic result only.',
+      'Default on. Keep this enabled when the project must continue into analysis, outline, drafting, and paper bundle work. Turn it off when the project should pursue the strongest justified algorithmic result only.',
     researchPaperEnabled: 'Paper required',
     researchPaperEnabledBody: 'Keep paper-oriented analysis and writing in scope. A strong run alone is not the endpoint.',
     researchPaperDisabled: 'Algorithm-first mode',
@@ -153,8 +160,8 @@ const copy = {
     languageHelp: 'The kickoff prompt and later communication should prefer this language by default.',
     promptRequired: 'Prompt preview cannot be empty.',
     goalRequired: 'Please provide a research request, or edit the preview manually.',
-    footer: 'Create quest immediately after review.',
-    create: 'Create quest',
+    footer: 'Create project immediately after review.',
+    create: 'Create project',
     cancel: 'Cancel',
     intensityOptions: {
       light: {
@@ -211,18 +218,18 @@ const copy = {
       custom: 'Custom — continue existing state, rebuttal/revision, or a user-defined brief.',
     },
     customProfileOptions: {
-      continue_existing_state: 'Continue existing state — first audit baselines, results, drafts, and current quest assets.',
+      continue_existing_state: 'Continue existing state — first audit baselines, results, drafts, and current project assets.',
       revision_rebuttal: 'Revision / rebuttal — first interpret reviews, then route extra experiments and writing updates.',
       freeform: 'Freeform — follow the custom brief and use only the skills actually needed.',
     },
   },
   zh: {
     title: 'Start Research',
-    body: '填写研究简述，检查 kickoff prompt，然后创建 quest。',
+    body: '填写研究简述，检查 kickoff prompt，然后创建项目。',
     formTitle: '上下文表单',
     formHint: '每一项都在为第一轮研究提供清晰、可执行的上下文。',
     preview: 'Prompt 预览',
-    previewBody: '这里展示的是即将写入新 quest 的完整启动内容。',
+    previewBody: '这里展示的是即将写入新项目的完整启动内容。',
     manual: '手工编辑已启用',
     manualTitle: '你已手工修改预览，左侧表单暂时锁定。',
     manualBody: '点击“恢复表单驱动”后，会重新根据左侧表单生成 prompt，并解除锁定。',
@@ -233,15 +240,15 @@ const copy = {
     noTemplates: '还没有已保存模板',
     useTemplate: '使用模板',
     latestDraft: '最近草稿',
-    questTarget: 'Quest 目标',
-    targetHint: '当前启动会创建一个新的 quest 仓库，并写入第一条面向 PI 的启动请求。',
-    targetMode: 'Quest 仓库',
-    targetModeValue: '创建新 quest',
+    questTarget: '项目目标',
+    targetHint: '当前启动会创建一个新的项目仓库，并写入第一条面向 PI 的启动请求。',
+    targetMode: '项目仓库',
+    targetModeValue: '创建新项目',
     targetRunner: 'Runner',
     targetRunnerValue: 'Codex / 本地 daemon',
     connectorDeliveryLabel: '连接器投递',
     connectorDeliveryHelp:
-      '可选。手动选择一个已启用 connector 的目标会话，让新 quest 创建后立即把进展发到这里；留空则保持默认自动绑定行为。',
+      '可选。手动选择一个已启用 connector 的目标会话，让新项目创建后立即把进展发到这里；留空则保持默认自动绑定行为。',
     connectorDeliveryHint: '最多选择 1 个；再次点击已选中的卡片即可取消。',
     connectorSettingsAction: '打开 Connector 设置',
     connectorEmptyTitle: '还没有启用的 connector',
@@ -251,15 +258,20 @@ const copy = {
     connectorUnavailableBody:
       '已有启用的 connector，但当前还没有可用目标。请先给对应 connector 发一条消息，或在 Settings 中设置默认目标。',
     connectorAutoModeLabel: '不手动指定',
-    connectorAutoModeBody: '创建 quest 时保持当前默认的自动绑定行为。',
+    connectorAutoModeBody: '创建项目时保持当前默认的自动绑定行为。',
     connectorSummaryLabel: '连接器',
     connectorSummaryAuto: '自动',
-    connectorSelectedHint: '创建后会把这个目标会话重新绑定到新 quest。',
+    connectorSelectedHint: '创建后会把这个目标会话重新绑定到新项目。',
     connectorSourceDefault: '默认目标',
     connectorSourceRecent: '最近会话',
     connectorSourceLast: '最新会话',
     connectorSourceDiscovered: '已发现目标',
     connectorSourceUnavailable: '等待第一条消息',
+    connectorSuggestTitle: '建议先绑定一个 Connector',
+    connectorSuggestBody:
+      '为了获得更顺滑的使用体验，建议你先配置至少一个 connector。这样开始研究后，里程碑和进展也能同步发到网页之外。',
+    connectorSuggestLater: '暂不',
+    connectorSuggestGo: '前往',
     basics: '核心研究简述',
     references: 'Baseline 与参考',
     policy: '研究合同',
@@ -276,7 +288,7 @@ const copy = {
       '例如：baseline 已可信；一个主实验已完成；引言和方法草稿已存在。',
     reviewSummaryLabel: '审稿 / 修改摘要',
     reviewSummaryHelp:
-      '当 quest 由 reviewer comments、revision request 或 meta-review 驱动时，在这里概括主要要求。',
+      '当项目由 reviewer comments、revision request 或 meta-review 驱动时，在这里概括主要要求。',
     reviewSummaryPlaceholder:
       '例如：reviewer 要求补更强的 ablation、增加一个 baseline、并澄清 limitation。',
     customBriefLabel: '自定义说明',
@@ -295,18 +307,18 @@ const copy = {
     objectives: '目标',
     titleLabel: '课题标题',
     titlePlaceholder: '一个简洁易读的研究标题',
-    titleHelp: '这是工作区和 quest 卡片中展示给用户看的标题。',
-    repoLabel: 'Quest ID',
+    titleHelp: '这是工作区和项目卡片中展示给用户看的标题。',
+    repoLabel: '项目 ID',
     repoPlaceholder: '默认使用下一个顺序编号，例如 001、002、003',
-    repoHelp: '默认由 runtime 分配下一个顺序 quest id；如有需要你也可以手动覆盖。',
-    repoLoading: '正在加载下一个 quest id…',
+    repoHelp: '默认由 runtime 分配下一个顺序项目 ID；如有需要你也可以手动覆盖。',
+    repoLoading: '正在加载下一个项目 ID…',
     repoAutoAssigned: '创建时由 runtime 分配',
     goalLabel: '核心研究请求',
     goalPlaceholder: '清楚说明科学问题、目标论文、核心假设，以及什么结果算成功。',
     goalHelp: '这里应该描述真正要解决的问题，而不是过早写实现细节。',
     baselineRoot: '复用 Baseline',
     baselineRootPlaceholder: '选择一个可复用的 baseline 条目（可选）',
-    baselineRootHelp: '选择全局 registry 中已经确认可复用的 baseline。运行时会在新 quest 创建前自动 attach 并 confirm；留空则从零开始建立 baseline。',
+    baselineRootHelp: '选择全局 registry 中已经确认可复用的 baseline。运行时会在新项目创建前自动 attach 并 confirm；留空则从零开始建立 baseline。',
     baselineVariant: 'Baseline variant',
     baselineVariantHelp: '可选：当 baseline entry 里包含多个 variant 时，可以在这里指定。',
     baselineUrls: 'Baseline 链接',
@@ -323,7 +335,7 @@ const copy = {
     objectivesHelp: '建议按短句逐行写明，例如“建立可信 baseline”“判断是否值得实现某方向”。',
     researchPaperLabel: '研究论文',
     researchPaperHelp:
-      '默认开启。若本次 quest 必须继续推进到分析、写作大纲、草稿与 paper bundle，请保持开启；若只追求最强且有依据的算法结果，可关闭。',
+      '默认开启。若本次项目必须继续推进到分析、写作大纲、草稿与 paper bundle，请保持开启；若只追求最强且有依据的算法结果，可关闭。',
     researchPaperEnabled: '需要研究论文',
     researchPaperEnabledBody: '保持论文导向的分析与写作流程。单次较强实验结果本身不构成终点。',
     researchPaperDisabled: '仅追求最佳算法',
@@ -333,8 +345,8 @@ const copy = {
     languageHelp: '默认希望 kickoff prompt 与后续交流优先使用的语言。',
     promptRequired: 'Prompt 预览不能为空。',
     goalRequired: '请填写研究请求，或直接在右侧手工编辑 prompt。',
-    footer: '确认后会立即创建 quest。',
-    create: '创建 quest',
+    footer: '确认后会立即创建项目。',
+    create: '创建项目',
     cancel: '取消',
     intensityOptions: {
       light: {
@@ -391,7 +403,7 @@ const copy = {
       custom: 'Custom —— 继续已有状态、处理 rebuttal/revision，或执行用户自定义任务。',
     },
     customProfileOptions: {
-      continue_existing_state: '继续已有状态 —— 先审计 baseline、结果、草稿和现有 quest 资产。',
+      continue_existing_state: '继续已有状态 —— 先审计 baseline、结果、草稿和现有项目资产。',
       revision_rebuttal: '审稿修改 / rebuttal —— 先解析 review，再决定补实验和改文。',
       freeform: '自由模式 —— 以自定义 brief 为主，只打开真正需要的 skills。',
     },
@@ -945,6 +957,9 @@ export function CreateProjectDialog({
   const [connectorsLoading, setConnectorsLoading] = useState(false)
   const [connectorsError, setConnectorsError] = useState<string | null>(null)
   const [selectedConnectorConversationId, setSelectedConnectorConversationId] = useState<string | null>(null)
+  const [showConnectorRecommendation, setShowConnectorRecommendation] = useState(false)
+  const [connectorRecommendationHandled, setConnectorRecommendationHandled] = useState(false)
+  const referenceTemplates = useMemo(() => listReferenceStartResearchTemplates(), [])
 
   const activeResearchIntensity = useMemo(
     () => detectStartResearchIntensity(form),
@@ -1019,6 +1034,8 @@ export function CreateProjectDialog({
     setQuestIdManualOverride(false)
     setSuggestedQuestId('')
     setSelectedConnectorConversationId(null)
+    setShowConnectorRecommendation(false)
+    setConnectorRecommendationHandled(false)
   }, [initialGoal, locale, open])
 
   const setField = <K extends keyof StartResearchTemplate>(
@@ -1054,6 +1071,16 @@ export function CreateProjectDialog({
       active = false
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    if (connectorsLoading) return
+    if (connectorsError) return
+    if (connectorRecommendationHandled) return
+    if (connectors.length > 0) return
+    setShowConnectorRecommendation(true)
+    setConnectorRecommendationHandled(true)
+  }, [connectorRecommendationHandled, connectors.length, connectorsError, connectorsLoading, open])
 
   useEffect(() => {
     if (!open) return
@@ -1147,6 +1174,11 @@ export function CreateProjectDialog({
     [connectorChoices, selectedConnectorConversationId]
   )
 
+  const templateOptions = useMemo(
+    () => [...referenceTemplates, ...templates],
+    [referenceTemplates, templates]
+  )
+
   useEffect(() => {
     if (!selectedConnectorConversationId) return
     if (!connectorChoices.some((item) => item.conversationId === selectedConnectorConversationId)) {
@@ -1237,7 +1269,7 @@ export function CreateProjectDialog({
       })
       return
     }
-    const next = templates.find((item) => item.id === templateId)
+    const next = templateOptions.find((item) => item.id === templateId)
     if (!next) {
       return
     }
@@ -1261,7 +1293,7 @@ export function CreateProjectDialog({
       entry_state_summary: next.entry_state_summary,
       review_summary: next.review_summary,
       custom_brief: next.custom_brief,
-      user_language: locale,
+      user_language: next.user_language,
     })
   }
 
@@ -1280,8 +1312,9 @@ export function CreateProjectDialog({
   }
 
   const handleOpenConnectorSettings = () => {
+    setShowConnectorRecommendation(false)
     onClose()
-    navigate('/settings/connectors', { state: { configName: 'connectors' } })
+    navigate('/settings/connector', { state: { configName: 'connectors' } })
   }
 
   const handleCreate = async () => {
@@ -1334,14 +1367,15 @@ export function CreateProjectDialog({
   }
 
   return (
-    <OverlayDialog
-      open={open}
-      title={t.title}
-      description={t.body}
-      onClose={onClose}
-      className="h-[94svh] max-w-[96vw] rounded-[26px] sm:h-[92vh] sm:max-w-[92vw] sm:rounded-[30px]"
-    >
-      <div className="feed-scrollbar flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 sm:gap-4 sm:p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:overflow-hidden lg:p-5">
+    <>
+      <OverlayDialog
+        open={open}
+        title={t.title}
+        description={t.body}
+        onClose={onClose}
+        className="h-[94svh] max-w-[96vw] rounded-[26px] sm:h-[92vh] sm:max-w-[92vw] sm:rounded-[30px]"
+      >
+        <div className="feed-scrollbar flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3 sm:gap-4 sm:p-4 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:overflow-hidden lg:p-5">
         <div
           className={cn(
             'flex flex-none flex-col overflow-visible lg:min-h-0 lg:flex-auto lg:overflow-hidden lg:rounded-xl lg:border lg:border-[rgba(45,42,38,0.09)] lg:bg-[rgba(255,255,255,0.76)] lg:shadow-[0_10px_26px_-22px_rgba(45,42,38,0.26)] lg:backdrop-blur-xl dark:lg:border-[rgba(45,42,38,0.09)] dark:lg:bg-[rgba(255,255,255,0.82)]'
@@ -1379,15 +1413,15 @@ export function CreateProjectDialog({
                     >
                       <option value="__new__">{t.newTemplate}</option>
                       <option value="__latest__">{t.useTemplate}: {t.latestDraft}</option>
-                      {templates.length === 0 ? <option value="__empty__">{t.noTemplates}</option> : null}
-                      {templates.map((item) => (
+                      {templateOptions.length === 0 ? <option value="__empty__">{t.noTemplates}</option> : null}
+                      {templateOptions.map((item) => (
                         <option key={item.id} value={item.id}>
                           {compactTemplateLabel(item, locale)}
                         </option>
                       ))}
                     </select>
                     <div className="inline-flex h-9 items-center rounded-[10px] border border-[rgba(45,42,38,0.09)] bg-white/65 px-3 text-[11px] text-[rgba(75,73,69,0.72)] dark:border-[rgba(45,42,38,0.09)] dark:bg-white/72 dark:text-[rgba(75,73,69,0.72)]">
-                      {templates.length}
+                      {templateOptions.length}
                     </div>
                   </div>
                 </InlineField>
@@ -1525,7 +1559,7 @@ export function CreateProjectDialog({
                           <div>{selectedBaselineEntry.summary ? clampText(String(selectedBaselineEntry.summary), 120) : (locale === 'zh' ? '未提供概要。' : 'No summary provided.')}</div>
                           <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
                             <div>{locale === 'zh' ? '状态' : 'Status'}: {formatBaselineStatus(selectedBaselineEntry.status, locale)}</div>
-                            <div>{locale === 'zh' ? '来源 Quest' : 'Source quest'}: {selectedBaselineEntry.source_quest_id || (locale === 'zh' ? '未知' : 'unknown')}</div>
+                            <div>{locale === 'zh' ? '来源项目' : 'Source project'}: {selectedBaselineEntry.source_quest_id || (locale === 'zh' ? '未知' : 'unknown')}</div>
                             <div>{locale === 'zh' ? '主指标' : 'Primary metric'}: {resolveBaselineMetricLabel(selectedBaselineEntry, locale)}</div>
                             <div>{locale === 'zh' ? '确认时间' : 'Confirmed'}: {formatBaselineTimestamp(selectedBaselineEntry.confirmed_at || selectedBaselineEntry.updated_at, locale)}</div>
                           </div>
@@ -1813,7 +1847,7 @@ export function CreateProjectDialog({
           <div className="mt-3 flex shrink-0 flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between lg:px-0">
             <div className="inline-flex items-center gap-2 text-[11px] text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">
               <BookmarkPlus className="h-3.5 w-3.5" />
-              <span>{templates.length} template(s)</span>
+              <span>{templateOptions.length} template(s)</span>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
               <Button
@@ -1839,7 +1873,49 @@ export function CreateProjectDialog({
             </div>
           </div>
         </div>
-      </div>
-    </OverlayDialog>
+        </div>
+      </OverlayDialog>
+      <Dialog
+        open={open && showConnectorRecommendation}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setShowConnectorRecommendation(false)
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-[92vw] rounded-[24px] border border-[rgba(45,42,38,0.09)] bg-[rgba(255,255,255,0.92)] p-0 shadow-[0_30px_90px_-48px_rgba(45,42,38,0.38)] backdrop-blur-2xl sm:max-w-md dark:border-[rgba(255,255,255,0.08)] dark:bg-[rgba(28,28,30,0.86)]"
+        >
+          <div className="p-5 sm:p-6">
+            <DialogHeader className="space-y-2 text-left">
+              <DialogTitle className="text-[18px] font-semibold text-[rgba(38,36,33,0.96)] dark:text-white">
+                {t.connectorSuggestTitle}
+              </DialogTitle>
+              <DialogDescription className="text-sm leading-6 text-[rgba(86,82,77,0.82)] dark:text-white/68">
+                {t.connectorSuggestBody}
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-5 flex-row justify-end gap-2 sm:space-x-0">
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-w-[88px]"
+                onClick={() => setShowConnectorRecommendation(false)}
+              >
+                {t.connectorSuggestLater}
+              </Button>
+              <Button
+                type="button"
+                className="min-w-[88px]"
+                onClick={handleOpenConnectorSettings}
+              >
+                {t.connectorSuggestGo}
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

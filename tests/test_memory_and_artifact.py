@@ -297,6 +297,14 @@ def test_artifact_managed_git_flow_updates_research_state_and_mirrors_analysis(t
                 "goal": "Remove the adapter and compare.",
                 "required_changes": "Disable the adapter path only.",
                 "metric_contract": "Report full validation metrics.",
+                "required_baselines": [
+                    {
+                        "baseline_id": "adapter-ablation-baseline",
+                        "reason": "Need a clean comparator for the ablation slice.",
+                        "benchmark": "val",
+                        "split": "full",
+                    }
+                ],
             },
             {
                 "slice_id": "robustness",
@@ -316,13 +324,23 @@ def test_artifact_managed_git_flow_updates_research_state_and_mirrors_analysis(t
     assert campaign["next_instruction"]
     first_slice = campaign["slices"][0]
     second_slice = campaign["slices"][1]
+    assert first_slice["required_baselines"][0]["baseline_id"] == "adapter-ablation-baseline"
     assert Path(first_slice["worktree_root"]).exists()
     assert Path(second_slice["worktree_root"]).exists()
+    analysis_inventory_path = quest_root / "artifacts" / "baselines" / "analysis_inventory.json"
+    analysis_inventory = read_json(analysis_inventory_path, {})
+    assert analysis_inventory_path.exists()
+    assert analysis_inventory["entries"][0]["baseline_id"] == "adapter-ablation-baseline"
+    assert analysis_inventory["entries"][0]["status"] == "required"
 
     state_after_campaign = quest_service.read_research_state(quest_root)
     assert state_after_campaign["active_analysis_campaign_id"] == campaign["campaign_id"]
     assert state_after_campaign["current_workspace_root"] == first_slice["worktree_root"]
     assert quest_service.snapshot(quest["quest_id"])["active_anchor"] == "analysis-campaign"
+
+    analysis_baseline_root = quest_root / "baselines" / "local" / "adapter-ablation-baseline"
+    analysis_baseline_root.mkdir(parents=True, exist_ok=True)
+    (analysis_baseline_root / "README.md").write_text("# Analysis baseline\n", encoding="utf-8")
 
     first_record = artifact.record_analysis_slice(
         quest_root,
@@ -333,11 +351,30 @@ def test_artifact_managed_git_flow_updates_research_state_and_mirrors_analysis(t
         results="Accuracy dropped as expected.",
         evidence_paths=["experiments/analysis/ablation/result.json"],
         metric_rows=[{"name": "acc", "value": 0.84}],
+        comparison_baselines=[
+            {
+                "baseline_id": "adapter-ablation-baseline",
+                "baseline_root_rel_path": "baselines/local/adapter-ablation-baseline",
+                "benchmark": "val",
+                "split": "full",
+                "metrics_summary": {"acc": 0.8},
+                "published": True,
+            }
+        ],
     )
     assert first_record["ok"] is True
     assert first_record["completed"] is False
     assert first_record["next_slice"]["slice_id"] == "robustness"
     assert Path(first_record["mirror_path"]).exists()
+    assert Path(first_record["result_json_path"]).exists()
+    slice_result_payload = read_json(first_record["result_json_path"], {})
+    assert slice_result_payload["comparison_baselines"][0]["baseline_id"] == "adapter-ablation-baseline"
+    analysis_inventory = read_json(analysis_inventory_path, {})
+    registered_entry = next(
+        item for item in analysis_inventory["entries"] if item["baseline_id"] == "adapter-ablation-baseline"
+    )
+    assert registered_entry["status"] == "registered"
+    assert registered_entry["baseline_root_rel_path"] == "baselines/local/adapter-ablation-baseline"
 
     second_record = artifact.record_analysis_slice(
         quest_root,
@@ -634,6 +671,14 @@ def test_supplementary_experiment_protocol_supports_runtime_ref_queries_and_unif
         reviewer_resolution="Addresses reviewer item R1-C1 directly.",
         manuscript_update_hint="Update the rebuttal response and the main results paragraph.",
         next_recommendation="Return to the parent branch and revise the manuscript.",
+        evaluation_summary={
+            "takeaway": "The reviewer-linked check supports the original claim.",
+            "claim_update": "strengthens",
+            "baseline_relation": "better",
+            "comparability": "high",
+            "failure_mode": "none",
+            "next_action": "write",
+        },
     )
     assert completed["ok"] is True
     result_text = Path(completed["result_path"]).read_text(encoding="utf-8")
@@ -655,6 +700,7 @@ def test_supplementary_experiment_protocol_supports_runtime_ref_queries_and_unif
     assert analysis_details["campaign_origin"]["kind"] == "rebuttal"
     assert analysis_details["todo_items"][0]["success_criteria"] == "Produce a fair comparison and a usable manuscript update."
     assert analysis_details["slices"][0]["claim_impact"] == "Strengthens confidence in the main claim."
+    assert analysis_details["slices"][0]["evaluation_summary"]["claim_update"] == "strengthens"
 
 
 def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path) -> None:
@@ -698,6 +744,13 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     )
     assert result["ok"] is True
     assert Path(result["manifest_path"]).exists()
+    assert Path(result["baseline_inventory_path"]).exists()
+    assert Path(result["open_source_manifest_path"]).exists()
+    baseline_inventory = read_json(Path(result["baseline_inventory_path"]), {})
+    assert baseline_inventory["schema_version"] == 1
+    open_source_manifest = read_json(Path(result["open_source_manifest_path"]), {})
+    assert open_source_manifest["source_bundle_manifest_path"] == "paper/paper_bundle_manifest.json"
+    assert open_source_manifest["cleanup_plan_path"] == "release/open_source/cleanup_plan.md"
     snapshot = quest_service.snapshot(quest["quest_id"])
     assert snapshot["active_anchor"] == "finalize"
 
@@ -778,6 +831,14 @@ def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home:
         ],
         evidence_paths=["outputs/main-001/metrics.json"],
         config_paths=["configs/adapter.yaml"],
+        evaluation_summary={
+            "takeaway": "The adapter clears the baseline on the main validation metric.",
+            "claim_update": "strengthens",
+            "baseline_relation": "better",
+            "comparability": "high",
+            "failure_mode": "none",
+            "next_action": "analysis_campaign",
+        },
     )
 
     assert result["ok"] is True
@@ -796,14 +857,26 @@ def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home:
     assert payload["baseline_ref"]["metric_contract_json_rel_path"] == "baselines/imported/baseline-main/json/metric_contract.json"
     assert payload["metrics_summary"]["acc"] == 0.89
     assert payload["baseline_comparisons"]["primary_metric_id"] == "acc"
+    assert payload["evaluation_summary"]["claim_update"] == "strengthens"
     primary = next(item for item in payload["baseline_comparisons"]["items"] if item["metric_id"] == "acc")
     assert primary["delta"] == pytest.approx(0.05)
     assert payload["progress_eval"]["breakthrough"] is True
     assert payload["progress_eval"]["breakthrough_level"] in {"minor", "major"}
+    assert result["evaluation_summary"]["next_action"] == "analysis_campaign"
 
     snapshot = quest_service.snapshot(quest["quest_id"])
     assert snapshot["summary"]["latest_metric"]["key"] == "acc"
     assert snapshot["summary"]["latest_metric"]["delta_vs_baseline"] == pytest.approx(0.05)
+    stage_view = quest_service.stage_view(
+        quest["quest_id"],
+        {
+            "selection_ref": f"stage:{idea['branch']}:experiment",
+            "selection_type": "stage_node",
+            "branch_name": idea["branch"],
+            "stage_key": "experiment",
+        },
+    )
+    assert stage_view["details"]["experiment"]["evaluation_summary"]["baseline_relation"] == "better"
 
 
 def test_submit_idea_supports_foundation_selection_and_branch_listing(temp_home: Path) -> None:
@@ -1674,7 +1747,45 @@ def test_questpath_documents_and_stage_view_cover_quest_root_files(temp_home: Pa
     assert stage_view["stage_key"] == "baseline"
     assert stage_view["title"] == "Baseline · baseline-001"
     assert any(item["label"] == "Attachment" for item in stage_view["sections"]["key_files"])
-    assert any(str(item.get("artifact_kind") or "") == "baseline" for item in stage_view["sections"]["history"])
+
+
+def test_workflow_uses_questpath_for_quest_root_outputs_when_active_workspace_is_worktree(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("workflow questpath contract")
+    quest_root = Path(quest["quest_root"])
+    worktree_root = quest_root / ".ds" / "worktrees" / "branch-001"
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    (worktree_root / "brief.md").write_text("# Worktree brief\n", encoding="utf-8")
+
+    run_output = quest_root / ".ds" / "runs" / "run-001" / "result.txt"
+    run_output.parent.mkdir(parents=True, exist_ok=True)
+    run_output.write_text("quest-root output\n", encoding="utf-8")
+    history_root = quest_root / ".ds" / "codex_history" / "run-001"
+    history_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        history_root / "meta.json",
+        {
+            "run_id": "run-001",
+            "skill_id": "experiment",
+            "summary": "Recorded output",
+            "output_path": str(run_output),
+        },
+    )
+
+    quest_service.update_research_state(
+        quest_root,
+        current_workspace_root=str(worktree_root),
+        research_head_worktree_root=str(worktree_root),
+    )
+
+    workflow = quest_service.workflow(quest["quest_id"])
+    output_item = next(
+        item for item in workflow["changed_files"] if str(item.get("path") or "").endswith(".ds/runs/run-001/result.txt")
+    )
+
+    assert output_item["document_id"] == "questpath::.ds/runs/run-001/result.txt"
 
 
 def test_explorer_can_switch_to_git_snapshot_and_open_historical_files(temp_home: Path) -> None:

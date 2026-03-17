@@ -196,6 +196,37 @@ export interface ConnectorTargetSnapshot {
   is_default?: boolean
 }
 
+export interface SystemUpdateResult {
+  ok?: boolean
+  target_version?: string | null
+  message?: string | null
+  log_path?: string | null
+}
+
+export interface SystemUpdateStatus {
+  ok: boolean
+  package_name?: string
+  install_mode?: string
+  can_check?: boolean
+  can_self_update?: boolean
+  current_version: string
+  latest_version?: string | null
+  update_available: boolean
+  prompt_recommended?: boolean
+  busy?: boolean
+  last_checked_at?: string | null
+  last_check_error?: string | null
+  last_prompted_at?: string | null
+  last_deferred_at?: string | null
+  last_skipped_version?: string | null
+  last_update_started_at?: string | null
+  last_update_finished_at?: string | null
+  last_update_result?: SystemUpdateResult | null
+  target_version?: string | null
+  manual_update_command?: string | null
+  reason?: string | null
+}
+
 export interface ConfigFileEntry {
   name: string
   path: string
@@ -412,6 +443,15 @@ export interface MetricContractPayload {
   }>
 }
 
+export interface EvaluationSummaryPayload {
+  takeaway?: string | null
+  claim_update?: string | null
+  baseline_relation?: string | null
+  comparability?: string | null
+  failure_mode?: string | null
+  next_action?: string | null
+}
+
 export interface MainExperimentResultPayload {
   run_id?: string
   run_kind?: string
@@ -446,6 +486,7 @@ export interface MainExperimentResultPayload {
     breakthrough_level?: string | null
     reason?: string | null
   }
+  evaluation_summary?: EvaluationSummaryPayload | null
   files_changed?: string[]
   evidence_paths?: string[]
 }
@@ -898,6 +939,9 @@ export interface ExplorerPayload {
 export interface FeedEnvelope {
   cursor: number
   has_more?: boolean
+  oldest_cursor?: number | null
+  newest_cursor?: number | null
+  direction?: 'after' | 'before' | 'tail' | string
   quest_id?: string
   format?: string
   session_id?: string

@@ -9,7 +9,7 @@ For the current runtime control flow, prompt/skill execution model, MCP surface,
 Use the current workspace install:
 
 ```bash
-pip install -e .
+uv sync
 npm install
 ```
 

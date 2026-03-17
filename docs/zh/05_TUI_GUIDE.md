@@ -9,7 +9,7 @@
 在当前仓库目录中：
 
 ```bash
-pip install -e .
+uv sync
 npm install
 ```
 

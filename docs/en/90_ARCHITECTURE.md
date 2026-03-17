@@ -42,7 +42,7 @@ The normal user path is:
 
 1. `npm install -g @researai/deepscientist`
 2. run `ds`
-3. `bin/ds.js` ensures the local Python runtime is ready under `~/DeepScientist/runtime/venv`
+3. `bin/ds.js` ensures a locked uv-managed Python runtime is ready under `~/DeepScientist/runtime/python-env`
 4. the launcher starts the Python daemon
 5. the daemon serves the web workspace and shared API surface
 6. the TUI and web UI both consume the same daemon contracts
@@ -57,7 +57,9 @@ Key directories:
 
 - `runtime/`
   - launcher-managed runtime state
-  - Python venv
+  - uv-managed Python environment
+  - uv-managed Python installs
+  - uv cache
   - built bundle helpers
   - managed local tool installs under `runtime/tools/`
 - `config/`

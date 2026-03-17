@@ -35,6 +35,9 @@ type QuestStudioDirectTimelineProps = {
   connectionState: 'connecting' | 'connected' | 'reconnecting' | 'error'
   error?: string | null
   snapshot?: QuestSummary | null
+  hasOlderHistory?: boolean
+  loadingOlderHistory?: boolean
+  onLoadOlderHistory?: () => Promise<void>
   emptyLabel?: string
   bottomInset?: number
 }
@@ -414,6 +417,9 @@ export function QuestStudioDirectTimeline({
   connectionState,
   error,
   snapshot,
+  hasOlderHistory = false,
+  loadingOlderHistory = false,
+  onLoadOlderHistory,
   emptyLabel = 'Copilot trace appears here.',
   bottomInset = 28,
 }: QuestStudioDirectTimelineProps) {
@@ -424,6 +430,11 @@ export function QuestStudioDirectTimeline({
   )
   const listRef = React.useRef<HTMLDivElement | null>(null)
   const contentRef = React.useRef<HTMLDivElement | null>(null)
+  const prependAnchorRef = React.useRef<{ active: boolean; scrollHeight: number; scrollTop: number }>({
+    active: false,
+    scrollHeight: 0,
+    scrollTop: 0,
+  })
   const latestAnimatedBlockId = React.useMemo(() => {
     for (let turnIndex = turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
       const turn = turns[turnIndex]
@@ -446,6 +457,33 @@ export function QuestStudioDirectTimeline({
     deps: [turns.length, streaming, activeToolCount, latestOperationId],
   })
 
+  const handleLoadOlderHistory = React.useCallback(async () => {
+    if (!hasOlderHistory || loadingOlderHistory || !onLoadOlderHistory) return
+    const root = listRef.current
+    if (root) {
+      prependAnchorRef.current = {
+        active: true,
+        scrollHeight: root.scrollHeight,
+        scrollTop: root.scrollTop,
+      }
+    }
+    await onLoadOlderHistory()
+  }, [hasOlderHistory, loadingOlderHistory, onLoadOlderHistory])
+
+  React.useEffect(() => {
+    if (!prependAnchorRef.current.active || loadingOlderHistory) {
+      return
+    }
+    const root = listRef.current
+    if (!root) {
+      prependAnchorRef.current.active = false
+      return
+    }
+    const delta = root.scrollHeight - prependAnchorRef.current.scrollHeight
+    root.scrollTop = prependAnchorRef.current.scrollTop + Math.max(delta, 0)
+    prependAnchorRef.current.active = false
+  }, [loadingOlderHistory, turns.length])
+
   return (
     <div className="flex min-h-0 flex-1 flex-col px-4 pt-4">
       <ChatScrollProvider value={{ isNearBottom }}>
@@ -453,8 +491,27 @@ export function QuestStudioDirectTimeline({
           ref={listRef}
           className="feed-scrollbar flex min-h-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto pr-1"
           style={{ paddingBottom: bottomInset }}
+          onWheel={(event) => {
+            const root = listRef.current
+            if (!root || event.deltaY >= 0 || root.scrollTop > 24) {
+              return
+            }
+            void handleLoadOlderHistory()
+          }}
         >
           <div ref={contentRef} className="flex min-w-0 flex-col gap-4">
+            {hasOlderHistory ? (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  className="rounded-full border border-black/[0.08] bg-white/[0.88] px-3 py-1 text-[11px] text-muted-foreground transition hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+                  disabled={loadingOlderHistory}
+                  onClick={() => void handleLoadOlderHistory()}
+                >
+                  {loadingOlderHistory ? 'Loading older updates...' : 'Load older updates'}
+                </button>
+              </div>
+            ) : null}
             {turns.length === 0 ? (
               <EmptyState
                 loading={loading}

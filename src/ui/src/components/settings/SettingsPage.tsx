@@ -106,8 +106,17 @@ function normalizeHashAnchor(value?: string | null) {
     .replace(/^#/, '')
 }
 
-function settingsConfigPath(name: ConfigDocumentName | null) {
+function settingsConfigPath(name: ConfigDocumentName | null, connectorName?: ConnectorName | null) {
+  if (name === 'connectors') {
+    return connectorName ? `/settings/connector/${connectorName}` : '/settings/connector'
+  }
   return name ? `/settings/${name}` : '/settings'
+}
+
+function connectorNameFromAnchor(anchorId: string): ConnectorName | null {
+  const normalized = normalizeHashAnchor(anchorId)
+  const match = /^connector-(qq|telegram|discord|slack|feishu|whatsapp|lingzhu)(?:$|-)/.exec(normalized)
+  return (match?.[1] as ConnectorName | undefined) ?? null
 }
 
 function scrollSettingsAnchor(root: HTMLElement | null, anchorId: string) {
@@ -129,11 +138,13 @@ function scrollSettingsAnchor(root: HTMLElement | null, anchorId: string) {
 
 export function SettingsPage({
   requestedConfigName,
+  requestedConnectorName,
   onRequestedConfigConsumed,
   runtimeAddress,
   locale,
 }: {
   requestedConfigName?: ConfigDocumentName | null
+  requestedConnectorName?: ConnectorName | null
   onRequestedConfigConsumed?: () => void
   runtimeAddress: string
   locale: Locale
@@ -150,7 +161,6 @@ export function SettingsPage({
   const [saving, setSaving] = useState(false)
   const [validating, setValidating] = useState(false)
   const [testingAll, setTestingAll] = useState(false)
-  const [testingConnectorName, setTestingConnectorName] = useState<ConnectorName | null>(null)
   const [validation, setValidation] = useState<ConfigValidationPayload | null>(null)
   const [testResult, setTestResult] = useState<ConfigTestPayload | null>(null)
   const [saveMessage, setSaveMessage] = useState('')
@@ -223,6 +233,7 @@ export function SettingsPage({
   }, [onRequestedConfigConsumed, requestedConfigName])
 
   const isConnectorDocument = selectedName === 'connectors'
+  const selectedConnectorName = isConnectorDocument ? requestedConnectorName ?? null : null
   const isDirty = Boolean(
     document && JSON.stringify(document.meta?.structured_config || {}) !== JSON.stringify(structuredDraft)
   )
@@ -313,6 +324,23 @@ export function SettingsPage({
     }
   }, [document?.revision, loading, location.hash, selectedName])
 
+  useEffect(() => {
+    if (!isConnectorDocument || selectedConnectorName) {
+      return
+    }
+    const anchorConnectorName = connectorNameFromAnchor(location.hash)
+    if (!anchorConnectorName) {
+      return
+    }
+    navigate(
+      {
+        pathname: settingsConfigPath('connectors', anchorConnectorName),
+        hash: location.hash,
+      },
+      { replace: true }
+    )
+  }, [isConnectorDocument, location.hash, navigate, selectedConnectorName])
+
   const handleSelectName = (name: ConfigDocumentName) => {
     setSelectedName(name)
     setSaveMessage('')
@@ -356,9 +384,13 @@ export function SettingsPage({
     if (!selectedName || !anchorId) {
       return
     }
+    const nextConnectorName =
+      selectedName === 'connectors'
+        ? selectedConnectorName || connectorNameFromAnchor(anchorId)
+        : null
     navigate(
       {
-        pathname: settingsConfigPath(selectedName),
+        pathname: settingsConfigPath(selectedName, nextConnectorName),
         hash: `#${anchorId}`,
       },
       { replace: false }
@@ -420,29 +452,6 @@ export function SettingsPage({
     }
   }
 
-  const runConnectorTest = async (connectorName: ConnectorName, target: { chat_type: 'direct' | 'group'; chat_id: string; text: string }) => {
-    if (!isConnectorDocument) {
-      return
-    }
-    setTestingConnectorName(connectorName)
-    try {
-      setTestResult(await client.testConfig('connectors', connectorName === 'lingzhu'
-        ? {
-            structured: structuredConnectors,
-            live: true,
-          }
-        : {
-            structured: structuredConnectors,
-            live: true,
-            delivery_targets: {
-              [connectorName]: target,
-            },
-          }))
-    } finally {
-      setTestingConnectorName(null)
-    }
-  }
-
   const handleSave = async () => {
     if (!selectedName || !document) {
       return
@@ -470,7 +479,7 @@ export function SettingsPage({
       <ProjectsAppBar title={t.title} />
 
       <main className="mx-auto mt-6 min-h-0 w-full flex-1 overflow-hidden">
-        <div className="mx-auto grid h-full min-h-0 w-full max-w-[1500px] grid-rows-[auto_minmax(0,1fr)] gap-0 xl:grid-cols-[250px_minmax(0,1fr)] xl:grid-rows-1">
+        <div className="mx-auto grid h-full min-h-0 w-full max-w-[90vw] grid-rows-[auto_minmax(0,1fr)] gap-0 xl:grid-cols-[250px_minmax(0,1fr)] xl:grid-rows-1">
           <aside className="feed-scrollbar flex min-h-0 flex-col overflow-auto border-b border-black/[0.08] pb-6 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-6 dark:border-white/[0.08]">
             <div className="text-sm font-medium">{t.files}</div>
 
@@ -513,12 +522,33 @@ export function SettingsPage({
                 <div className="text-xs text-muted-foreground">{t.noHealth}</div>
               ) : (
                 <div className="space-y-2">
-                  {connectorSummary.map((connector) => (
-                    <div key={connector.name} className="flex items-center justify-between gap-3 text-sm">
-                      <span>{connector.label}</span>
-                      <span className="text-xs text-muted-foreground">{connector.enabled ? t.enabled : t.idle}</span>
-                    </div>
-                  ))}
+                  {connectorSummary.map((connector) => {
+                    const entry = connectorCatalog.find((item) => item.name === connector.name)
+                    const Icon = entry?.icon
+                    return (
+                      <button
+                        key={connector.name}
+                        type="button"
+                        onClick={() =>
+                          navigate({
+                            pathname: settingsConfigPath('connectors', connector.name),
+                            hash: '',
+                          })
+                        }
+                        className="flex w-full items-center justify-between gap-3 rounded-[16px] border border-black/[0.06] bg-white/[0.4] px-3 py-2 text-left text-sm transition hover:border-black/[0.12] hover:text-foreground dark:border-white/[0.08] dark:bg-white/[0.03]"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          {Icon ? (
+                            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-black/[0.06] bg-white/[0.56] dark:border-white/[0.1] dark:bg-white/[0.04]">
+                              <Icon className="h-3.5 w-3.5" />
+                            </span>
+                          ) : null}
+                          <span className="truncate">{connector.label}</span>
+                        </span>
+                        <span className="shrink-0 text-xs text-muted-foreground">{connector.enabled ? t.enabled : t.idle}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -561,7 +591,7 @@ export function SettingsPage({
 
                 {saveMessage ? <div className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{saveMessage}</div> : null}
 
-                {helpMarkdown ? (
+                {helpMarkdown && !isConnectorDocument ? (
                   <section className="border-b border-black/[0.08] py-6 dark:border-white/[0.08]">
                     <div className="mb-3 text-sm font-medium">{t.reference}</div>
                     <MarkdownDocument
@@ -579,18 +609,23 @@ export function SettingsPage({
                       locale={locale}
                       value={structuredConnectors}
                       connectors={connectors}
-                      validation={validation}
-                      testResult={testResult}
                       saving={saving}
                       isDirty={isDirty}
-                      validating={validating}
-                      testingAll={testingAll}
-                      testingConnectorName={testingConnectorName}
+                      selectedConnectorName={selectedConnectorName}
                       onChange={setStructuredConnectors}
                       onSave={() => void handleSave()}
-                      onValidate={() => void runValidate()}
-                      onTestAll={() => void runTestAll()}
-                      onTestConnector={(connectorName, deliveryTarget) => void runConnectorTest(connectorName, deliveryTarget)}
+                      onSelectConnector={(connectorName) =>
+                        navigate({
+                          pathname: settingsConfigPath('connectors', connectorName),
+                          hash: '',
+                        })
+                      }
+                      onBackToConnectorCatalog={() =>
+                        navigate({
+                          pathname: settingsConfigPath('connectors'),
+                          hash: '',
+                        })
+                      }
                       onJumpToAnchor={jumpToAnchor}
                     />
                   </div>

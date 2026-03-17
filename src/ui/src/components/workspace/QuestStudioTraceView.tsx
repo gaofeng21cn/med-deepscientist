@@ -29,6 +29,9 @@ type QuestStudioTraceViewProps = {
   stopping?: boolean
   showStopButton?: boolean
   slashCommands?: ConnectorCommand[]
+  hasOlderHistory?: boolean
+  loadingOlderHistory?: boolean
+  onLoadOlderHistory?: () => Promise<void>
   onSubmit: (message: string) => Promise<void>
   onStopRun: () => Promise<void>
 }
@@ -46,6 +49,9 @@ export function QuestStudioTraceView({
   stopping = false,
   showStopButton = false,
   slashCommands = [],
+  hasOlderHistory = false,
+  loadingOlderHistory = false,
+  onLoadOlderHistory,
   onSubmit,
   onStopRun,
 }: QuestStudioTraceViewProps) {
@@ -198,6 +204,9 @@ export function QuestStudioTraceView({
           connectionState={connectionState}
           error={error}
           snapshot={snapshot}
+          hasOlderHistory={hasOlderHistory}
+          loadingOlderHistory={loadingOlderHistory}
+          onLoadOlderHistory={onLoadOlderHistory}
           emptyLabel={t('copilot_studio_empty', undefined, 'Copilot trace appears here.')}
           bottomInset={bottomInset}
         />

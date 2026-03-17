@@ -16,7 +16,7 @@ If you previously followed an OpenClaw or NanoClaw article, note the key differe
 After finishing this guide, you should be able to:
 
 - chat with DeepScientist from QQ private messages
-- let QQ auto-bind to the latest active quest
+- let QQ auto-bind to the latest active project
 - use `/new`, `/use latest`, `/status`, and related commands from QQ
 - see the detected `openid` in the `Settings` page
 - run safe readiness checks and send probes from the `Settings` page
@@ -219,7 +219,7 @@ When the connector is fully working, you should usually see all of these:
 - `Detected OpenID` is no longer empty in `Settings > Connectors > QQ`
 - the `Snapshot` panel shows a discovered target and the bound target is no longer empty
 - clicking `Send probe` again no longer reports an empty delivery target
-- if a latest quest already exists, plain text continues that quest automatically; if no quest exists yet, the bot returns help instead
+- if a latest project already exists, plain text continues that project automatically; if no project exists yet, the bot returns help instead
 
 ### 5.2 Error quick decoder
 
@@ -239,17 +239,17 @@ Common commands:
 | Command | Meaning |
 | --- | --- |
 | `/help` | Show help |
-| `/projects` or `/list` | List quests |
-| `/use <quest_id>` | Bind a specific quest |
-| `/use latest` | Bind the newest quest |
-| `/new <goal>` | Create a new quest and bind the current QQ conversation |
-| `/status` | Show the current quest status |
+| `/projects` or `/list` | List projects |
+| `/use <quest_id>` | Bind a specific project |
+| `/use latest` | Bind the newest project |
+| `/new <goal>` | Create a new project and bind the current QQ conversation |
+| `/status` | Show the current project status |
 
 Recommended usage:
 
-- if a latest quest already exists, plain text usually continues that quest
-- if there is no quest yet, start with `/new <goal>`
-- if you want to switch to another quest, send `/use <quest_id>` explicitly
+- if a latest project already exists, plain text usually continues that project
+- if there is no project yet, start with `/new <goal>`
+- if you want to switch to another project, send `/use <quest_id>` explicitly
 
 ## 7. Most common mistakes
 

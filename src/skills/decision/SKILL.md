@@ -19,7 +19,7 @@ Use this skill whenever continuation is non-trivial.
 - If the runtime starts an auto-continue turn with no new user message, continue from the active requirements and durable quest state instead of replaying the previous user turn.
 - If `startup_contract.decision_policy = autonomous`, do not emit ordinary `artifact.interact(kind='decision_request', ...)` calls; decide the route yourself, record the reason, and continue.
 - Use `reply_mode='blocking'` for the actual decision request only when the user must choose before safe continuation and the quest contract still allows a user-gated decision.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - If a threaded user reply arrives, interpret it relative to the latest decision or progress interaction before assuming the task changed completely.
 - Quest completion is a special terminal decision: first ask for explicit completion approval with `artifact.interact(kind='decision_request', reply_mode='blocking', reply_schema={'decision_type': 'quest_completion_approval'}, ...)`, and only after an explicit approval reply should you call `artifact.complete_quest(...)`.
 
@@ -319,7 +319,7 @@ When asking, use a structured decision request with:
 - tradeoffs, including the main pros and cons for each option
 - recommended option first
 - explicit reply format
-- a stated timeout window; normally wait up to 1 day before self-resolving if no user reply arrives
+- a stated timeout window; normally wait up to 1 day before self-resolving if no user reply arrives, except when the only blocker is a missing external credential or secret that only the user can provide
 
 ### 6. Record the decision durably
 
@@ -327,6 +327,7 @@ Use `artifact.record(kind='decision', ...)` for the final decision.
 
 If user input is needed, also use `artifact.interact(kind='decision_request', ...)`.
 If the timeout expires without a user reply, choose the best option yourself, record why, and notify the user of the chosen option before moving on.
+This does not apply when the only blocker is a missing external credential or secret that only the user can provide; in that case keep the interaction waiting and, if resumed without the credential, you may park with `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` instead of busy-looping.
 
 If `startup_contract.decision_policy = autonomous`, ordinary route ambiguity is not by itself grounds to request user input.
 In that mode, only explicit approval-style exceptions such as quest completion should normally become blocking user decisions.

@@ -91,6 +91,41 @@ class ArtifactService:
         self.baselines = BaselineRegistry(home)
         self.quest_service = QuestService(home)
 
+    def _normalize_evaluation_summary(self, payload: dict[str, Any] | None) -> dict[str, str] | None:
+        if not isinstance(payload, dict):
+            return None
+        normalized: dict[str, str] = {}
+        for key in (
+            "takeaway",
+            "claim_update",
+            "baseline_relation",
+            "comparability",
+            "failure_mode",
+            "next_action",
+        ):
+            value = payload.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                normalized[key] = text
+        return normalized or None
+
+    def _evaluation_summary_markdown_lines(self, payload: dict[str, Any] | None) -> list[str]:
+        normalized = self._normalize_evaluation_summary(payload)
+        if not normalized:
+            return ["- Not recorded."]
+        labels = (
+            ("takeaway", "Takeaway"),
+            ("claim_update", "Claim Update"),
+            ("baseline_relation", "Baseline Relation"),
+            ("comparability", "Comparability"),
+            ("failure_mode", "Failure Mode"),
+            ("next_action", "Next Action"),
+        )
+        lines = [f"- {label}: {normalized[key]}" for key, label in labels if normalized.get(key)]
+        return lines or ["- Not recorded."]
+
     def _workspace_root_for(self, quest_root: Path, workspace_root: Path | None = None) -> Path:
         if workspace_root is not None:
             return workspace_root
@@ -387,6 +422,207 @@ class ArtifactService:
         write_json(path, normalized)
         return normalized
 
+    def _analysis_baseline_inventory_path(self, quest_root: Path) -> Path:
+        return ensure_dir(quest_root / "artifacts" / "baselines") / "analysis_inventory.json"
+
+    def _read_analysis_baseline_inventory(self, quest_root: Path) -> dict[str, Any]:
+        path = self._analysis_baseline_inventory_path(quest_root)
+        payload = read_json(path, {})
+        if not isinstance(payload, dict):
+            payload = {}
+        entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+        return {
+            "schema_version": 1,
+            "entries": [dict(item) for item in entries if isinstance(item, dict)],
+            "updated_at": payload.get("updated_at"),
+        }
+
+    def _write_analysis_baseline_inventory(self, quest_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        path = self._analysis_baseline_inventory_path(quest_root)
+        normalized_entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
+        normalized = {
+            "schema_version": 1,
+            "entries": [dict(item) for item in normalized_entries if isinstance(item, dict)],
+            "updated_at": utc_now(),
+        }
+        write_json(path, normalized)
+        return normalized
+
+    def _normalize_baseline_root_rel_path(
+        self,
+        quest_root: Path,
+        baseline_root_rel_path: str | None,
+        *,
+        baseline_id: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        raw = str(baseline_root_rel_path or "").strip()
+        if not raw:
+            return None, None
+        candidate = Path(raw)
+        resolved = candidate.resolve() if candidate.is_absolute() else resolve_within(quest_root, raw)
+        if not resolved.exists():
+            raise FileNotFoundError(f"Baseline root does not exist: {resolved}")
+        try:
+            relative = resolved.relative_to(quest_root.resolve()).as_posix()
+        except ValueError as exc:
+            raise ValueError("`baseline_root_rel_path` must stay within quest_root.") from exc
+        parts = Path(relative).parts
+        if len(parts) < 3 or parts[0] != "baselines" or parts[1] not in {"local", "imported"}:
+            raise ValueError(
+                "`baseline_root_rel_path` must live under `baselines/local/<baseline_id>/...` or "
+                "`baselines/imported/<baseline_id>/...`."
+            )
+        normalized_baseline_id = str(baseline_id or parts[2]).strip() or None
+        if normalized_baseline_id and parts[2] != normalized_baseline_id:
+            raise ValueError(
+                f"`baseline_root_rel_path` points to baseline `{parts[2]}`, which does not match `{normalized_baseline_id}`."
+            )
+        return relative, parts[1]
+
+    @staticmethod
+    def _analysis_baseline_label(payload: dict[str, Any]) -> str:
+        baseline_id = str(payload.get("baseline_id") or "baseline").strip() or "baseline"
+        parts = [f"`{baseline_id}`"]
+        variant_id = str(payload.get("variant_id") or "").strip()
+        if variant_id:
+            parts.append(f"variant `{variant_id}`")
+        benchmark = str(payload.get("benchmark") or "").strip()
+        split = str(payload.get("split") or "").strip()
+        if benchmark and split:
+            parts.append(f"benchmark `{benchmark}` / split `{split}`")
+        elif benchmark:
+            parts.append(f"benchmark `{benchmark}`")
+        elif split:
+            parts.append(f"split `{split}`")
+        reason = str(payload.get("reason") or "").strip()
+        if reason:
+            parts.append(f"reason: {reason}")
+        return " · ".join(parts)
+
+    def _normalize_required_baselines(self, quest_root: Path, values: list[object] | None) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for raw in values or []:
+            if not isinstance(raw, dict):
+                continue
+            baseline_id = str(raw.get("baseline_id") or "").strip()
+            if not baseline_id:
+                continue
+            baseline_root_rel_path, storage_mode = self._normalize_baseline_root_rel_path(
+                quest_root,
+                raw.get("baseline_root_rel_path"),
+                baseline_id=baseline_id,
+            )
+            normalized.append(
+                {
+                    "baseline_id": baseline_id,
+                    "variant_id": str(raw.get("variant_id") or "").strip() or None,
+                    "reason": str(raw.get("reason") or "").strip() or None,
+                    "benchmark": str(raw.get("benchmark") or "").strip() or None,
+                    "split": str(raw.get("split") or "").strip() or None,
+                    "baseline_root_rel_path": baseline_root_rel_path,
+                    "storage_mode": storage_mode or (str(raw.get("storage_mode") or "").strip() or None),
+                    "usage_scope": "supplementary",
+                }
+            )
+        return normalized
+
+    def _normalize_comparison_baselines(self, quest_root: Path, values: list[object] | None) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for raw in values or []:
+            if not isinstance(raw, dict):
+                continue
+            baseline_id = str(raw.get("baseline_id") or "").strip()
+            if not baseline_id:
+                continue
+            baseline_root_rel_path, storage_mode = self._normalize_baseline_root_rel_path(
+                quest_root,
+                raw.get("baseline_root_rel_path"),
+                baseline_id=baseline_id,
+            )
+            metrics_summary = (
+                normalize_metrics_summary(raw.get("metrics_summary"))
+                if isinstance(raw.get("metrics_summary"), dict)
+                else {}
+            )
+            normalized.append(
+                {
+                    "baseline_id": baseline_id,
+                    "variant_id": str(raw.get("variant_id") or "").strip() or None,
+                    "benchmark": str(raw.get("benchmark") or "").strip() or None,
+                    "split": str(raw.get("split") or "").strip() or None,
+                    "reason": str(raw.get("reason") or "").strip() or None,
+                    "metrics_summary": metrics_summary,
+                    "evidence_paths": [
+                        str(item).strip() for item in (raw.get("evidence_paths") or []) if str(item).strip()
+                    ],
+                    "baseline_root_rel_path": baseline_root_rel_path,
+                    "storage_mode": storage_mode or (str(raw.get("storage_mode") or "").strip() or None),
+                    "usage_scope": "supplementary",
+                    "published": bool(raw.get("published", False)),
+                    "published_entry_id": str(raw.get("published_entry_id") or "").strip() or None,
+                    "status": str(raw.get("status") or "registered").strip() or "registered",
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _analysis_inventory_entry_key(payload: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
+        origin = dict(payload.get("origin") or {}) if isinstance(payload.get("origin"), dict) else {}
+        return (
+            str(payload.get("baseline_id") or "").strip(),
+            str(payload.get("variant_id") or "").strip(),
+            str(origin.get("campaign_id") or "").strip(),
+            str(origin.get("slice_id") or "").strip(),
+            str(payload.get("benchmark") or "").strip(),
+            str(payload.get("split") or "").strip(),
+        )
+
+    @staticmethod
+    def _merge_analysis_inventory_entry(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(existing)
+        for key, value in incoming.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            if isinstance(value, (list, dict)) and not value:
+                continue
+            merged[key] = value
+        merged["updated_at"] = utc_now()
+        merged.setdefault("created_at", existing.get("created_at") or incoming.get("created_at") or utc_now())
+        return merged
+
+    def _upsert_analysis_baseline_inventory(self, quest_root: Path, entries: list[dict[str, Any]]) -> dict[str, Any]:
+        inventory = self._read_analysis_baseline_inventory(quest_root)
+        existing_entries = [dict(item) for item in (inventory.get("entries") or []) if isinstance(item, dict)]
+        by_key = {
+            self._analysis_inventory_entry_key(item): dict(item)
+            for item in existing_entries
+            if str(item.get("baseline_id") or "").strip()
+        }
+        for raw in entries:
+            if not isinstance(raw, dict):
+                continue
+            entry = dict(raw)
+            if not str(entry.get("baseline_id") or "").strip():
+                continue
+            key = self._analysis_inventory_entry_key(entry)
+            current = by_key.get(key)
+            if current is None:
+                stamped = dict(entry)
+                stamped.setdefault("created_at", utc_now())
+                stamped["updated_at"] = utc_now()
+                by_key[key] = stamped
+                continue
+            by_key[key] = self._merge_analysis_inventory_entry(current, entry)
+        normalized = self._write_analysis_baseline_inventory(
+            quest_root,
+            {
+                "entries": list(by_key.values()),
+            },
+        )
+        return normalized
+
     def _paper_root(self, quest_root: Path) -> Path:
         return ensure_dir(quest_root / "paper")
 
@@ -404,6 +640,114 @@ class ArtifactService:
 
     def _paper_bundle_manifest_path(self, quest_root: Path) -> Path:
         return self._paper_root(quest_root) / "paper_bundle_manifest.json"
+
+    def _paper_baseline_inventory_path(self, quest_root: Path) -> Path:
+        return self._paper_root(quest_root) / "baseline_inventory.json"
+
+    def _open_source_root(self, quest_root: Path) -> Path:
+        return ensure_dir(quest_root / "release" / "open_source")
+
+    def _open_source_manifest_path(self, quest_root: Path) -> Path:
+        return self._open_source_root(quest_root) / "manifest.json"
+
+    def _open_source_cleanup_plan_path(self, quest_root: Path) -> Path:
+        return self._open_source_root(quest_root) / "cleanup_plan.md"
+
+    def _open_source_include_paths_path(self, quest_root: Path) -> Path:
+        return self._open_source_root(quest_root) / "include_paths.json"
+
+    def _open_source_exclude_paths_path(self, quest_root: Path) -> Path:
+        return self._open_source_root(quest_root) / "exclude_paths.json"
+
+    def _write_paper_baseline_inventory(self, quest_root: Path) -> dict[str, Any]:
+        quest_yaml = self.quest_service.read_quest_yaml(quest_root)
+        confirmed_baseline_ref = (
+            dict(quest_yaml.get("confirmed_baseline_ref") or {})
+            if isinstance(quest_yaml.get("confirmed_baseline_ref"), dict)
+            else None
+        )
+        analysis_inventory = self._read_analysis_baseline_inventory(quest_root)
+        payload = {
+            "schema_version": 1,
+            "canonical_baseline_ref": confirmed_baseline_ref,
+            "supplementary_baselines": [
+                dict(item) for item in (analysis_inventory.get("entries") or []) if isinstance(item, dict)
+            ],
+            "updated_at": utc_now(),
+        }
+        write_json(self._paper_baseline_inventory_path(quest_root), payload)
+        return payload
+
+    def _ensure_open_source_prep(
+        self,
+        quest_root: Path,
+        *,
+        source_branch: str | None,
+        source_bundle_manifest_path: str,
+        baseline_inventory_path: str,
+    ) -> dict[str, Any]:
+        root = self._open_source_root(quest_root)
+        cleanup_plan_path = self._open_source_cleanup_plan_path(quest_root)
+        include_paths_path = self._open_source_include_paths_path(quest_root)
+        exclude_paths_path = self._open_source_exclude_paths_path(quest_root)
+        manifest_path = self._open_source_manifest_path(quest_root)
+        if not cleanup_plan_path.exists():
+            write_text(
+                cleanup_plan_path,
+                "\n".join(
+                    [
+                        "# Open Source Cleanup Plan",
+                        "",
+                        "## Goal",
+                        "",
+                        "Prepare a clean public code branch from the finalized paper line.",
+                        "",
+                        "## Keep",
+                        "",
+                        "- Core training / evaluation code needed to reproduce the public results.",
+                        "",
+                        "## Remove Or Private",
+                        "",
+                        "- Temporary logs, scratch files, local secrets, and unrelated experimental debris.",
+                        "",
+                        "## Before Release",
+                        "",
+                        "- Confirm README, license, and benchmark instructions are complete.",
+                        "- Confirm only necessary files remain in scope.",
+                        "",
+                    ]
+                ).rstrip()
+                + "\n",
+            )
+        if not include_paths_path.exists():
+            write_json(include_paths_path, {"paths": []})
+        if not exclude_paths_path.exists():
+            write_json(exclude_paths_path, {"paths": []})
+        existing = read_json(manifest_path, {})
+        existing = existing if isinstance(existing, dict) else {}
+        manifest = {
+            **existing,
+            "schema_version": 1,
+            "status": str(existing.get("status") or "draft").strip() or "draft",
+            "source_branch": str(existing.get("source_branch") or source_branch or "").strip() or None,
+            "release_branch": str(existing.get("release_branch") or "").strip() or None,
+            "source_bundle_manifest_path": str(
+                existing.get("source_bundle_manifest_path") or source_bundle_manifest_path or ""
+            ).strip()
+            or source_bundle_manifest_path,
+            "baseline_inventory_path": str(existing.get("baseline_inventory_path") or baseline_inventory_path or "").strip()
+            or baseline_inventory_path,
+            "cleanup_plan_path": str(existing.get("cleanup_plan_path") or "release/open_source/cleanup_plan.md").strip()
+            or "release/open_source/cleanup_plan.md",
+            "include_paths_path": str(existing.get("include_paths_path") or "release/open_source/include_paths.json").strip()
+            or "release/open_source/include_paths.json",
+            "exclude_paths_path": str(existing.get("exclude_paths_path") or "release/open_source/exclude_paths.json").strip()
+            or "release/open_source/exclude_paths.json",
+            "created_at": existing.get("created_at") or utc_now(),
+            "updated_at": utc_now(),
+        }
+        write_json(manifest_path, manifest)
+        return manifest
 
     def _next_paper_outline_id(self, quest_root: Path) -> str:
         max_index = 0
@@ -2367,6 +2711,7 @@ class ArtifactService:
         status: str = "completed",
         baseline_id: str | None = None,
         baseline_variant_id: str | None = None,
+        evaluation_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._require_baseline_gate_open(quest_root, action="record_main_experiment")
         state = self.quest_service.read_research_state(quest_root)
@@ -2445,6 +2790,7 @@ class ArtifactService:
         resolved_config_paths = [str(item).strip() for item in (config_paths or []) if str(item).strip()]
         resolved_notes = [str(item).strip() for item in (notes or []) if str(item).strip()]
         normalized_dataset_scope = str(dataset_scope or "full").strip().lower() or "full"
+        normalized_evaluation_summary = self._normalize_evaluation_summary(evaluation_summary)
         primary = comparisons.get("primary") if isinstance(comparisons, dict) else {}
         primary_metric_id = str(progress_eval.get("primary_metric_id") or comparisons.get("primary_metric_id") or "").strip() or None
         primary_value = primary.get("run_value") if isinstance(primary, dict) else None
@@ -2554,6 +2900,8 @@ class ArtifactService:
         if resolved_notes:
             run_lines.extend(["", "## Notes", ""])
             run_lines.extend([f"- {item}" for item in resolved_notes])
+        run_lines.extend(["", "## Evaluation Summary", ""])
+        run_lines.extend(self._evaluation_summary_markdown_lines(normalized_evaluation_summary))
         run_lines.extend(
             [
                 "",
@@ -2602,6 +2950,7 @@ class ArtifactService:
                 key: value for key, value in comparisons.items() if key != "primary"
             },
             "progress_eval": progress_eval,
+            "evaluation_summary": normalized_evaluation_summary,
             "delivery_policy": delivery_policy,
             "startup_contract": delivery_policy.get("startup_contract") or None,
             "evidence_paths": resolved_evidence_paths,
@@ -2642,6 +2991,7 @@ class ArtifactService:
                     "recommended_next_route": delivery_policy.get("recommended_next_route"),
                     "changed_file_count": len(resolved_changed_files),
                     "evidence_count": len(resolved_evidence_paths),
+                    "evaluation_summary": normalized_evaluation_summary,
                 },
                 "delivery_policy": delivery_policy,
                 "startup_contract": delivery_policy.get("startup_contract") or None,
@@ -2657,6 +3007,7 @@ class ArtifactService:
                     key: value for key, value in comparisons.items() if key != "primary"
                 },
                 "progress_eval": progress_eval,
+                "evaluation_summary": normalized_evaluation_summary,
                 "files_changed": resolved_changed_files,
                 "evidence_paths": resolved_evidence_paths,
                 "verdict": verdict,
@@ -2693,6 +3044,7 @@ class ArtifactService:
                     "breakthrough_level": progress_eval.get("breakthrough_level"),
                     "need_research_paper": delivery_policy.get("need_research_paper"),
                     "recommended_next_route": delivery_policy.get("recommended_next_route"),
+                    "evaluation_summary": normalized_evaluation_summary,
                 }
             ],
         )
@@ -2715,6 +3067,7 @@ class ArtifactService:
                 key: value for key, value in comparisons.items() if key != "primary"
             },
             "progress_eval": progress_eval,
+            "evaluation_summary": normalized_evaluation_summary,
             "delivery_policy": delivery_policy,
         }
 
@@ -2752,6 +3105,7 @@ class ArtifactService:
         normalized_experimental_designs = self._normalize_string_list(experimental_designs)
         normalized_todo_items = self._normalize_campaign_todo_items(todo_items)
         slice_contexts: list[dict[str, Any]] = []
+        inventory_entries: list[dict[str, Any]] = []
         for index, raw in enumerate(slices, start=1):
             slice_id = str(raw.get("slice_id") or generate_id("slice")).strip()
             title = str(raw.get("title") or slice_id).strip() or slice_id
@@ -2783,6 +3137,10 @@ class ArtifactService:
             abandonment_criteria = str(
                 raw.get("abandonment_criteria") or matched_todo.get("abandonment_criteria") or ""
             ).strip()
+            required_baselines = self._normalize_required_baselines(
+                quest_root,
+                raw.get("required_baselines") or matched_todo.get("required_baselines"),
+            )
             plan_dir = ensure_dir(worktree_root / "experiments" / "analysis" / campaign_id / slice_id)
             plan_path = plan_dir / "plan.md"
             requirement_lines = [
@@ -2812,33 +3170,44 @@ class ArtifactService:
                 "",
                 str(raw.get("required_changes") or "").strip() or "TBD",
                 "",
-                "## Metric Contract",
-                "",
-                str(raw.get("metric_contract") or "").strip() or "TBD",
-                "",
-                "## Environment Notes",
-                "",
-                str(raw.get("environment_notes") or "").strip() or "TBD",
-                "",
-                "## Must Not Simplify",
-                "",
-                str(raw.get("must_not_simplify") or "").strip() or "Full dataset / full protocol only unless explicitly approved.",
-                "",
-                "## Success Criteria",
-                "",
-                success_criteria or "TBD",
-                "",
-                "## Abandonment Criteria",
-                "",
-                abandonment_criteria or "TBD",
-                "",
-                "## Completion Condition",
-                "",
-                str(raw.get("completion_condition") or matched_todo.get("completion_condition") or "").strip()
-                or str(raw.get("must_not_simplify") or matched_todo.get("must_not_simplify") or "").strip()
-                or "Complete the planned analysis slice and mirror the durable result back to the parent branch.",
+                "## Required Baselines",
                 "",
             ]
+            if required_baselines:
+                requirement_lines.extend([f"- {self._analysis_baseline_label(item)}" for item in required_baselines])
+            else:
+                requirement_lines.append("- None recorded.")
+            requirement_lines.extend(
+                [
+                    "",
+                    "## Metric Contract",
+                    "",
+                    str(raw.get("metric_contract") or "").strip() or "TBD",
+                    "",
+                    "## Environment Notes",
+                    "",
+                    str(raw.get("environment_notes") or "").strip() or "TBD",
+                    "",
+                    "## Must Not Simplify",
+                    "",
+                    str(raw.get("must_not_simplify") or "").strip() or "Full dataset / full protocol only unless explicitly approved.",
+                    "",
+                    "## Success Criteria",
+                    "",
+                    success_criteria or "TBD",
+                    "",
+                    "## Abandonment Criteria",
+                    "",
+                    abandonment_criteria or "TBD",
+                    "",
+                    "## Completion Condition",
+                    "",
+                    str(raw.get("completion_condition") or matched_todo.get("completion_condition") or "").strip()
+                    or str(raw.get("must_not_simplify") or matched_todo.get("must_not_simplify") or "").strip()
+                    or "Complete the planned analysis slice and mirror the durable result back to the parent branch.",
+                    "",
+                ]
+            )
             requirement_lines.extend(["## Reviewer Item IDs", ""])
             if reviewer_item_ids:
                 requirement_lines.extend([f"- `{item}`" for item in reviewer_item_ids])
@@ -2879,9 +3248,31 @@ class ArtifactService:
                     "completion_condition": str(
                         raw.get("completion_condition") or matched_todo.get("completion_condition") or ""
                     ).strip(),
+                    "required_baselines": required_baselines,
                     "reviewer_item_ids": reviewer_item_ids,
                     "manuscript_targets": manuscript_targets,
                 }
+                )
+            inventory_entries.extend(
+                [
+                    {
+                        "baseline_id": item.get("baseline_id"),
+                        "variant_id": item.get("variant_id"),
+                        "usage_scope": "supplementary",
+                        "status": "required",
+                        "reason": item.get("reason"),
+                        "benchmark": item.get("benchmark"),
+                        "split": item.get("split"),
+                        "baseline_root_rel_path": item.get("baseline_root_rel_path"),
+                        "storage_mode": item.get("storage_mode"),
+                        "origin": {
+                            "stage": "analysis_campaign",
+                            "campaign_id": campaign_id,
+                            "slice_id": slice_id,
+                        },
+                    }
+                    for item in required_baselines
+                ]
             )
 
         todo_manifest = {
@@ -2903,6 +3294,7 @@ class ArtifactService:
                     "why_now": item.get("why_now") or context.get("why_now"),
                     "success_criteria": item.get("success_criteria") or context.get("success_criteria"),
                     "abandonment_criteria": item.get("abandonment_criteria") or context.get("abandonment_criteria"),
+                    "required_baselines": item.get("required_baselines") or context.get("required_baselines") or [],
                     "reviewer_item_ids": item.get("reviewer_item_ids") or context.get("reviewer_item_ids") or [],
                     "manuscript_targets": item.get("manuscript_targets") or context.get("manuscript_targets") or [],
                 }
@@ -2957,6 +3349,7 @@ class ArtifactService:
                     f"- Research question: {item['research_question'] or 'TBD'}",
                     f"- Experimental design: {item['experimental_design'] or 'TBD'}",
                     f"- Why now: {item['why_now'] or 'TBD'}",
+                    f"- Required baselines: {', '.join(self._analysis_baseline_label(entry) for entry in item['required_baselines']) or 'none'}",
                     f"- Success criteria: {item['success_criteria'] or 'TBD'}",
                     f"- Abandonment criteria: {item['abandonment_criteria'] or 'TBD'}",
                     f"- Completion condition: {item['completion_condition'] or item['must_not_simplify'] or 'TBD'}",
@@ -3017,6 +3410,7 @@ class ArtifactService:
                         "why_now": item["why_now"],
                         "completion_condition": item["completion_condition"] or item["must_not_simplify"],
                         "must_not_simplify": item["must_not_simplify"],
+                        "required_baselines": item["required_baselines"],
                         "success_criteria": item["success_criteria"],
                         "abandonment_criteria": item["abandonment_criteria"],
                         "reviewer_item_ids": item["reviewer_item_ids"],
@@ -3065,6 +3459,7 @@ class ArtifactService:
                             "why_now": item["why_now"],
                             "completion_condition": item["completion_condition"] or item["must_not_simplify"],
                             "must_not_simplify": item["must_not_simplify"],
+                            "required_baselines": item["required_baselines"],
                             "success_criteria": item["success_criteria"],
                             "abandonment_criteria": item["abandonment_criteria"],
                             "reviewer_item_ids": item["reviewer_item_ids"],
@@ -3089,6 +3484,7 @@ class ArtifactService:
             workspace_mode="analysis",
             last_flow_type="analysis_campaign",
         )
+        baseline_inventory = self._upsert_analysis_baseline_inventory(quest_root, inventory_entries) if inventory_entries else None
         self.quest_service.update_settings(self._quest_id(quest_root), active_anchor="analysis-campaign")
         checkpoint_result = self._checkpoint_with_optional_push(
             parent_worktree_root,
@@ -3138,6 +3534,7 @@ class ArtifactService:
             "charter_path": str(charter_path),
             "slices": slice_contexts,
             "manifest": manifest,
+            "analysis_baseline_inventory": baseline_inventory,
             "todo_manifest_path": str(todo_manifest_path),
             "artifact": artifact,
             "checkpoint": checkpoint_result,
@@ -3320,6 +3717,18 @@ class ArtifactService:
             raise ValueError("submit_paper_bundle requires a selected outline or explicit `outline_path`.")
 
         manifest_path = self._paper_bundle_manifest_path(quest_root)
+        baseline_inventory = self._write_paper_baseline_inventory(quest_root)
+        baseline_inventory_path = self._paper_baseline_inventory_path(quest_root)
+        source_branch = (
+            str(self.quest_service.read_research_state(quest_root).get("current_workspace_branch") or "").strip()
+            or current_branch(self._workspace_root_for(quest_root))
+        )
+        open_source_manifest = self._ensure_open_source_prep(
+            quest_root,
+            source_branch=source_branch,
+            source_bundle_manifest_path="paper/paper_bundle_manifest.json",
+            baseline_inventory_path="paper/baseline_inventory.json",
+        )
         manifest = {
             "schema_version": 1,
             "title": str(
@@ -3338,6 +3747,10 @@ class ArtifactService:
             "compile_report_path": str(compile_report_path or "paper/build/compile_report.json").strip() or None,
             "pdf_path": str(pdf_path or "").strip() or None,
             "latex_root_path": str(latex_root_path or "").strip() or None,
+            "baseline_inventory_path": "paper/baseline_inventory.json",
+            "open_source_manifest_path": "release/open_source/manifest.json",
+            "open_source_cleanup_plan_path": str(open_source_manifest.get("cleanup_plan_path") or "").strip()
+            or "release/open_source/cleanup_plan.md",
             "selected_outline_ref": str(selected_outline.get("outline_id") or "").strip() or None,
             "created_at": utc_now(),
             "updated_at": utc_now(),
@@ -3359,10 +3772,14 @@ class ArtifactService:
                     "outline_path": manifest.get("outline_path"),
                     "draft_path": manifest.get("draft_path"),
                     "pdf_path": manifest.get("pdf_path"),
+                    "baseline_inventory_path": str(baseline_inventory_path),
+                    "open_source_manifest_path": str(self._open_source_manifest_path(quest_root)),
                 },
                 "details": {
                     "title": manifest.get("title"),
                     "selected_outline_ref": manifest.get("selected_outline_ref"),
+                    "baseline_inventory_count": len(baseline_inventory.get("supplementary_baselines") or []),
+                    "open_source_status": open_source_manifest.get("status"),
                 },
             },
             checkpoint=False,
@@ -3372,6 +3789,8 @@ class ArtifactService:
             "ok": True,
             "manifest_path": str(manifest_path),
             "manifest": manifest,
+            "baseline_inventory_path": str(baseline_inventory_path),
+            "open_source_manifest_path": str(self._open_source_manifest_path(quest_root)),
             "artifact": artifact,
         }
 
@@ -3394,6 +3813,8 @@ class ArtifactService:
         next_recommendation: str | None = None,
         dataset_scope: str = "full",
         subset_approval_ref: str | None = None,
+        comparison_baselines: list[dict[str, Any]] | None = None,
+        evaluation_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         state = self.quest_service.read_research_state(quest_root)
         manifest = self._read_analysis_manifest(quest_root, campaign_id)
@@ -3408,16 +3829,19 @@ class ArtifactService:
         evidence_paths = [str(item).strip() for item in (evidence_paths or []) if str(item).strip()]
         deviations = [str(item).strip() for item in (deviations or []) if str(item).strip()]
         metric_rows = [item for item in (metric_rows or []) if isinstance(item, dict)]
+        normalized_comparison_baselines = self._normalize_comparison_baselines(quest_root, comparison_baselines)
         normalized_claim_impact = str(claim_impact or "").strip() or None
         normalized_reviewer_resolution = str(reviewer_resolution or "").strip() or None
         normalized_manuscript_update_hint = str(manuscript_update_hint or "").strip() or None
         normalized_next_recommendation = str(next_recommendation or "").strip() or None
+        normalized_evaluation_summary = self._normalize_evaluation_summary(evaluation_summary)
         slice_worktree_root = Path(str(target.get("worktree_root") or ""))
         parent_worktree_root = Path(str(manifest.get("parent_worktree_root") or ""))
         parent_branch = str(manifest.get("parent_branch") or "")
 
         result_dir = ensure_dir(slice_worktree_root / "experiments" / "analysis" / campaign_id / slice_id)
         result_path = result_dir / "RESULT.md"
+        result_json_path = result_dir / "RESULT.json"
         result_lines = [
             f"# {target.get('title') or slice_id}",
             "",
@@ -3456,6 +3880,10 @@ class ArtifactService:
             "",
             normalized_next_recommendation or "Not recorded.",
             "",
+            "## Evaluation Summary",
+            "",
+            *self._evaluation_summary_markdown_lines(normalized_evaluation_summary),
+            "",
             "## Deviations",
             "",
         ]
@@ -3472,6 +3900,20 @@ class ArtifactService:
             result_lines.extend(["", "## Metric Rows", ""])
             for row in metric_rows:
                 result_lines.append(f"- `{row}`")
+        result_lines.extend(["", "## Comparison Baselines", ""])
+        if normalized_comparison_baselines:
+            for entry in normalized_comparison_baselines:
+                result_lines.append(f"- {self._analysis_baseline_label(entry)}")
+                if entry.get("baseline_root_rel_path"):
+                    result_lines.append(f"  - Root: `{entry['baseline_root_rel_path']}`")
+                if entry.get("metrics_summary"):
+                    result_lines.append(f"  - Metrics: `{entry['metrics_summary']}`")
+                if entry.get("published"):
+                    result_lines.append(
+                        f"  - Published: `{entry.get('published_entry_id') or entry.get('baseline_id')}`"
+                    )
+        else:
+            result_lines.append("- None recorded.")
         if subset_approval_ref:
             result_lines.extend(["", "## Subset Approval", "", f"`{subset_approval_ref}`"])
         write_text(result_path, "\n".join(result_lines).rstrip() + "\n")
@@ -3485,6 +3927,37 @@ class ArtifactService:
             keys = [key for key in row.keys() if key not in {"split", "seed", "note", "notes"}]
             if len(keys) == 1:
                 metrics_summary[keys[0]] = row.get(keys[0])
+
+        result_payload = {
+            "schema_version": 1,
+            "result_kind": "analysis_slice",
+            "campaign_id": campaign_id,
+            "slice_id": slice_id,
+            "status": status,
+            "title": target.get("title"),
+            "goal": target.get("goal"),
+            "run_kind": target.get("run_kind"),
+            "required_baselines": target.get("required_baselines") or [],
+            "comparison_baselines": normalized_comparison_baselines,
+            "metrics_summary": metrics_summary,
+            "metric_rows": metric_rows,
+            "dataset_scope": normalized_scope,
+            "subset_approval_ref": subset_approval_ref,
+            "setup": setup.strip() or None,
+            "execution": execution.strip() or None,
+            "results": results.strip() or None,
+            "claim_impact": normalized_claim_impact,
+            "reviewer_resolution": normalized_reviewer_resolution,
+            "manuscript_update_hint": normalized_manuscript_update_hint,
+            "next_recommendation": normalized_next_recommendation,
+            "evaluation_summary": normalized_evaluation_summary,
+            "deviations": deviations,
+            "evidence_paths": evidence_paths,
+            "source_branch": str(target.get("branch") or ""),
+            "source_worktree_root": str(slice_worktree_root),
+            "updated_at": utc_now(),
+        }
+        write_json(result_json_path, result_payload)
 
         mirror_dir = ensure_dir(parent_worktree_root / "experiments" / "analysis-results" / campaign_id)
         mirror_path = mirror_dir / f"{slice_id}.md"
@@ -3524,7 +3997,17 @@ class ArtifactService:
             "",
             normalized_manuscript_update_hint or "Not recorded.",
             "",
+            "## Evaluation Summary",
+            "",
+            *self._evaluation_summary_markdown_lines(normalized_evaluation_summary),
+            "",
         ]
+        mirror_lines.extend(["## Comparison Baselines", ""])
+        if normalized_comparison_baselines:
+            mirror_lines.extend([f"- {self._analysis_baseline_label(entry)}" for entry in normalized_comparison_baselines])
+        else:
+            mirror_lines.append("- None recorded.")
+        mirror_lines.append("")
         write_text(mirror_path, "\n".join(mirror_lines).rstrip() + "\n")
 
         artifact = self.record(
@@ -3548,6 +4031,7 @@ class ArtifactService:
                 "protocol_step": "record",
                 "paths": {
                     "slice_result_md": str(result_path),
+                    "slice_result_json": str(result_json_path),
                     "parent_result_md": str(mirror_path),
                 },
                 "details": {
@@ -3563,7 +4047,11 @@ class ArtifactService:
                     "next_recommendation": normalized_next_recommendation,
                     "deviations": deviations,
                     "evidence_paths": evidence_paths,
+                    "required_baselines": target.get("required_baselines") or [],
+                    "comparison_baselines": normalized_comparison_baselines,
+                    "evaluation_summary": normalized_evaluation_summary,
                 },
+                "evaluation_summary": normalized_evaluation_summary,
             },
             checkpoint=False,
             workspace_root=slice_worktree_root,
@@ -3586,11 +4074,14 @@ class ArtifactService:
             updated["status"] = status
             updated["completed_at"] = utc_now()
             updated["result_path"] = str(result_path)
+            updated["result_json_path"] = str(result_json_path)
             updated["mirror_path"] = str(mirror_path)
             updated["claim_impact"] = normalized_claim_impact
             updated["reviewer_resolution"] = normalized_reviewer_resolution
             updated["manuscript_update_hint"] = normalized_manuscript_update_hint
             updated["next_recommendation"] = normalized_next_recommendation
+            updated["comparison_baselines"] = normalized_comparison_baselines
+            updated["evaluation_summary"] = normalized_evaluation_summary
             updated_slices.append(updated)
         next_slice = next((item for item in updated_slices if str(item.get("status") or "") == "pending"), None)
         manifest = self._write_analysis_manifest(
@@ -3600,6 +4091,36 @@ class ArtifactService:
                 **manifest,
                 "slices": updated_slices,
             },
+        )
+        baseline_inventory = (
+            self._upsert_analysis_baseline_inventory(
+                quest_root,
+                [
+                    {
+                        "baseline_id": entry.get("baseline_id"),
+                        "variant_id": entry.get("variant_id"),
+                        "usage_scope": "supplementary",
+                        "status": "registered",
+                        "reason": entry.get("reason"),
+                        "benchmark": entry.get("benchmark"),
+                        "split": entry.get("split"),
+                        "baseline_root_rel_path": entry.get("baseline_root_rel_path"),
+                        "storage_mode": entry.get("storage_mode"),
+                        "metrics_summary": entry.get("metrics_summary"),
+                        "evidence_paths": entry.get("evidence_paths"),
+                        "published": entry.get("published"),
+                        "published_entry_id": entry.get("published_entry_id"),
+                        "origin": {
+                            "stage": "analysis_campaign",
+                            "campaign_id": campaign_id,
+                            "slice_id": slice_id,
+                        },
+                    }
+                    for entry in normalized_comparison_baselines
+                ],
+            )
+            if normalized_comparison_baselines
+            else self._read_analysis_baseline_inventory(quest_root)
         )
 
         if next_slice is not None:
@@ -3642,14 +4163,17 @@ class ArtifactService:
                 "slice_id": slice_id,
                 "status": status,
                 "result_path": str(result_path),
+                "result_json_path": str(result_json_path),
                 "mirror_path": str(mirror_path),
                 "artifact": artifact,
                 "slice_checkpoint": slice_checkpoint,
                 "parent_checkpoint": parent_checkpoint,
                 "next_slice": next_slice,
                 "manifest": manifest,
+                "analysis_baseline_inventory": baseline_inventory,
                 "interaction": interaction,
                 "research_state": research_state,
+                "evaluation_summary": normalized_evaluation_summary,
                 "completed": False,
             }
 
@@ -3744,6 +4268,7 @@ class ArtifactService:
             "slice_id": slice_id,
             "status": status,
             "result_path": str(result_path),
+            "result_json_path": str(result_json_path),
             "mirror_path": str(mirror_path),
             "artifact": artifact,
             "slice_checkpoint": slice_checkpoint,
@@ -3752,8 +4277,10 @@ class ArtifactService:
             "summary_checkpoint": parent_summary_checkpoint,
             "summary_path": str(summary_path),
             "manifest": manifest,
+            "analysis_baseline_inventory": baseline_inventory,
             "interaction": interaction,
             "research_state": research_state,
+            "evaluation_summary": normalized_evaluation_summary,
             "completed": True,
             "returned_to_branch": parent_branch,
             "returned_to_worktree_root": str(parent_worktree_root),

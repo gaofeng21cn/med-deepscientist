@@ -4,6 +4,7 @@ declare global {
   interface Window {
     __DEEPSCIENTIST_RUNTIME__?: {
       surface?: string
+      version?: string
       supports?: {
         productApis?: boolean
         socketIo?: boolean

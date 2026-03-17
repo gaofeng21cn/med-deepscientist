@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { client } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import type {
+  EvaluationSummaryPayload,
   GitBranchEdge,
   GitBranchesPayload,
   GitBranchNode,
@@ -83,6 +84,65 @@ function comparisonTone(better?: boolean | null) {
     return 'text-rose-700 dark:text-rose-300'
   }
   return 'text-muted-foreground'
+}
+
+function normalizeEvaluationSummary(value: unknown): EvaluationSummaryPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+  const raw = value as Record<string, unknown>
+  const summary: EvaluationSummaryPayload = {
+    takeaway: typeof raw.takeaway === 'string' && raw.takeaway.trim() ? raw.takeaway.trim() : null,
+    claim_update: typeof raw.claim_update === 'string' && raw.claim_update.trim() ? raw.claim_update.trim() : null,
+    baseline_relation:
+      typeof raw.baseline_relation === 'string' && raw.baseline_relation.trim() ? raw.baseline_relation.trim() : null,
+    comparability: typeof raw.comparability === 'string' && raw.comparability.trim() ? raw.comparability.trim() : null,
+    failure_mode: typeof raw.failure_mode === 'string' && raw.failure_mode.trim() ? raw.failure_mode.trim() : null,
+    next_action: typeof raw.next_action === 'string' && raw.next_action.trim() ? raw.next_action.trim() : null,
+  }
+  return Object.values(summary).some(Boolean) ? summary : null
+}
+
+function evaluationSummaryItems(value: unknown): Array<{ label: string; value: string; hint?: string }> {
+  const summary = normalizeEvaluationSummary(value)
+  if (!summary) return []
+  const items: Array<[keyof EvaluationSummaryPayload, string, string | undefined]> = [
+    ['takeaway', 'Takeaway', 'Reusable one-line conclusion.'],
+    ['claim_update', 'Claim update', 'How this result shifts the current claim.'],
+    ['baseline_relation', 'Baseline relation', 'Overall relation to the accepted baseline.'],
+    ['comparability', 'Comparability', 'How fair and stable the comparison is.'],
+    ['failure_mode', 'Failure mode', 'Primary failure class if anything blocked trust.'],
+    ['next_action', 'Next action', 'Immediate route suggested by this result.'],
+  ]
+  return items
+    .filter(([key]) => Boolean(summary[key]))
+    .map(([key, label, hint]) => ({
+      label,
+      value: summary[key] || '—',
+      hint,
+    }))
+}
+
+function EvaluationSummaryGrid({
+  value,
+  className,
+}: {
+  value: unknown
+  className?: string
+}) {
+  const items = evaluationSummaryItems(value)
+  if (!items.length) return null
+  return (
+    <div className={cn('grid gap-2 sm:grid-cols-2', className)}>
+      {items.map((item) => (
+        <div key={item.label} className="rounded-[18px] bg-black/[0.03] px-3 py-3 dark:bg-white/[0.04]">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">{item.label}</div>
+          <div className="mt-2 text-sm font-medium leading-6 text-foreground">{item.value}</div>
+          {item.hint ? <div className="mt-1 text-[11px] leading-5 text-muted-foreground">{item.hint}</div> : null}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function kindMeta(kind?: string) {
@@ -1027,6 +1087,13 @@ export function GitResearchCanvas({
                       </div>
                     </div>
 
+                    {activeNode.latest_result?.evaluation_summary ? (
+                      <section className="space-y-2">
+                        <div className="text-sm font-semibold">Evaluation summary</div>
+                        <EvaluationSummaryGrid value={activeNode.latest_result.evaluation_summary} />
+                      </section>
+                    ) : null}
+
                     <section className="space-y-2">
                       <div className="text-sm font-semibold">Files changed</div>
                       {compareLoading ? (
@@ -1189,6 +1256,7 @@ export function GitResearchCanvas({
                             {activeNode.latest_result.paths?.result_json ? <div>Result JSON: {activeNode.latest_result.paths.result_json}</div> : null}
                           </div>
                         ) : null}
+                        <EvaluationSummaryGrid value={activeNode.latest_result.evaluation_summary} />
                       </div>
                     ) : null}
                     {activeNode.recent_artifacts?.length ? (
@@ -1328,6 +1396,18 @@ export function GitResearchCanvas({
                               <div>No result file paths recorded.</div>
                             ) : null}
                           </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {activeNode.latest_result?.evaluation_summary ? (
+                      <div className="rounded-[24px] border border-black/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(244,239,233,0.94))] p-4 shadow-card dark:border-white/[0.10] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]">
+                        <div className="flex items-center gap-2 text-sm font-semibold">
+                          <Sparkles className="h-4 w-4 text-muted-foreground" />
+                          Evaluation summary
+                        </div>
+                        <div className="mt-3">
+                          <EvaluationSummaryGrid value={activeNode.latest_result.evaluation_summary} />
                         </div>
                       </div>
                     ) : null}

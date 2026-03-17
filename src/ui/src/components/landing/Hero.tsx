@@ -9,11 +9,13 @@ import { OpenQuestDialog } from '@/components/projects/OpenQuestDialog'
 import { Button } from '@/components/ui/button'
 import { FadeContent, GlareHover } from '@/components/react-bits'
 import { client } from '@/lib/api'
+import { runtimeVersion } from '@/lib/runtime/quest-runtime'
 import { HERO_COPY, HERO_STAGES } from './hero-content'
 import type { QuestSummary } from '@/types'
 import HeroNav from './HeroNav'
 import HeroScene from './HeroScene'
 import HeroProgress from './HeroProgress'
+import { UpdateReminderDialog } from './UpdateReminderDialog'
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 const FINAL_SCROLL_HOLD = 0.2
@@ -51,6 +53,7 @@ export default function Hero() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const currentVersion = useMemo(() => runtimeVersion(), [])
 
   useEffect(() => {
     document.body.classList.add('font-project')
@@ -387,8 +390,9 @@ export default function Hero() {
                       </Button>
                     </div>
 
-                    <div className="text-xs text-[#7E8B97]">
-                      {HERO_COPY.supportLine}
+                    <div className="space-y-1 text-xs text-[#7E8B97]">
+                      <div>{HERO_COPY.supportLine}</div>
+                      {currentVersion ? <div>{`DeepScientist v${currentVersion}`}</div> : null}
                     </div>
                   </div>
                 </FadeContent>
@@ -440,6 +444,7 @@ export default function Hero() {
         onDeleteQuest={deleteQuest}
         deletingQuestId={deletingQuestId}
       />
+      <UpdateReminderDialog />
     </>
   )
 }

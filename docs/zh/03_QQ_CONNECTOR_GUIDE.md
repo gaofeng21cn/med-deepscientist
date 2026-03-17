@@ -16,7 +16,7 @@
 完成本文档后，你应该可以做到：
 
 - 用 QQ 私聊 DeepScientist
-- 让 QQ 自动绑定到当前最新 quest
+- 让 QQ 自动绑定到当前最新项目
 - 在 QQ 中使用 `/new`、`/use latest`、`/status` 等命令
 - 在 `Settings` 页面看到自动检测到的 `openid`
 - 从 `Settings` 页面执行非破坏性的连接测试
@@ -219,7 +219,7 @@ QQ readiness is healthy, but no OpenID has been learned yet. Save credentials, t
 - `Settings > Connectors > QQ` 中的 `Detected OpenID` 不再为空
 - `Snapshot` 里出现已经发现的目标会话，且绑定目标不是空
 - 再次点击“发送测试消息”时，不再提示 target 为空
-- 如果当前已经有最新 quest，普通文本会自动进入该 quest；如果还没有 quest，则优先返回帮助信息
+- 如果当前已经有最新项目，普通文本会自动进入该项目；如果还没有项目，则优先返回帮助信息
 
 ### 5.2 报错提示速查
 
@@ -239,17 +239,17 @@ QQ readiness is healthy, but no OpenID has been learned yet. Save credentials, t
 | 命令 | 作用 |
 | --- | --- |
 | `/help` | 查看帮助 |
-| `/projects` 或 `/list` | 查看 quest 列表 |
-| `/use <quest_id>` | 绑定指定 quest |
-| `/use latest` | 绑定最新 quest |
-| `/new <goal>` | 新建 quest 并把当前 QQ 会话绑定过去 |
-| `/status` | 查看当前 quest 状态 |
+| `/projects` 或 `/list` | 查看项目列表 |
+| `/use <quest_id>` | 绑定指定项目 |
+| `/use latest` | 绑定最新项目 |
+| `/new <goal>` | 新建项目并把当前 QQ 会话绑定过去 |
+| `/status` | 查看当前项目状态 |
 
 日常沟通建议：
 
-- 如果已经有最新 quest，普通文本通常会继续那个 quest
-- 如果还没有 quest，优先发送 `/new <goal>`
-- 如果你想切换到另一个 quest，显式发送 `/use <quest_id>`
+- 如果已经有最新项目，普通文本通常会继续那个项目
+- 如果还没有项目，优先发送 `/new <goal>`
+- 如果你想切换到另一个项目，显式发送 `/use <quest_id>`
 
 ## 7. 最容易踩坑的地方
 

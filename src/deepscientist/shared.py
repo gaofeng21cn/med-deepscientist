@@ -71,7 +71,8 @@ def write_json(path: Path, payload: Any) -> None:
     )
 
 
-def read_json(path: Path, default: Any = None) -> Any:
+def read_json(path: Path | str, default: Any = None) -> Any:
+    path = Path(path)
     if not path.exists():
         return default
     payload = path.read_text(encoding="utf-8").strip()

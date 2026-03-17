@@ -735,7 +735,10 @@ class PromptBuilder:
             "- acknowledgment_protocol: after artifact.interact returns any human message, immediately call artifact.interact(...) again to confirm receipt; if answerable, answer directly, otherwise state the short plan, nearest checkpoint, and that the current background subtask is paused",
             "- progress_protocol: emit artifact.interact(kind='progress', reply_mode='threaded', ...) only at real human-meaningful checkpoints, after the first meaningful signal from long-running work, and then only occasional keepalives during truly long work, usually about every 20 to 30 minutes",
             "- long_run_reporting_protocol: for long-running bash_exec monitoring loops, report after each completed sleep/await cycle with real evidence plus the next planned check time and estimated next reply time",
+            "- timeout_protocol: before using bash_exec(mode='await', ...), estimate whether the command can finish within the selected wait window; if runtime is uncertain or likely longer, use bash_exec(mode='detach', ...) and monitor, or set timeout_seconds intentionally",
             "- blocking_protocol: use reply_mode='blocking' only for true unresolved user decisions; ordinary progress updates should stay threaded and non-blocking",
+            "- credential_blocking_protocol: if continuation requires user-supplied external credentials or secrets such as an API key, GitHub key/token, or Hugging Face key/token, emit one structured blocking decision request that asks the user to provide the credential or choose an alternative route; do not invent placeholders or silently skip the blocked step",
+            "- credential_wait_protocol: if that credential request remains unanswered, keep the quest waiting rather than self-resolving; if you are resumed without new credentials and no other work is possible, a long low-frequency park such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable to avoid busy-looping",
             f"- standby_prefix_rule: when you intentionally leave one blocking standby interaction after task completion, prefix it with {'[等待决策]' if chinese_turn else '[Waiting for decision]'} and wait for a new user reply before continuing",
             "- stop_notice_protocol: if work must pause or stop, send a user-visible notice that explains why, confirms preserved context, and states that any new message or `/resume` will continue from the same quest",
             "- respect_protocol: write user-facing updates as natural, respectful, easy-to-follow chat; do not sound like a formal status report or internal tool log",
@@ -913,6 +916,26 @@ class PromptBuilder:
                     "- active_baseline_metric_contract_rule: before planning or running `experiment` or `analysis-campaign`, read this JSON file and treat it as the canonical baseline comparison contract unless a newer confirmed baseline explicitly replaces it.",
                 ]
             )
+        analysis_baseline_inventory = read_json(quest_root / "artifacts" / "baselines" / "analysis_inventory.json", {})
+        analysis_baseline_inventory = analysis_baseline_inventory if isinstance(analysis_baseline_inventory, dict) else {}
+        analysis_inventory_entries = (
+            analysis_baseline_inventory.get("entries") if isinstance(analysis_baseline_inventory.get("entries"), list) else []
+        )
+        registered_count = sum(
+            1
+            for item in analysis_inventory_entries
+            if isinstance(item, dict) and str(item.get("status") or "").strip().lower() == "registered"
+        )
+        if analysis_inventory_entries:
+            lines.extend(
+                [
+                    f"- supplementary_baseline_inventory_status: artifacts/baselines/analysis_inventory.json [exists]",
+                    f"- supplementary_baseline_count: {len(analysis_inventory_entries)}",
+                    f"- supplementary_baseline_registered_count: {registered_count}",
+                ]
+            )
+        else:
+            lines.append("- supplementary_baseline_inventory_status: artifacts/baselines/analysis_inventory.json [missing]")
         lines.extend(["", "Active interactions:"])
         active_interactions = snapshot.get("active_interactions") or []
         if active_interactions:
@@ -1001,10 +1024,14 @@ class PromptBuilder:
         )
         bundle_manifest = read_json(paper_root / "paper_bundle_manifest.json", {})
         bundle_manifest = bundle_manifest if isinstance(bundle_manifest, dict) else {}
+        paper_baseline_inventory = read_json(paper_root / "baseline_inventory.json", {})
+        paper_baseline_inventory = paper_baseline_inventory if isinstance(paper_baseline_inventory, dict) else {}
         claim_evidence_map = read_json(paper_root / "claim_evidence_map.json", {})
         claim_evidence_map = claim_evidence_map if isinstance(claim_evidence_map, dict) else {}
         compile_report = read_json(paper_root / "build" / "compile_report.json", {})
         compile_report = compile_report if isinstance(compile_report, dict) else {}
+        open_source_manifest = read_json(quest_root / "release" / "open_source" / "manifest.json", {})
+        open_source_manifest = open_source_manifest if isinstance(open_source_manifest, dict) else {}
 
         selected_outline_ref = str(
             selected_outline.get("outline_id") or bundle_manifest.get("selected_outline_ref") or ""
@@ -1045,6 +1072,7 @@ class PromptBuilder:
                 f"- draft_status: {_path_status(bundle_manifest.get('draft_path'), fallback='paper/draft.md')}",
                 f"- references_status: {_path_status(bundle_manifest.get('references_path'), fallback='paper/references.bib')}",
                 f"- claim_evidence_map_status: {_path_status(bundle_manifest.get('claim_evidence_map_path'), fallback='paper/claim_evidence_map.json')}",
+                f"- baseline_inventory_status: {_path_status(bundle_manifest.get('baseline_inventory_path'), fallback='paper/baseline_inventory.json')}",
                 f"- review_status: {'paper/review/review.md [exists]' if (paper_root / 'review' / 'review.md').exists() else 'paper/review/review.md [missing]'}",
                 f"- proofing_report_status: {'paper/proofing/proofing_report.md [exists]' if (paper_root / 'proofing' / 'proofing_report.md').exists() else 'paper/proofing/proofing_report.md [missing]'}",
                 f"- page_images_manifest_status: {'paper/proofing/page_images_manifest.json [exists]' if (paper_root / 'proofing' / 'page_images_manifest.json').exists() else 'paper/proofing/page_images_manifest.json [missing]'}",
@@ -1061,6 +1089,8 @@ class PromptBuilder:
                     f"- bundle_pdf_status: {_path_status(pdf_rel_path, fallback='paper/paper.pdf')}",
                     f"- bundle_compile_report_status: {_path_status(compile_rel_path, fallback='paper/build/compile_report.json')}",
                     f"- bundle_latex_root: {latex_root_path or 'none'}",
+                    f"- open_source_manifest_status: {_path_status(bundle_manifest.get('open_source_manifest_path'), fallback='release/open_source/manifest.json')}",
+                    f"- open_source_cleanup_plan_status: {_path_status(bundle_manifest.get('open_source_cleanup_plan_path'), fallback='release/open_source/cleanup_plan.md')}",
                 ]
             )
         else:
@@ -1089,6 +1119,17 @@ class PromptBuilder:
 
         if compile_report:
             lines.append(f"- compile_report_ok: {compile_report.get('ok') if 'ok' in compile_report else 'unknown'}")
+        supplementary_baselines = (
+            paper_baseline_inventory.get("supplementary_baselines")
+            if isinstance(paper_baseline_inventory.get("supplementary_baselines"), list)
+            else []
+        )
+        if paper_baseline_inventory:
+            lines.append(f"- paper_supplementary_baseline_count: {len(supplementary_baselines)}")
+        if open_source_manifest:
+            lines.append(
+                f"- open_source_release_branch: {str(open_source_manifest.get('release_branch') or '').strip() or 'none'}"
+            )
 
         lines.extend(["", "Recent supporting runs:"])
         recent_runs = snapshot.get("recent_runs") or []

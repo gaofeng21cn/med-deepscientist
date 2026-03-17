@@ -144,6 +144,95 @@ export function defaultStartResearchTemplate(language: 'en' | 'zh'): StartResear
   }
 }
 
+export function listReferenceStartResearchTemplates(): StartResearchTemplateEntry[] {
+  const timestamp = '2026-03-17T00:00:00.000Z'
+  const zhTemplate: StartResearchTemplate = {
+    title: '示例 · 复现 P-and-B 并探索更高效的推理控制',
+    quest_id: '',
+    goal: [
+      '请复现 P-and-B（Planning and Budgeting）论文与官方仓库中的核心 baseline，并在严格保持评测任务一致的前提下，继续探索更高质量、更省 token、且具有学术洞见的改进方向。',
+      '',
+      '要求先完整恢复并验证官方 baseline，再沿着文献调研与实验结果提出新方向。所有新 idea 都必须建立在充分的相关工作阅读、对失败模式的分析，以及对当前最佳 baseline 的清晰理解之上。',
+      '',
+      '研究目标不是只得到一个更高分结果，而是形成一项适合作为论文工作的研究成果：结论需要可靠，洞见需要明确，结果需要能解释为什么有效、何时有效、何时无效。',
+    ].join('\n'),
+    baseline_id: '',
+    baseline_variant_id: '',
+    baseline_urls: 'https://github.com/junhongmit/P-and-B',
+    paper_urls: 'https://arxiv.org/abs/2505.16122',
+    runtime_constraints: [
+      '- 使用用户提供的 OpenAI-compatible 推理接口与单一指定模型。',
+      '- 在不破坏服务稳定性的前提下，尽量提高并发吞吐；若需要修改并发、超时或重试逻辑，必须记录原因。',
+      '- 除非有充分证据证明必须调整，否则优先保持官方 baseline 的任务定义、主要超参数与评测协议不变。',
+      '- 不允许伪造实验结果；失败、异常、中断和退化结果都必须如实记录。',
+    ].join('\n'),
+    objectives: [
+      '1. 恢复并验证官方 baseline，形成可复用的可信起点。',
+      '2. 记录关键指标、token 开销、长尾失败模式与主要观察结论。',
+      '3. 基于文献与实验结果提出至少一个有研究价值的改进方向。',
+      '4. 形成足以支持论文写作的实验与分析材料。',
+    ].join('\n'),
+    need_research_paper: true,
+    research_intensity: 'balanced',
+    decision_policy: 'autonomous',
+    launch_mode: 'standard',
+    custom_profile: 'freeform',
+    entry_state_summary: '',
+    review_summary: '',
+    custom_brief: '',
+    user_language: 'zh',
+  }
+
+  const enTemplate: StartResearchTemplate = {
+    title: 'Example · Reproduce P-and-B and explore more efficient reasoning control',
+    quest_id: '',
+    goal: [
+      'Please reproduce the core baselines from the P-and-B (Planning and Budgeting) paper and official repository, then continue exploring stronger and more token-efficient reasoning-control ideas while keeping the task definition and evaluation protocol faithful to the original work.',
+      '',
+      'The workflow should first restore and verify the official baselines, then move into literature-grounded idea generation and evidence-driven experimentation. Every new idea must be justified by careful reading of related work, analysis of failure modes, and a clear understanding of the current best baseline.',
+      '',
+      'The goal is not merely to obtain one better score, but to produce a paper-worthy research result: the claims must be reliable, the insights must be explicit, and the evidence must explain why the method helps, when it helps, and where it breaks.',
+    ].join('\n'),
+    baseline_id: '',
+    baseline_variant_id: '',
+    baseline_urls: 'https://github.com/junhongmit/P-and-B',
+    paper_urls: 'https://arxiv.org/abs/2505.16122',
+    runtime_constraints: [
+      '- Use the user-provided OpenAI-compatible inference endpoint and the single designated model.',
+      '- Keep throughput high without destabilizing the service; if concurrency, timeout, or retry settings are changed, record the reason explicitly.',
+      '- Preserve the official task setup, major hyperparameters, and evaluation protocol unless there is concrete evidence that an adaptation is necessary.',
+      '- Never fabricate results; failed, interrupted, degraded, or inconclusive runs must be recorded honestly.',
+    ].join('\n'),
+    objectives: [
+      '1. Restore and verify the official baseline as a trustworthy reusable starting point.',
+      '2. Record key metrics, token costs, long-tail failure modes, and main observations.',
+      '3. Propose at least one research-worthy improvement direction grounded in literature and experimental evidence.',
+      '4. Produce experiment and analysis assets that are strong enough to support paper writing.',
+    ].join('\n'),
+    need_research_paper: true,
+    research_intensity: 'balanced',
+    decision_policy: 'autonomous',
+    launch_mode: 'standard',
+    custom_profile: 'freeform',
+    entry_state_summary: '',
+    review_summary: '',
+    custom_brief: '',
+    user_language: 'en',
+  }
+
+  const templates = [
+    { id: 'builtin_example_zh_pandb', template: zhTemplate },
+    { id: 'builtin_example_en_pandb', template: enTemplate },
+  ]
+
+  return templates.map(({ id, template }) => ({
+    ...template,
+    id,
+    updated_at: timestamp,
+    compiled_prompt: compileStartResearchPrompt(template),
+  }))
+}
+
 export function listStartResearchIntensityPresets() {
   return START_RESEARCH_INTENSITY_ORDER.map((presetId) => START_RESEARCH_INTENSITY_PRESETS[presetId])
 }
@@ -310,7 +399,7 @@ function labelLaunchMode(value: LaunchMode) {
 function labelCustomProfile(value: CustomProfile) {
   switch (value) {
     case 'continue_existing_state':
-      return 'Continue existing state: audit and normalize an existing baseline, result, draft, or mixed quest state before deciding the next anchor.'
+      return 'Continue existing state: audit and normalize an existing baseline, result, draft, or mixed project state before deciding the next anchor.'
     case 'revision_rebuttal':
       return 'Revision / rebuttal: treat the current paper and reviewer package as the active contract, then route supplementary experiments and manuscript edits from that state.'
     default:
@@ -332,13 +421,13 @@ function labelScope(value: ResearchScope) {
 function labelBaselineMode(value: BaselineMode) {
   switch (value) {
     case 'existing':
-      return 'Use existing baseline: trust the selected reusable baseline first and let runtime attach and confirm it before the quest begins.'
+      return 'Use existing baseline: trust the selected reusable baseline first and let runtime attach and confirm it before the project begins.'
     case 'restore_from_url':
       return 'Restore from URL: recover the baseline from provided repositories or artifact links.'
     case 'allow_degraded_minimal_reproduction':
       return 'Allow degraded minimal reproduction: accept a weaker but still measurable baseline if exact recovery is impossible.'
     default:
-      return 'Stop if insufficient: pause the quest instead of faking a baseline when evidence is missing.'
+      return 'Stop if insufficient: pause the project instead of faking a baseline when evidence is missing.'
   }
 }
 
@@ -367,18 +456,18 @@ function labelGitStrategy(value: GitStrategy) {
 function deliveryModeLines(needResearchPaper: boolean) {
   if (needResearchPaper) {
     return [
-      '- A research paper is required for this quest.',
-      '- The quest should normally continue through baseline, literature-grounded idea selection, implementation, main experiments, necessary analysis, paper outline, drafting, revision, and paper bundle preparation.',
+      '- A research paper is required for this project.',
+      '- The project should normally continue through baseline, literature-grounded idea selection, implementation, main experiments, necessary analysis, paper outline, drafting, revision, and paper bundle preparation.',
       '- Do not stop after obtaining only one improved algorithm or one promising run.',
       '- After each `artifact.record_main_experiment(...)`, first interpret the measured result, then decide whether to improve further, run necessary follow-up analysis, or move into writing.',
       '- The idea stage only creates or revises a candidate direction; the round is not complete until a main experiment result is recorded and routed.',
-      '- Unless the user explicitly changes scope, do not terminate the quest before at least one paper-like deliverable exists.',
+      '- Unless the user explicitly changes scope, do not terminate the project before at least one paper-like deliverable exists.',
     ]
   }
   return [
-    '- A research paper is NOT required for this quest.',
+    '- A research paper is NOT required for this project.',
     '- The primary goal is the strongest justified algorithmic result, not paper drafting or paper packaging.',
-    '- The quest must still do rigorous baseline work, literature-grounded idea selection, implementation, and main experiments.',
+    '- The project must still do rigorous baseline work, literature-grounded idea selection, implementation, and main experiments.',
     '- After each `artifact.record_main_experiment(...)`, use the measured result to decide the next optimization step.',
     '- The idea stage only creates or revises a candidate direction; it does not by itself decide the next round.',
     '- The agent should decide how to continue from durable evidence such as the accepted baseline, the current research head, and the strongest recent main-experiment result.',
@@ -398,7 +487,7 @@ function decisionPolicyLines(value: DecisionPolicy) {
   return [
     '- Autonomous decision mode is active.',
     '- Do not hand ordinary route, branch, cost, baseline-reuse, or experiment-selection decisions back to the user.',
-    '- Report chosen routes through threaded progress or milestone updates, and keep moving unless you are explicitly requesting final quest-completion approval.',
+    '- Report chosen routes through threaded progress or milestone updates, and keep moving unless you are explicitly requesting final completion approval.',
   ]
 }
 
@@ -412,7 +501,7 @@ function customLaunchLines(input: StartResearchTemplate) {
   }
   const lines = [
     '- Custom launch mode is active.',
-    '- Do not force the quest into a blank full-research loop if the custom brief is narrower or the quest already has meaningful durable state.',
+    '- Do not force the project into a blank full-research loop if the custom brief is narrower or the project already has meaningful durable state.',
     `- Custom profile: ${labelCustomProfile(normalized.custom_profile)}`,
   ]
   if (normalized.entry_state_summary) {
@@ -443,7 +532,7 @@ export function compileStartResearchPrompt(input: StartResearchTemplate) {
   const paperUrls = sanitizeLines(normalized.paper_urls)
   const baselineVariant = normalized.baseline_variant_id
   const baselineContext = normalized.baseline_id
-    ? `Runtime will attach and confirm baseline_id ${normalized.baseline_id}${baselineVariant ? ` (variant ${baselineVariant})` : ''} before the quest starts. Treat it as the pre-bound baseline unless you find a concrete incompatibility, corruption, or missing-evidence problem.`
+    ? `Runtime will attach and confirm baseline_id ${normalized.baseline_id}${baselineVariant ? ` (variant ${baselineVariant})` : ''} before the project starts. Treat it as the pre-bound baseline unless you find a concrete incompatibility, corruption, or missing-evidence problem.`
     : baselineUrls.length > 0
       ? baselineUrls.map((url) => `- ${url}`).join('\n')
       : 'No baseline link has been attached yet. The first obligation is to discover, repair, or reconstruct a reusable baseline.'
@@ -453,9 +542,9 @@ export function compileStartResearchPrompt(input: StartResearchTemplate) {
     : '- Produce a trustworthy baseline\n- Decide whether the current direction is worth implementation\n- Preserve clean artifacts, metrics, and reasons for each decision'
 
   return [
-    'Quest Bootstrap',
-    `- Quest title: ${normalized.title || 'Untitled quest'}`,
-    `- Quest id: ${questRepo}`,
+    'Project Bootstrap',
+    `- Project title: ${normalized.title || 'Untitled project'}`,
+    `- Project id: ${questRepo}`,
     `- User language: ${normalized.user_language === 'zh' ? 'Chinese' : 'English'}`,
     '',
     'Primary Research Request',
@@ -494,7 +583,7 @@ export function compileStartResearchPrompt(input: StartResearchTemplate) {
     `- Time budget per research round: ${derivedContract.time_budget_hours} hour(s)`,
     '',
     'Mandatory Working Rules',
-    '- Keep all durable files inside the quest root.',
+    '- Keep all durable files inside the project root.',
     '- Reuse existing baseline artifacts whenever possible before rebuilding them.',
     normalized.launch_mode === 'custom'
       ? '- Custom launch mode is authoritative here: do not restart from scratch unless the existing state is unusable or misleading.'
@@ -503,7 +592,7 @@ export function compileStartResearchPrompt(input: StartResearchTemplate) {
     '- Every decision must include reasons, evidence, and the next recommended action.',
     '- If the startup contract already fixes the delivery mode and baseline policy, follow it without asking the user again unless cost, safety, or scope changes materially.',
     normalized.decision_policy === 'autonomous'
-      ? '- Autonomous mode is the default contract here: decide the route yourself and continue unless you are requesting explicit quest-completion approval.'
+      ? '- Autonomous mode is the default contract here: decide the route yourself and continue unless you are requesting explicit completion approval.'
       : '- User-gated mode is enabled here: if local evidence is insufficient for a safe route decision, ask the user with one blocking decision request.',
   ].join('\n')
 }

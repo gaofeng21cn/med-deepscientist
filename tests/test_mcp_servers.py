@@ -359,12 +359,21 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
                     "results": "Accuracy improved.",
                     "conclusion": "Ready for follow-up.",
                     "metric_rows": [{"metric_id": "accuracy", "value": 0.93}],
+                    "evaluation_summary": {
+                        "takeaway": "The MCP run clears the accepted baseline.",
+                        "claim_update": "strengthens",
+                        "baseline_relation": "better",
+                        "comparability": "high",
+                        "failure_mode": "none",
+                        "next_action": "analysis_campaign",
+                    },
                 },
             )
         )
         assert main_result["ok"] is True
         assert Path(main_result["result_json_path"]).exists()
         assert main_result["progress_eval"]["breakthrough"] is True
+        assert main_result["evaluation_summary"]["next_action"] == "analysis_campaign"
 
         refs_after_main = _unwrap_tool_result(await server.call_tool("resolve_runtime_refs", {}))
         assert refs_after_main["latest_main_run_id"] == "main-mcp-001"
@@ -427,6 +436,12 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
                             "goal": "Disable the adapter and compare.",
                             "required_changes": "Disable adapter only.",
                             "metric_contract": "Report full validation metrics.",
+                            "required_baselines": [
+                                {
+                                    "baseline_id": "mcp-analysis-baseline",
+                                    "reason": "Need a dedicated analysis comparator.",
+                                }
+                            ],
                         }
                     ],
                 },
@@ -435,6 +450,10 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         assert campaign_result["ok"] is True
         assert campaign_result["campaign_id"]
         assert Path(campaign_result["slices"][0]["worktree_root"]).exists()
+        assert campaign_result["slices"][0]["required_baselines"][0]["baseline_id"] == "mcp-analysis-baseline"
+        analysis_baseline_root = quest_root / "baselines" / "local" / "mcp-analysis-baseline"
+        analysis_baseline_root.mkdir(parents=True, exist_ok=True)
+        (analysis_baseline_root / "README.md").write_text("# MCP Analysis Baseline\n", encoding="utf-8")
 
         campaign_view = _unwrap_tool_result(
             await server.call_tool(
@@ -458,12 +477,29 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
                     "results": "Accuracy dropped as expected.",
                     "metric_rows": [{"name": "acc", "value": 0.84}],
                     "evidence_paths": ["experiments/analysis/ablation/result.json"],
+                    "comparison_baselines": [
+                        {
+                            "baseline_id": "mcp-analysis-baseline",
+                            "baseline_root_rel_path": "baselines/local/mcp-analysis-baseline",
+                            "metrics_summary": {"acc": 0.8},
+                        }
+                    ],
+                    "evaluation_summary": {
+                        "takeaway": "Removing the adapter weakens the result as expected.",
+                        "claim_update": "strengthens",
+                        "baseline_relation": "better",
+                        "comparability": "high",
+                        "failure_mode": "none",
+                        "next_action": "write",
+                    },
                 },
             )
         )
         assert slice_result["ok"] is True
         assert slice_result["completed"] is True
         assert slice_result["returned_to_branch"] == second_idea_result["branch"]
+        assert Path(slice_result["result_json_path"]).exists()
+        assert slice_result["evaluation_summary"]["takeaway"].startswith("Removing the adapter")
 
         summary_result = _unwrap_tool_result(await server.call_tool("refresh_summary", {"reason": "mcp test"}))
         assert summary_result["ok"] is True

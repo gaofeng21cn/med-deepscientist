@@ -21,7 +21,7 @@ The task is “respond to concrete reviewer pressure with the smallest honest se
 - Default to plain-language summaries. Do not mention file paths, artifact ids, branch/worktree ids, session ids, raw commands, or raw logs unless the user asks or needs them to act.
 - Message templates are references only. Adapt to the actual context and vary wording so updates feel natural and non-robotic.
 - Use `reply_mode='blocking'` only for real user decisions that cannot be resolved from local evidence.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - If a threaded user reply arrives, interpret it relative to the latest rebuttal progress update before assuming the task changed completely.
 - When the rebuttal plan, the main supplementary-evidence package, or the final response bundle becomes durable, send one richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says what reviewer concerns are now addressed, what still remains open, and what happens next.
 
@@ -87,11 +87,13 @@ Use, in roughly this order:
 - the current paper or draft
 - the selected outline if one exists
 - review comments, meta-review, or editor letter
+- the six-field `evaluation_summary` blocks from recent main experiments and analysis slices
 - recent main and analysis experiment results
 - prior decision and writing memory
 - existing figures, tables, and claim-evidence maps
 
 If the current paper/result state is still unclear, open `intake-audit` first before continuing the rebuttal workflow.
+Before launching any new supplementary experiment, read those structured `evaluation_summary` blocks first so the rebuttal plan starts from the already-recorded evidence state rather than from raw narrative memory.
 
 ## Core outputs
 

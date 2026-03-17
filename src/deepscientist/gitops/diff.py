@@ -333,6 +333,9 @@ def _collect_branch_state(repo: Path) -> dict[str, dict[str, Any]]:
                 "baseline_ref": record.get("baseline_ref") or {},
                 "baseline_comparisons": record.get("baseline_comparisons") or {},
                 "progress_eval": record.get("progress_eval") or {},
+                "evaluation_summary": record.get("evaluation_summary")
+                or ((record.get("details") or {}) if isinstance(record.get("details"), dict) else {}).get("evaluation_summary")
+                or {},
                 "files_changed": record.get("files_changed") or [],
                 "evidence_paths": record.get("evidence_paths") or [],
                 "updated_at": record.get("updated_at"),

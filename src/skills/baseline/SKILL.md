@@ -18,7 +18,7 @@ It absorbs the essential old DeepScientist reproducer discipline into one stage 
 - Default to plain-language summaries. Do not mention file paths, artifact ids, branch/worktree ids, session ids, raw commands, or raw logs unless the user asks or needs them to act.
 - Message templates are references only. Adapt to the actual context and vary wording so updates feel natural and non-robotic.
 - Use `reply_mode='blocking'` only for real user decisions that cannot be resolved from local evidence.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - If a threaded user reply arrives, interpret it relative to the latest baseline progress update before assuming the task changed completely.
 - Prefer `bash_exec` for setup, reproduction, and verification commands so each baseline action keeps a durable quest-local session id and log trail.
 - When the baseline route is durably chosen, confirmed, waived, or blocked with a clear next action, send one richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says whether the baseline is trusted, blocked, or waived, why that matters, and what the next stage is.
@@ -203,6 +203,12 @@ Global reusable registry paths:
 
 Do not invent parallel durable locations when these runtime contracts already exist.
 Do not leave the authoritative metric contract only in chat, memory, or prose once the baseline is accepted.
+
+If a baseline is reproduced only because an analysis campaign needs an extra comparator:
+
+- still place it under `<quest_root>/baselines/local/<baseline_id>/` or `<quest_root>/baselines/imported/<baseline_id>/`
+- treat it as a supplementary analysis baseline unless the quest explicitly promotes it into the canonical gate
+- do not call `artifact.confirm_baseline(...)` for that supplementary case unless the quest truly intends to replace the canonical baseline
 
 ## Baseline id and variant rules
 

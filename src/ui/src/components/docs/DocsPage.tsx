@@ -325,7 +325,7 @@ export function DocsPage({
       <ProjectsAppBar title={t.title} />
 
       <main className="mx-auto mt-6 min-h-0 w-full flex-1 overflow-hidden">
-        <div className="mx-auto grid h-full min-h-0 w-full max-w-[1500px] grid-rows-[auto_minmax(0,1fr)] gap-0 xl:grid-cols-[260px_minmax(0,1fr)_220px] xl:grid-rows-1">
+        <div className="mx-auto grid h-full min-h-0 w-full max-w-[90vw] grid-rows-[auto_minmax(0,1fr)] gap-0 xl:grid-cols-[260px_minmax(0,1fr)_220px] xl:grid-rows-1">
           <aside className="flex min-h-0 flex-col border-b border-black/[0.08] pb-6 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-6 dark:border-white/[0.08]">
             <div className="flex items-center gap-2 text-sm font-medium">
               <span>{t.repoTitle}</span>

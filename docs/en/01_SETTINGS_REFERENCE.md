@@ -92,9 +92,9 @@ acp:
 - Type: `string`
 - Default: the installed DeepScientist home, usually `~/DeepScientist`
 - UI label: `Home path`
-- Meaning: root directory for config, quests, memory, plugins, logs, and cache.
+- Meaning: root directory for config, projects, memory, plugins, logs, and cache.
 - When to change: only when you intentionally installed DeepScientist somewhere else.
-- Notes: this is not a single quest path; it is the runtime root.
+- Notes: this is not a single project path; it is the runtime root.
 
 **`default_runner`**
 
@@ -102,7 +102,7 @@ acp:
 - Default: `codex`
 - Allowed values: currently `codex`, `claude`
 - UI label: `Default runner`
-- Meaning: runner used when a quest does not override it.
+- Meaning: runner used when a project does not override it.
 - Notes: in the current branch, `codex` is the primary path and `claude` remains a reserved slot.
 
 **`default_locale`**
@@ -120,15 +120,15 @@ acp:
 - Type: `boolean`
 - Default: `true`
 - UI label: `Restore sessions on start`
-- Meaning: restore previous quest sessions when the daemon starts.
+- Meaning: restore previous project sessions when the daemon starts.
 
 **`daemon.max_concurrent_quests`**
 
 - Type: `number`
 - Default: `1`
-- UI label: `Max concurrent quests`
-- Meaning: upper bound on how many quests may run at the same time.
-- Recommendation: keep `1` unless you intentionally want parallel quest execution.
+- UI label: `Max concurrent projects`
+- Meaning: upper bound on how many projects may run at the same time.
+- Recommendation: keep `1` unless you intentionally want parallel project execution.
 
 **`daemon.ack_timeout_ms`**
 
@@ -202,7 +202,7 @@ acp:
 - Type: `boolean`
 - Default: `true`
 - UI label: `Auto-checkpoint`
-- Meaning: create Git checkpoints automatically during quest progress.
+- Meaning: create Git checkpoints automatically during project progress.
 
 **`git.auto_push`**
 
@@ -252,15 +252,15 @@ Palette selection is no longer exposed in `Settings` or `config.yaml`.
 
 - Type: `boolean`
 - Default: `true`
-- UI label: `Sync quest skills on create`
-- Meaning: mirror skills into quest-local runner homes when a quest is created.
+- UI label: `Sync project skills on create`
+- Meaning: mirror skills into project-local runner homes when a project is created.
 
 **`skills.sync_quest_on_open`**
 
 - Type: `boolean`
 - Default: `true`
-- UI label: `Sync quest skills on open`
-- Meaning: refresh quest-local skill mirrors when an existing quest is opened.
+- UI label: `Sync project skills on open`
+- Meaning: refresh project-local skill mirrors when an existing project is opened.
 
 ### Connector policy
 
@@ -271,7 +271,7 @@ These fields are global connector behaviors, not per-platform credentials.
 - Type: `boolean`
 - Default: `true`
 - UI label: `Auto-ack incoming messages`
-- Meaning: send a short acknowledgment before the full quest response completes.
+- Meaning: send a short acknowledgment before the full project response completes.
 
 **`connectors.milestone_push`**
 
@@ -285,7 +285,7 @@ These fields are global connector behaviors, not per-platform credentials.
 - Type: `boolean`
 - Default: `true`
 - UI label: `Enable direct chat`
-- Meaning: allow connectors to continue quests from direct messages.
+- Meaning: allow connectors to continue projects from direct messages.
 
 ### Cloud link
 
@@ -371,7 +371,7 @@ These settings are compatibility knobs for ACP-style external consumers.
 
 ### Summary
 
-`runners.yaml` defines which runner executes quests and what its default model, approval policy, sandbox, and retry behavior should be. In the current open-source release:
+`runners.yaml` defines which runner executes projects and what its default model, approval policy, sandbox, and retry behavior should be. In the current open-source release:
 
 - `codex`: primary path, enabled by default
 - `claude`: TODO / reserved slot, disabled by default, not runnable yet
@@ -433,7 +433,7 @@ claude:
 - Type: `string`
 - Default: `codex=gpt-5.4`, `claude=inherit`
 - UI label: `Default model`
-- Meaning: default model used when a quest does not override it.
+- Meaning: default model used when a project does not override it.
 
 **`model_reasoning_effort`**
 
@@ -534,7 +534,7 @@ Current design rules:
 
 - prefer no-public-callback transports
 - keep webhook / relay fields only as legacy or fallback paths
-- treat connectors as alternate quest control surfaces, not disconnected notification bots
+- treat connectors as alternate project control surfaces, not disconnected notification bots
 
 ### Top-level routing
 
@@ -586,7 +586,7 @@ These fields appear across multiple connectors:
 
 - Type: `boolean`
 - Default: usually `true`
-- Meaning: direct messages automatically follow the current active quest.
+- Meaning: direct messages automatically follow the current active project.
 
 ### `telegram`
 
@@ -969,7 +969,7 @@ allow_unsigned: false
 
 ### Summary
 
-This file configures external MCP servers. It does not configure built-in `memory`, `artifact`, or `bash_exec`, and it does not store quest-local MCP state.
+This file configures external MCP servers. It does not configure built-in `memory`, `artifact`, or `bash_exec`, and it does not store project-local MCP state.
 
 ### Schema
 
@@ -992,7 +992,7 @@ servers:
 
 - Type: `boolean`
 - Default: new cards start as `false`
-- Meaning: only enabled external MCP servers are exposed to quests or runners.
+- Meaning: only enabled external MCP servers are exposed to projects or runners.
 
 **`servers.<server_id>.transport`**
 

@@ -307,6 +307,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         status: str = "completed",
         baseline_id: str | None = None,
         baseline_variant_id: str | None = None,
+        evaluation_summary: dict[str, Any] | None = None,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return service.record_main_experiment(
@@ -330,6 +331,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             status=status,
             baseline_id=baseline_id,
             baseline_variant_id=baseline_variant_id,
+            evaluation_summary=evaluation_summary,
         )
 
     @server.tool(
@@ -462,6 +464,8 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         next_recommendation: str | None = None,
         dataset_scope: str = "full",
         subset_approval_ref: str | None = None,
+        comparison_baselines: list[dict[str, Any]] | None = None,
+        evaluation_summary: dict[str, Any] | None = None,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return service.record_analysis_slice(
@@ -481,6 +485,8 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             next_recommendation=next_recommendation,
             dataset_scope=dataset_scope,
             subset_approval_ref=subset_approval_ref,
+            comparison_baselines=comparison_baselines,
+            evaluation_summary=evaluation_summary,
         )
 
     @server.tool(name="publish_baseline", description="Publish a quest baseline to the global baseline registry.")

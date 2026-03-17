@@ -1548,11 +1548,16 @@ class QuestService:
             if normalized in seen_files:
                 return
             seen_files.add(normalized)
+            resolved_document_id = document_id or self._path_to_document_id(
+                normalized,
+                quest_root=quest_root,
+                workspace_root=workspace_root,
+            )
             changed_files.append(
                 {
                     "path": normalized,
                     "source": source,
-                    "document_id": document_id,
+                    "document_id": resolved_document_id,
                     "writable": writable,
                 }
             )
@@ -1621,14 +1626,30 @@ class QuestService:
             "changed_files": changed_files[-30:],
         }
 
-    def events(self, quest_id: str, *, after: int = 0, limit: int = 200, tail: bool = False) -> dict:
+    def events(
+        self,
+        quest_id: str,
+        *,
+        after: int = 0,
+        before: int | None = None,
+        limit: int = 200,
+        tail: bool = False,
+    ) -> dict:
         records = self._read_cached_jsonl(self._quest_root(quest_id) / ".ds" / "events.jsonl")
         normalized_limit = max(limit, 0)
-        if tail and normalized_limit > 0:
+        direction = "after"
+        if before is not None:
+            direction = "before"
+            end = max(int(before) - 1, 0)
+            start = max(end - normalized_limit, 0)
+            sliced = records[start:end]
+        elif tail and normalized_limit > 0:
+            direction = "tail"
             start = max(len(records) - normalized_limit, 0)
+            sliced = records[start : start + normalized_limit]
         else:
             start = max(after, 0)
-        sliced = records[start : start + normalized_limit]
+            sliced = records[start : start + normalized_limit]
         enriched = []
         for index, item in enumerate(sliced, start=start + 1):
             enriched.append(
@@ -1638,11 +1659,23 @@ class QuestService:
                     **item,
                 }
             )
-        next_cursor = len(records) if tail else start + len(sliced)
+        if before is not None:
+            next_cursor = start + len(sliced)
+        else:
+            next_cursor = len(records) if tail else start + len(sliced)
+        oldest_cursor = enriched[0]["cursor"] if enriched else None
+        newest_cursor = enriched[-1]["cursor"] if enriched else None
+        if before is not None:
+            has_more = start > 0
+        else:
+            has_more = start > 0 if tail else next_cursor < len(records)
         return {
             "quest_id": quest_id,
             "cursor": next_cursor,
-            "has_more": start > 0 if tail else next_cursor < len(records),
+            "has_more": has_more,
+            "oldest_cursor": oldest_cursor,
+            "newest_cursor": newest_cursor,
+            "direction": direction,
             "events": enriched,
         }
 
@@ -1790,18 +1823,13 @@ class QuestService:
 
         quest_root = self._quest_root(quest_id)
         workspace_root = self.active_workspace_root(quest_root)
-        changed_paths = {
-            item["path"]: item
-            for item in self.workflow(quest_id).get("changed_files", [])
-            if item.get("path")
-        }
         git_status = self._git_status_map(workspace_root)
 
         root_nodes = self._tree_children(
             workspace_root,
             workspace_root,
             git_status=git_status,
-            changed_paths=changed_paths,
+            changed_paths={},
             profile=profile,
         )
         sections = self._group_explorer_sections(root_nodes)
@@ -2035,6 +2063,36 @@ class QuestService:
         if "/" in document_id or document_id.startswith("."):
             return None, None
         return document_id, None
+
+    @staticmethod
+    def _path_to_document_id(
+        path: str | Path | None,
+        *,
+        quest_root: Path,
+        workspace_root: Path,
+    ) -> str | None:
+        if not path:
+            return None
+        try:
+            candidate = Path(path).expanduser()
+            if not candidate.is_absolute():
+                candidate = (workspace_root / candidate).resolve()
+            else:
+                candidate = candidate.resolve()
+        except OSError:
+            return None
+
+        try:
+            relative_to_workspace = candidate.relative_to(workspace_root.resolve()).as_posix()
+            return f"path::{relative_to_workspace}"
+        except ValueError:
+            pass
+
+        try:
+            relative_to_quest = candidate.relative_to(quest_root.resolve()).as_posix()
+            return f"questpath::{relative_to_quest}"
+        except ValueError:
+            return None
 
     @staticmethod
     def _markdown_asset_directory(relative_path: str) -> PurePosixPath:

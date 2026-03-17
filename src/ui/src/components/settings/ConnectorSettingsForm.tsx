@@ -1,8 +1,9 @@
 import {
-  AlertCircle,
+  ArrowLeft,
   ArrowDownLeft,
   ArrowUpRight,
   Ban,
+  BookOpenText,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -10,19 +11,18 @@ import {
   MessageSquareText,
   RadioTower,
   Save,
-  Send,
   ShieldCheck,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Button } from '@/components/ui/button'
 import { HintDot } from '@/components/ui/hint-dot'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { getDocAssetUrl } from '@/lib/docs'
 import { cn } from '@/lib/utils'
 import type {
-  ConfigTestPayload,
-  ConfigValidationPayload,
   ConnectorRecentEvent,
   ConnectorSnapshot,
   ConnectorTargetSnapshot,
@@ -30,20 +30,22 @@ import type {
 } from '@/types'
 
 import { connectorCatalog, type ConnectorCatalogEntry, type ConnectorField, type ConnectorName } from './connectorCatalog'
+import {
+  connectorGuideCatalog,
+  connectorGuideDocHref,
+  localizedGuideText,
+  type ConnectorGuideEntry,
+  type ConnectorGuideLink,
+  type ConnectorGuideStep,
+} from './connectorGuideCatalog'
 import { translateSettingsCatalogText } from './settingsCatalogI18n'
 
 type ConnectorConfigMap = Record<string, Record<string, unknown>>
 
-type DeliveryTargetState = {
-  chat_type: 'direct' | 'group'
-  chat_id: string
-  text: string
-}
-
 const copy = {
   en: {
     title: 'Connectors',
-    subtitle: 'Bind accounts, validate them, and run a live probe from one place.',
+    subtitle: 'Bind accounts and review runtime state from one place.',
     enabled: 'Enabled',
     disabled: 'Disabled',
     testTarget: 'Test target',
@@ -55,11 +57,6 @@ const copy = {
     probeText: 'Message',
     probePlaceholder: 'Optional probe message…',
     save: 'Save',
-    validate: 'Check',
-    testAll: 'Test all',
-    testConnector: 'Send probe',
-    testing: 'Testing…',
-    validating: 'Checking…',
     saving: 'Saving…',
     portal: 'Portal',
     emptyValidation: 'No issues.',
@@ -88,8 +85,6 @@ const copy = {
     deliveryQueued: 'Queued',
     deliveryFailed: 'Failed',
     useTarget: 'Use',
-    validation: 'Check',
-    testResult: 'Test',
     ok: 'Ready',
     needsWork: 'Needs work',
     showLegacy: 'Show legacy fields',
@@ -106,14 +101,44 @@ const copy = {
     selected: 'Selected',
     localMirror: 'Local UI/TUI can still mirror updates in mixed mode.',
     fieldHintPrefix: 'How to fill:',
+    overviewTitle: 'Connector catalog',
+    overviewSubtitle: 'Open one connector at a time. Each detail page is reduced to a step-by-step setup flow.',
+    openConnector: 'Open setup',
+    backToCatalog: 'Back to connectors',
+    docs: 'Docs',
+    localGuide: 'Guide',
+    quickChecks: 'Before you start',
+    requiredFields: 'Key fields',
+    openOfficialDocs: 'Official docs',
+    openLocalDocs: 'Full guide',
+    stepChecklist: 'What to do',
+    stepFields: 'Fill in this step',
+    stepSaveHint: 'Save after finishing this step.',
+    stepProbeHint: 'After the platform-side action is done, return here and check the runtime snapshot.',
+    blockedTitle: 'Before you continue',
+    missingFields: 'Missing now',
+    saveConnectorFirst: 'Save this connector before moving to the next step.',
+    sendPlatformMessageFirst: 'Go to the platform, send one real message or mention, then return here.',
+    enableConnectorFirst: 'Enable this connector and fill the missing credentials first.',
+    detailSubtitle: 'Complete one connector from Step 1 onward instead of editing every platform in one long page.',
+    stepSaveAction: 'Save this connector',
+    connectorReference: 'Connector docs',
+    useDiscoveredTargets: 'Use the runtime-discovered target whenever possible.',
+    setupFlow: 'Setup flow',
+    nextAction: 'Next action',
+    qqStepPlatform: 'Create QQ bot',
+    qqStepCredentials: 'Save connector settings',
+    qqStepBind: 'Send first private message',
+    qqStepSuccess: 'Check and confirm',
     qqQuickSetup: 'Quick setup',
-    qqStepCredentials: 'Credentials',
-    qqStepBind: 'Bind by first message',
-    qqStepSuccess: 'Connected',
     qqStepAdvanced: 'Advanced',
     qqStepDone: 'Done',
     qqStepCurrent: 'Current',
     qqStepPending: 'Pending',
+    qqPlatformHint: 'Create the QQ bot first, then copy the App ID and App Secret into Settings.',
+    qqPlatformChecklist1: 'Open the QQ bot platform and create the bot.',
+    qqPlatformChecklist2: 'Save the App ID and App Secret immediately.',
+    qqPlatformChecklist3: 'Do not fill OpenID manually before the first private message arrives.',
     qqSaveNow: 'Save credentials',
     qqSaveFirst: 'Save the App ID and App Secret first.',
     qqAfterSave: 'After saving, send `/help` or any private message to the bot from QQ.',
@@ -128,6 +153,8 @@ const copy = {
     qqBindChecklist1: 'Open QQ and send one private message to the bot.',
     qqBindChecklist2: 'Wait for DeepScientist to detect the OpenID and save it.',
     qqBindChecklist3: 'Return here and confirm the detected OpenID is no longer empty.',
+    qqProbeLockedUntilOpenId: 'The probe unlocks after the first QQ private message is detected.',
+    qqNeedOpenIdFirst: 'Send the first QQ private message so DeepScientist can detect and save the OpenID.',
     lingzhuQuickSetup: 'Quick setup',
     lingzhuStepEndpoint: 'Gateway endpoint',
     lingzhuStepPlatform: 'Platform values',
@@ -149,10 +176,12 @@ const copy = {
     lingzhuNoProbeYet: 'Run the probe after saving the AK and endpoint values.',
     lingzhuAgentIdHint: 'Use the same agent id on both OpenClaw and Lingzhu.',
     lingzhuPlatformReminder: 'Paste the generated public SSE URL and AK into the Lingzhu platform.',
+    lingzhuCompleteEndpointFirst: 'Finish Step 1 and save the gateway endpoint values first.',
+    lingzhuSavePlatformValuesFirst: 'Save the public URL, AK, and agent values before running the Lingzhu probe.',
   },
   zh: {
     title: '连接器',
-    subtitle: '在一个面板里完成账号绑定、校验与主动测试。',
+    subtitle: '在一个面板里完成账号绑定，并查看运行时状态。',
     enabled: '已启用',
     disabled: '已禁用',
     testTarget: '测试目标',
@@ -164,11 +193,6 @@ const copy = {
     probeText: '消息',
     probePlaceholder: '可选探针消息…',
     save: '保存',
-    validate: '校验',
-    testAll: '全部测试',
-    testConnector: '发送测试消息',
-    testing: '测试中…',
-    validating: '校验中…',
     saving: '保存中…',
     portal: '平台',
     emptyValidation: '没有问题。',
@@ -197,8 +221,6 @@ const copy = {
     deliveryQueued: '队列中',
     deliveryFailed: '发送失败',
     useTarget: '使用',
-    validation: '校验',
-    testResult: '测试',
     ok: '就绪',
     needsWork: '需处理',
     showLegacy: '显示旧式字段',
@@ -215,14 +237,44 @@ const copy = {
     selected: '已选',
     localMirror: '混合模式下，本地 Web/TUI 仍会保留同步视图。',
     fieldHintPrefix: '填写方式:',
+    overviewTitle: '连接器目录',
+    overviewSubtitle: '先选一个 connector 进入，再按 Step 1 / Step 2 / Step 3 完成配置，不再把所有平台堆在一页里。',
+    openConnector: '进入配置',
+    backToCatalog: '返回连接器列表',
+    docs: '文档',
+    localGuide: '指南',
+    quickChecks: '开始前先确认',
+    requiredFields: '关键字段',
+    openOfficialDocs: '官方文档',
+    openLocalDocs: '完整指南',
+    stepChecklist: '本步要做什么',
+    stepFields: '本步填写项',
+    stepSaveHint: '完成本步后先保存。',
+    stepProbeHint: '先完成平台侧操作，再回来查看运行时快照。',
+    blockedTitle: '继续前先完成这些',
+    missingFields: '当前还缺',
+    saveConnectorFirst: '进入下一步前，请先保存当前 connector。',
+    sendPlatformMessageFirst: '请先回到平台侧发送一条真实消息或一次 @ 提及，再回来继续。',
+    enableConnectorFirst: '请先启用当前 connector，并补齐缺少的凭据。',
+    detailSubtitle: '一次只配置一个 connector，从 Step 1 开始，不再在一页里同时编辑所有平台。',
+    stepSaveAction: '保存当前 connector',
+    connectorReference: '连接器文档',
+    useDiscoveredTargets: '能用运行时自动发现目标时，优先直接使用，不要盲填目标 id。',
+    setupFlow: '配置流程',
+    nextAction: '当前下一步',
+    qqStepPlatform: '创建 QQ 机器人',
+    qqStepCredentials: '保存 connector 设置',
+    qqStepBind: '发送第一条私聊',
+    qqStepSuccess: '校验并确认',
     qqQuickSetup: '快速接入',
-    qqStepCredentials: '填写凭据',
-    qqStepBind: '发送首条消息',
-    qqStepSuccess: '连接成功',
     qqStepAdvanced: '高级设置',
     qqStepDone: '已完成',
     qqStepCurrent: '当前',
     qqStepPending: '待完成',
+    qqPlatformHint: '先在 QQ 平台创建机器人，再把 App ID 与 App Secret 复制回来。',
+    qqPlatformChecklist1: '打开 QQ 机器人平台并创建机器人。',
+    qqPlatformChecklist2: '立刻保存 App ID 和 App Secret。',
+    qqPlatformChecklist3: '在第一条私聊到达前，不要手动填写 OpenID。',
     qqSaveNow: '保存凭据',
     qqSaveFirst: '请先保存 App ID 和 App Secret。',
     qqAfterSave: '保存后，请从 QQ 给机器人发送 `/help` 或任意一条私聊消息。',
@@ -237,6 +289,8 @@ const copy = {
     qqBindChecklist1: '打开 QQ，给机器人发送一条私聊消息。',
     qqBindChecklist2: '等待 DeepScientist 自动检测并保存 OpenID。',
     qqBindChecklist3: '回到这里确认 OpenID 已不再为空。',
+    qqProbeLockedUntilOpenId: '检测到第一条 QQ 私聊并拿到 OpenID 后，测试入口才会解锁。',
+    qqNeedOpenIdFirst: '请先发送第一条 QQ 私聊，让 DeepScientist 自动检测并保存 OpenID。',
     lingzhuQuickSetup: '快速接入',
     lingzhuStepEndpoint: '网关端点',
     lingzhuStepPlatform: '平台填写值',
@@ -258,6 +312,8 @@ const copy = {
     lingzhuNoProbeYet: '保存 AK 和端点后，再执行探测。',
     lingzhuAgentIdHint: 'OpenClaw 与 Lingzhu 两侧应使用同一个 agent id。',
     lingzhuPlatformReminder: '请把自动生成的公网 SSE URL 和 AK 填回到 Lingzhu 平台中。',
+    lingzhuCompleteEndpointFirst: '请先完成 Step 1，并保存网关端点配置。',
+    lingzhuSavePlatformValuesFirst: '执行 Lingzhu 探测前，请先保存公网地址、AK 和 agent 等平台值。',
   },
 } satisfies Record<Locale, Record<string, string>>
 
@@ -287,14 +343,6 @@ function normalizeFieldValue(field: ConnectorField, value: string | boolean) {
 
 function snapshotByName(items: ConnectorSnapshot[]) {
   return new Map(items.map((item) => [item.name, item]))
-}
-
-function testItemByName(payload: ConfigTestPayload | null) {
-  const next = new Map<string, NonNullable<ConfigTestPayload['items'][number]>>()
-  for (const item of payload?.items || []) {
-    next.set(item.name, item)
-  }
-  return next
 }
 
 function connectorTargetLabel(target: ConnectorTargetSnapshot) {
@@ -496,45 +544,6 @@ function routingConfig(value: ConnectorConfigMap): Record<string, unknown> {
   return raw && typeof raw === 'object' ? raw : {}
 }
 
-function ResultNotice({
-  title,
-  ok,
-  warnings,
-  errors,
-  empty,
-}: {
-  title: string
-  ok: boolean
-  warnings: string[]
-  errors: string[]
-  empty: string
-}) {
-  return (
-    <section className="border-t border-black/[0.08] pt-4 dark:border-white/[0.08]">
-      <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-        {ok ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertCircle className="h-4 w-4 text-amber-600" />}
-        <span>{title}</span>
-      </div>
-      {errors.length === 0 && warnings.length === 0 ? (
-        <div className="text-sm text-muted-foreground">{empty}</div>
-      ) : (
-        <div className="space-y-2">
-          {errors.map((item) => (
-            <div key={item} className="border-l-2 border-rose-500/60 pl-3 text-sm text-rose-700 dark:text-rose-300">
-              {item}
-            </div>
-          ))}
-          {warnings.map((item) => (
-            <div key={item} className="border-l-2 border-amber-500/60 pl-3 text-sm text-amber-700 dark:text-amber-200">
-              {item}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
-}
-
 function fieldHint(field: ConnectorField, locale: Locale) {
   const t = copy[locale]
   const pieces = [
@@ -719,7 +728,11 @@ function connectorSectionAnchorId(name: ConnectorName, sectionId: string) {
   return `${connectorAnchorId(name)}-section-${sectionId}`
 }
 
-function qqStepAnchorId(step: 'credentials' | 'bind' | 'success' | 'advanced') {
+function connectorGuideStepAnchorId(name: ConnectorName, stepId: string) {
+  return `${connectorAnchorId(name)}-step-${stepId}`
+}
+
+function qqStepAnchorId(step: 'platform' | 'credentials' | 'bind' | 'success' | 'advanced') {
   return `connector-qq-step-${step}`
 }
 
@@ -735,6 +748,29 @@ function findConnectorField(entry: ConnectorCatalogEntry, key: string) {
     }
   }
   return null
+}
+
+function findConnectorFields(entry: ConnectorCatalogEntry, keys: string[]) {
+  return keys
+    .map((key) => findConnectorField(entry, key))
+    .filter(Boolean) as ConnectorField[]
+}
+
+function connectorFieldReady(field: ConnectorField | null, raw: unknown) {
+  if (!field) {
+    return String(raw || '').trim().length > 0
+  }
+  if (field.kind === 'boolean') {
+    return typeof raw === 'boolean'
+  }
+  if (field.kind === 'list') {
+    return Array.isArray(raw) ? raw.length > 0 : String(raw || '').trim().length > 0
+  }
+  return String(raw || '').trim().length > 0
+}
+
+function missingConnectorFields(entry: ConnectorCatalogEntry, keys: string[], config: Record<string, unknown>) {
+  return findConnectorFields(entry, keys).filter((field) => !connectorFieldReady(field, config[field.key]))
 }
 
 function AnchorJumpButton({
@@ -779,78 +815,448 @@ function StepStateBadge({
   )
 }
 
+function StepBlockerNotice({
+  locale,
+  description,
+  fields,
+}: {
+  locale: Locale
+  description: string
+  fields?: ConnectorField[]
+}) {
+  const t = copy[locale]
+
+  return (
+    <div className="mt-5 rounded-[22px] border border-amber-500/25 bg-amber-500/8 px-4 py-4 dark:border-amber-300/20 dark:bg-amber-300/8">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800 dark:text-amber-200">{t.blockedTitle}</div>
+      <div className="mt-2 text-sm leading-6 text-amber-900 dark:text-amber-100">{description}</div>
+      {fields?.length ? (
+        <div className="mt-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-800/80 dark:text-amber-200/80">{t.missingFields}</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {fields.map((field) => (
+              <span
+                key={field.key}
+                className="rounded-full border border-amber-500/25 bg-white/70 px-3 py-1 text-xs text-amber-900 dark:border-amber-300/20 dark:bg-white/[0.05] dark:text-amber-100"
+              >
+                {translateSettingsCatalogText(locale, field.label)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ConnectorGuideLinkButton({
+  link,
+  locale,
+  className,
+}: {
+  link: ConnectorGuideLink
+  locale: Locale
+  className?: string
+}) {
+  const label = localizedGuideText(locale, link.label)
+  const sharedClassName = cn(
+    'inline-flex items-center gap-2 rounded-full border border-black/[0.08] bg-white/[0.52] px-3 py-2 text-sm transition hover:border-black/[0.14] hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.04]',
+    className
+  )
+
+  if (link.kind === 'external') {
+    return (
+      <a href={link.href} target="_blank" rel="noreferrer" className={sharedClassName}>
+        <ArrowUpRight className="h-4 w-4" />
+        {label}
+      </a>
+    )
+  }
+
+  return (
+    <Link to={connectorGuideDocHref(locale, link)} className={sharedClassName}>
+      <BookOpenText className="h-4 w-4" />
+      {label}
+    </Link>
+  )
+}
+
+function ConnectorGuideImageCard({
+  image,
+  locale,
+}: {
+  image: NonNullable<ConnectorGuideStep['image']>
+  locale: Locale
+}) {
+  return (
+    <div className="overflow-hidden rounded-[22px] border border-black/[0.08] bg-white/[0.52] dark:border-white/[0.12] dark:bg-white/[0.04]">
+      <img
+        src={getDocAssetUrl(image.assetPath)}
+        alt={localizedGuideText(locale, image.alt)}
+        className="block w-full bg-white object-cover"
+        loading="lazy"
+      />
+      {image.caption ? (
+        <div className="border-t border-black/[0.06] px-4 py-3 text-xs leading-5 text-muted-foreground dark:border-white/[0.08]">
+          {localizedGuideText(locale, image.caption)}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ConnectorOverviewCard({
+  entry,
+  locale,
+  config,
+  onOpenConnector,
+}: {
+  entry: ConnectorCatalogEntry
+  locale: Locale
+  config: Record<string, unknown>
+  onOpenConnector: (connectorName: ConnectorName) => void
+}) {
+  const t = copy[locale]
+  const Icon = entry.icon
+  const enabled = Boolean(config.enabled)
+  const needsPublicNetwork = entry.name === 'lingzhu'
+  const publicRequirementLabel =
+    locale === 'zh'
+      ? needsPublicNetwork
+        ? '公网：需要'
+        : '公网：不需要'
+      : needsPublicNetwork
+        ? 'Public: required'
+        : 'Public: not needed'
+
+  return (
+    <article className="rounded-[28px] border border-black/[0.08] bg-white/[0.5] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[16px] border border-black/[0.08] bg-white/[0.56] dark:border-white/[0.12] dark:bg-white/[0.04]">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold tracking-tight">{translateSettingsCatalogText(locale, entry.label)}</h3>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>{enabled ? t.enabled : t.disabled}</span>
+              <span>{publicRequirementLabel}</span>
+            </div>
+          </div>
+        </div>
+
+        <Button onClick={() => onOpenConnector(entry.name)} className="shrink-0">
+          {t.openConnector}
+        </Button>
+      </div>
+    </article>
+  )
+}
+
 function ConnectorCard({
   entry,
   locale,
   config,
   snapshot,
-  testItem,
   saving,
   isDirty,
-  testing,
-  deliveryTarget,
   onUpdateField,
   onUpdateConnector,
-  onUpdateDelivery,
   onSave,
-  onTest,
   onJumpToAnchor,
 }: {
   entry: ConnectorCatalogEntry
   locale: Locale
   config: Record<string, unknown>
   snapshot?: ConnectorSnapshot
-  testItem?: ConfigTestPayload['items'][number]
   saving: boolean
   isDirty: boolean
-  testing: boolean
-  deliveryTarget: DeliveryTargetState
   onUpdateField: (connectorName: ConnectorName, key: string, value: unknown) => void
   onUpdateConnector: (connectorName: ConnectorName, patch: Record<string, unknown>) => void
-  onUpdateDelivery: (connectorName: ConnectorName, patch: Partial<DeliveryTargetState>) => void
   onSave: () => void
-  onTest: (connectorName: ConnectorName) => void
   onJumpToAnchor?: (anchorId: string) => void
 }) {
   const t = copy[locale]
   const Icon = entry.icon
   const enabled = Boolean(config.enabled)
+  const guide = connectorGuideCatalog[entry.name]
   const [legacyExpanded, setLegacyExpanded] = useState(false)
   const [qqAdvancedExpanded, setQqAdvancedExpanded] = useState(false)
-  const chatIdPlaceholder = entry.name === 'qq' ? (deliveryTarget.chat_type === 'group' ? 'group_openid' : 'openid') : '123456789'
   const cardAnchorId = connectorAnchorId(entry.name)
 
-  const renderGenericSections = () => (
-    <>
-      {entry.sections.map((section) => {
-        const sectionAnchorId = connectorSectionAnchorId(entry.name, section.id)
-        return (
-          <section
-            key={section.id}
-            id={sectionAnchorId}
-            className="border-t border-black/[0.06] pt-4 first:border-t-0 first:pt-0 dark:border-white/[0.08]"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span>{translateSettingsCatalogText(locale, section.title)}</span>
-                <HintDot label={translateSettingsCatalogText(locale, section.description)} />
-                <AnchorJumpButton anchorId={sectionAnchorId} onJumpToAnchor={onJumpToAnchor} />
-              </div>
-              {section.variant === 'legacy' ? (
-                <button
-                  type="button"
-                  onClick={() => setLegacyExpanded((current) => !current)}
-                  className="rounded-full border border-black/[0.08] bg-white/[0.44] px-3 py-1 text-[10px] tracking-[0.14em] text-muted-foreground transition hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]"
-                >
-                  {legacyExpanded ? t.hideLegacy : t.showLegacy}
-                </button>
+  const renderGuidedSetup = () => {
+    const legacyFields = entry.sections.flatMap((section) => (section.variant === 'legacy' ? section.fields : []))
+    const missingRequiredFields = missingConnectorFields(entry, guide.requiredFieldKeys, config)
+    const requiredReady = missingRequiredFields.length === 0
+    const settingsReady = Boolean(enabled && requiredReady)
+    const savedReady = Boolean(settingsReady && !isDirty)
+    const interactionReady = Boolean((snapshot?.discovered_targets?.length ?? 0) > 0 || snapshot?.main_chat_id)
+    const verificationReady = interactionReady
+    const stepSummaries = guide.steps.map((step, index) => {
+      const state: 'done' | 'current' | 'pending' =
+        step.id === 'platform'
+          ? requiredReady
+            ? 'done'
+            : 'current'
+          : step.id === 'settings'
+            ? !requiredReady
+              ? 'pending'
+              : savedReady
+                ? 'done'
+                : 'current'
+            : !savedReady
+              ? 'pending'
+              : verificationReady
+                ? 'done'
+                : 'current'
+      return {
+        ...step,
+        index,
+        state,
+      }
+    })
+    const nextStep = stepSummaries.find((step) => step.state !== 'done') || stepSummaries[stepSummaries.length - 1]
+    const verifyBlockedDescription = !savedReady ? t.saveConnectorFirst : !interactionReady ? t.sendPlatformMessageFirst : ''
+
+    return (
+      <div className="space-y-5">
+        <section className="rounded-[24px] border border-black/[0.08] bg-white/[0.48] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.setupFlow}</div>
+              <h4 className="mt-2 text-lg font-semibold tracking-tight">{localizedGuideText(locale, guide.summary)}</h4>
+            </div>
+            {nextStep ? <StepStateBadge state={nextStep.state} locale={locale} /> : null}
+          </div>
+
+          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+            {stepSummaries.map((step) => (
+              <button
+                key={`summary:${step.id}`}
+                type="button"
+                onClick={() => onJumpToAnchor?.(connectorGuideStepAnchorId(entry.name, step.id))}
+                className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-3 text-left transition hover:border-black/[0.12] dark:border-white/[0.08] dark:bg-white/[0.04]"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Step {step.index + 1}
+                  </span>
+                  <StepStateBadge state={step.state} locale={locale} />
+                </div>
+                <div className="mt-2 text-sm font-medium text-foreground">{localizedGuideText(locale, step.title)}</div>
+              </button>
+            ))}
+          </div>
+
+          {nextStep ? (
+            <div className="mt-5 rounded-[20px] border border-black/[0.06] bg-black/[0.02] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.nextAction}</div>
+              <div className="mt-2 text-sm font-medium text-foreground">{localizedGuideText(locale, nextStep.title)}</div>
+              <div className="mt-1 text-sm leading-6 text-muted-foreground">{localizedGuideText(locale, nextStep.description)}</div>
+              {nextStep.id === 'platform' && missingRequiredFields.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {missingRequiredFields.map((field) => (
+                    <span
+                      key={`missing:${field.key}`}
+                      className="rounded-full border border-black/[0.08] bg-white/[0.58] px-3 py-1.5 text-xs dark:border-white/[0.12] dark:bg-white/[0.04]"
+                    >
+                      {translateSettingsCatalogText(locale, field.label)}
+                    </span>
+                  ))}
+                </div>
               ) : null}
             </div>
-            {section.variant !== 'legacy' || legacyExpanded ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                {section.fields.map((field) => (
+          ) : null}
+        </section>
+
+        {guide.steps.map((step, index) => {
+          const stepAnchorId = connectorGuideStepAnchorId(entry.name, step.id)
+          const stepFields = findConnectorFields(entry, step.fieldKeys || [])
+          const stepLinks = step.links && step.links.length > 0 ? step.links : index === 0 ? guide.links : []
+          const state = stepSummaries[index]?.state || 'pending'
+
+          return (
+            <section
+              key={step.id}
+              id={stepAnchorId}
+              className="rounded-[24px] border border-black/[0.08] bg-white/[0.48] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]"
+            >
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <span>{`Step ${index + 1}`}</span>
+                    <AnchorJumpButton anchorId={stepAnchorId} onJumpToAnchor={onJumpToAnchor} />
+                  </div>
+                  <h4 className="mt-2 text-lg font-semibold tracking-tight">{localizedGuideText(locale, step.title)}</h4>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">{localizedGuideText(locale, step.description)}</p>
+                </div>
+                <StepStateBadge state={state} locale={locale} />
+              </div>
+
+              {stepLinks.length ? (
+                <div className="mt-5 flex flex-wrap gap-2">
+                  {stepLinks.map((link) => (
+                    <ConnectorGuideLinkButton
+                      key={`${step.id}:${link.kind}:${localizedGuideText(locale, link.label)}`}
+                      link={link}
+                      locale={locale}
+                    />
+                  ))}
+                </div>
+              ) : null}
+
+              {step.image ? (
+                <div className="mt-5">
+                  <ConnectorGuideImageCard image={step.image} locale={locale} />
+                </div>
+              ) : null}
+
+              {step.checklist?.length ? (
+                <div className="mt-5 rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.stepChecklist}</div>
+                  <ol className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+                    {step.checklist.map((item, checklistIndex) => (
+                      <li key={`${step.id}:${checklistIndex}`}>{checklistIndex + 1}. {localizedGuideText(locale, item)}</li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+
+              {step.id === 'settings' && !settingsReady ? (
+                <StepBlockerNotice locale={locale} description={t.enableConnectorFirst} fields={missingRequiredFields} />
+              ) : null}
+
+              {step.id === 'verify' && verifyBlockedDescription ? (
+                <StepBlockerNotice locale={locale} description={verifyBlockedDescription} />
+              ) : null}
+
+              {step.includeEnabledToggle || stepFields.length ? (
+                <div className="mt-5">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.stepFields}</div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {step.includeEnabledToggle ? (
+                      <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+                        <label className="flex min-h-[44px] items-center justify-between gap-4">
+                          <span className="text-sm font-medium">{t.enabled}</span>
+                          <input
+                            type="checkbox"
+                            checked={enabled}
+                            onChange={(event) => onUpdateField(entry.name, 'enabled', event.target.checked)}
+                            className="h-4 w-4 rounded border-black/20 text-foreground"
+                          />
+                        </label>
+                        <div className="mt-3 text-xs leading-5 text-muted-foreground">
+                          {translateSettingsCatalogText(locale, entry.deliveryNote)}
+                        </div>
+                      </div>
+                    ) : null}
+                    {stepFields.map((field) => (
+                      <ConnectorFieldControl
+                        key={`${step.id}:${field.key}`}
+                        field={field}
+                        config={config}
+                        locale={locale}
+                        onChange={(key, value) => onUpdateField(entry.name, key, value)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {step.id === 'settings' ? (
+                <div className="mt-5 flex flex-col gap-3 rounded-[20px] border border-black/[0.06] bg-black/[0.02] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03] md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm text-muted-foreground">{settingsReady ? t.stepSaveHint : t.enableConnectorFirst}</div>
+                  <Button onClick={onSave} disabled={saving || !settingsReady}>
+                    <Save className="h-4 w-4" />
+                    {saving ? t.saving : t.stepSaveAction}
+                  </Button>
+                </div>
+              ) : null}
+
+              {step.id === 'verify' ? (
+                <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+                  <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      <MessageSquareText className="h-4 w-4 text-muted-foreground" />
+                      <span>{t.discoveredTargets}</span>
+                    </div>
+                    <div className="mt-2 text-xs leading-5 text-muted-foreground">{t.useDiscoveredTargets}</div>
+                    <div className="mt-4">
+                      {snapshot?.discovered_targets?.length ? (
+                        <div className="flex flex-wrap gap-2">
+                          {snapshot.discovered_targets.map((target) => (
+                            <span
+                              key={target.conversation_id}
+                              className="rounded-full border border-black/[0.08] bg-white/[0.44] px-3 py-2 text-xs text-muted-foreground dark:border-white/[0.12] dark:bg-white/[0.03]"
+                            >
+                              {connectorTargetLabel(target)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-sm text-muted-foreground">{t.noTargets}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+                    <div className="text-sm font-medium">{t.snapshot}</div>
+                    <div className="mt-2 text-xs leading-5 text-muted-foreground">{t.stepProbeHint}</div>
+                    <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                      <div>
+                        <span className="text-foreground">{t.transportLabel}:</span>{' '}
+                        {translateSettingsCatalogText(locale, snapshot?.transport || snapshot?.display_mode || snapshot?.mode || 'default')}
+                      </div>
+                      <div>
+                        <span className="text-foreground">{t.connection}:</span>{' '}
+                        {translateSettingsCatalogText(locale, snapshot?.connection_state || 'idle')}
+                      </div>
+                      <div>
+                        <span className="text-foreground">{t.auth}:</span>{' '}
+                        {translateSettingsCatalogText(locale, snapshot?.auth_state || 'idle')}
+                      </div>
+                      <div>
+                        <span className="text-foreground">{t.discoveredTargets}:</span> {snapshot?.target_count ?? snapshot?.discovered_targets?.length ?? 0}
+                      </div>
+                      {interactionReady ? (
+                        <div className="text-emerald-700 dark:text-emerald-300">{t.ok}</div>
+                      ) : (
+                        <div>{t.noTargets}</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          )
+        })}
+
+        {legacyFields.length ? (
+          <section className="rounded-[24px] border border-black/[0.08] bg-white/[0.48] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]">
+            <button
+              type="button"
+              onClick={() => setLegacyExpanded((current) => !current)}
+              className="flex w-full items-start justify-between gap-4 text-left"
+            >
+              <div>
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  <span>{t.showLegacy}</span>
+                  <AnchorJumpButton anchorId={connectorSectionAnchorId(entry.name, 'legacy')} onJumpToAnchor={onJumpToAnchor} />
+                </div>
+                <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.showLegacy}</h4>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {translateSettingsCatalogText(
+                    locale,
+                    entry.sections.find((section) => section.variant === 'legacy')?.description || ''
+                  )}
+                </p>
+              </div>
+              {legacyExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+            </button>
+            {legacyExpanded ? (
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                {legacyFields.map((field) => (
                   <ConnectorFieldControl
-                    key={field.key}
+                    key={`legacy:${field.key}`}
                     field={field}
                     config={config}
                     locale={locale}
@@ -860,12 +1266,17 @@ function ConnectorCard({
               </div>
             ) : null}
           </section>
-        )
-      })}
-    </>
-  )
+        ) : null}
+      </div>
+    )
+  }
 
   const renderQqSetup = () => {
+    const qqGuide = connectorGuideCatalog.qq
+    const platformStep = qqGuide.steps.find((step) => step.id === 'platform') || null
+    const bindStep = qqGuide.steps.find((step) => step.id === 'bind') || null
+    const transportField = findConnectorField(entry, 'transport')
+    const botNameField = findConnectorField(entry, 'bot_name')
     const appIdField = findConnectorField(entry, 'app_id')
     const appSecretField = findConnectorField(entry, 'app_secret')
     const mainChatField = findConnectorField(entry, 'main_chat_id')
@@ -884,55 +1295,60 @@ function ConnectorCard({
       findConnectorField(entry, 'enable_file_upload_experimental'),
     ].filter(Boolean) as ConnectorField[]
 
-    const appId = String(config.app_id || '').trim()
-    const appSecret = String(config.app_secret || '').trim()
     const mainChatId = String(config.main_chat_id || snapshot?.main_chat_id || '').trim()
-    const credentialsReady = Boolean(enabled && appId && appSecret)
+    const qqMissingFields = missingConnectorFields(entry, ['app_id', 'app_secret'], config)
+    const platformReady = qqMissingFields.length === 0
+    const credentialsReady = Boolean(enabled && platformReady)
     const saveReady = Boolean(credentialsReady && !isDirty)
     const bindReady = Boolean(mainChatId)
+    const successReady = bindReady
     const stepCards: Array<{
-      key: 'credentials' | 'bind' | 'success'
+      key: 'platform' | 'credentials' | 'bind' | 'success'
       title: string
       state: 'done' | 'current' | 'pending'
     }> = [
       {
-        key: 'credentials' as const,
-        title: t.qqStepCredentials,
-        state: credentialsReady ? (saveReady ? 'done' : 'current') : 'current',
+        key: 'platform',
+        title: t.qqStepPlatform,
+        state: platformReady ? 'done' : 'current',
       },
       {
-        key: 'bind' as const,
+        key: 'credentials',
+        title: t.qqStepCredentials,
+        state: !platformReady ? 'pending' : saveReady ? 'done' : 'current',
+      },
+      {
+        key: 'bind',
         title: t.qqStepBind,
         state: bindReady ? 'done' : saveReady ? 'current' : 'pending',
       },
       {
-        key: 'success' as const,
+        key: 'success',
         title: t.qqStepSuccess,
-        state: bindReady ? 'done' : 'pending',
+        state: successReady ? 'done' : bindReady ? 'current' : 'pending',
       },
     ]
+    const nextQqStep = stepCards.find((step) => step.state !== 'done') || stepCards[stepCards.length - 1]
 
     return (
       <div className="space-y-5">
         <section
-          id={qqStepAnchorId('credentials')}
+          id={qqStepAnchorId('platform')}
           className="rounded-[24px] border border-black/[0.08] bg-white/[0.48] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]"
         >
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 <span>{t.qqQuickSetup}</span>
-                <AnchorJumpButton anchorId={qqStepAnchorId('credentials')} onJumpToAnchor={onJumpToAnchor} />
+                <AnchorJumpButton anchorId={qqStepAnchorId('platform')} onJumpToAnchor={onJumpToAnchor} />
               </div>
-              <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.qqStepCredentials}</h4>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {translateSettingsCatalogText(locale, entry.subtitle)}
-              </p>
+              <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.qqStepPlatform}</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.qqPlatformHint}</p>
             </div>
-            <StepStateBadge state={credentialsReady ? (saveReady ? 'done' : 'current') : 'current'} locale={locale} />
+            <StepStateBadge state={platformReady ? 'done' : 'current'} locale={locale} />
           </div>
 
-          <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <div className="mt-5 grid gap-3 lg:grid-cols-4">
             {stepCards.map((step, index) => (
               <button
                 key={step.key}
@@ -951,6 +1367,73 @@ function ConnectorCard({
             ))}
           </div>
 
+          {nextQqStep ? (
+            <div className="mt-5 rounded-[20px] border border-black/[0.06] bg-black/[0.02] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.nextAction}</div>
+              <div className="mt-2 text-sm font-medium text-foreground">{nextQqStep.title}</div>
+              {nextQqStep.key === 'platform' && qqMissingFields.length ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {qqMissingFields.map((field) => (
+                    <span
+                      key={`qq-missing:${field.key}`}
+                      className="rounded-full border border-black/[0.08] bg-white/[0.58] px-3 py-1.5 text-xs dark:border-white/[0.12] dark:bg-white/[0.04]"
+                    >
+                      {translateSettingsCatalogText(locale, field.label)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {qqGuide.links.map((link) => (
+              <ConnectorGuideLinkButton
+                key={`qq-platform:${link.kind}:${localizedGuideText(locale, link.label)}`}
+                link={link}
+                locale={locale}
+              />
+            ))}
+          </div>
+
+          {platformStep?.image ? (
+            <div className="mt-5">
+              <ConnectorGuideImageCard image={platformStep.image} locale={locale} />
+            </div>
+          ) : null}
+
+          <div className="mt-5 rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{t.stepChecklist}</div>
+            <ol className="mt-3 space-y-2 text-sm leading-6 text-muted-foreground">
+              <li>1. {t.qqPlatformChecklist1}</li>
+              <li>2. {t.qqPlatformChecklist2}</li>
+              <li>3. {t.qqPlatformChecklist3}</li>
+            </ol>
+          </div>
+        </section>
+
+        <section
+          id={qqStepAnchorId('credentials')}
+          className="rounded-[24px] border border-black/[0.08] bg-white/[0.48] p-5 dark:border-white/[0.12] dark:bg-white/[0.03]"
+        >
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                <span>Step 2</span>
+                <AnchorJumpButton anchorId={qqStepAnchorId('credentials')} onJumpToAnchor={onJumpToAnchor} />
+              </div>
+              <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.qqStepCredentials}</h4>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {t.qqSaveFirst}
+              </p>
+            </div>
+            <StepStateBadge state={!platformReady ? 'pending' : saveReady ? 'done' : 'current'} locale={locale} />
+          </div>
+
+          {!platformReady ? (
+            <StepBlockerNotice locale={locale} description={t.enableConnectorFirst} fields={qqMissingFields} />
+          ) : null}
+
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
               <label className="flex min-h-[44px] items-center justify-between gap-4">
@@ -966,6 +1449,22 @@ function ConnectorCard({
                 {translateSettingsCatalogText(locale, entry.deliveryNote)}
               </div>
             </div>
+            {transportField ? (
+              <ConnectorFieldControl
+                field={transportField}
+                config={{ ...config, transport: String(config.transport || 'gateway_direct') || 'gateway_direct' }}
+                locale={locale}
+                onChange={() => undefined}
+              />
+            ) : null}
+            {botNameField ? (
+              <ConnectorFieldControl
+                field={botNameField}
+                config={config}
+                locale={locale}
+                onChange={(key, value) => onUpdateField(entry.name, key, value)}
+              />
+            ) : null}
             {appIdField ? (
               <ConnectorFieldControl
                 field={appIdField}
@@ -1000,7 +1499,7 @@ function ConnectorCard({
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                <span>Step 2</span>
+                <span>Step 3</span>
                 <AnchorJumpButton anchorId={qqStepAnchorId('bind')} onJumpToAnchor={onJumpToAnchor} />
               </div>
               <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.qqStepBind}</h4>
@@ -1011,8 +1510,13 @@ function ConnectorCard({
             <StepStateBadge state={bindReady ? 'done' : saveReady ? 'current' : 'pending'} locale={locale} />
           </div>
 
+          {!saveReady ? (
+            <StepBlockerNotice locale={locale} description={t.saveConnectorFirst} />
+          ) : null}
+
           <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="space-y-3">
+              {bindStep?.image ? <ConnectorGuideImageCard image={bindStep.image} locale={locale} /> : null}
               <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <MessageSquareText className="h-4 w-4 text-muted-foreground" />
@@ -1064,29 +1568,56 @@ function ConnectorCard({
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
             <div>
               <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                <span>Step 3</span>
+                <span>Step 4</span>
                 <AnchorJumpButton anchorId={qqStepAnchorId('success')} onJumpToAnchor={onJumpToAnchor} />
               </div>
               <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.qqStepSuccess}</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                {bindReady ? t.qqConnectedSummary : t.qqWaitingOpenId}
+                {successReady ? t.qqConnectedSummary : bindReady ? t.stepProbeHint : t.qqWaitingOpenId}
               </p>
             </div>
-            <StepStateBadge state={bindReady ? 'done' : 'pending'} locale={locale} />
+            <StepStateBadge state={successReady ? 'done' : bindReady ? 'current' : 'pending'} locale={locale} />
           </div>
 
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.transportLabel}</div>
-              <div className="mt-2 text-sm font-medium">gateway_direct</div>
+          {!bindReady ? (
+            <StepBlockerNotice locale={locale} description={t.qqNeedOpenIdFirst} />
+          ) : null}
+
+          <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.transportLabel}</div>
+                <div className="mt-2 text-sm font-medium">gateway_direct</div>
+              </div>
+              <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.boundTarget}</div>
+                <div className="mt-2 break-all text-sm font-medium">{mainChatId || '—'}</div>
+              </div>
+              <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.discoveredTargets}</div>
+                <div className="mt-2 text-sm font-medium">{snapshot?.target_count ?? snapshot?.discovered_targets?.length ?? 0}</div>
+              </div>
             </div>
-            <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.boundTarget}</div>
-              <div className="mt-2 break-all text-sm font-medium">{mainChatId || '—'}</div>
-            </div>
-            <div className="rounded-[20px] border border-black/[0.06] bg-white/[0.62] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.04]">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{t.discoveredTargets}</div>
-              <div className="mt-2 text-sm font-medium">{snapshot?.target_count ?? snapshot?.discovered_targets?.length ?? 0}</div>
+
+            <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
+              <div className="text-sm font-medium">{t.snapshot}</div>
+              <div className="mt-2 text-xs leading-5 text-muted-foreground">{t.stepProbeHint}</div>
+              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
+                <div>
+                  <span className="text-foreground">{t.connection}:</span>{' '}
+                  {translateSettingsCatalogText(locale, snapshot?.connection_state || 'idle')}
+                </div>
+                <div>
+                  <span className="text-foreground">{t.auth}:</span>{' '}
+                  {translateSettingsCatalogText(locale, snapshot?.auth_state || 'idle')}
+                </div>
+                <div>
+                  <span className="text-foreground">{t.discoveredTargets}:</span> {snapshot?.target_count ?? snapshot?.discovered_targets?.length ?? 0}
+                </div>
+                <div>
+                  <span className="text-foreground">{t.boundTarget}:</span> {mainChatId || '—'}
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -1150,6 +1681,10 @@ function ConnectorCard({
   }
 
   const renderLingzhuSetup = () => {
+    const lingzhuGuide = connectorGuideCatalog.lingzhu
+    const endpointGuideStep = lingzhuGuide.steps.find((step) => step.id === 'endpoint') || null
+    const platformGuideStep = lingzhuGuide.steps.find((step) => step.id === 'platform') || null
+    const probeGuideStep = lingzhuGuide.steps.find((step) => step.id === 'probe') || null
     const localHostField = findConnectorField(entry, 'local_host')
     const gatewayPortField = findConnectorField(entry, 'gateway_port')
     const publicBaseUrlField = findConnectorField(entry, 'public_base_url')
@@ -1177,8 +1712,6 @@ function ConnectorCard({
     ].filter(Boolean) as ConnectorField[]
     const snapshotDetails =
       snapshot?.details && typeof snapshot.details === 'object' ? (snapshot.details as Record<string, unknown>) : {}
-    const testDetails =
-      testItem?.details && typeof testItem.details === 'object' ? (testItem.details as Record<string, unknown>) : {}
     const localHealthUrl =
       typeof snapshotDetails.health_url === 'string' && snapshotDetails.health_url
         ? String(snapshotDetails.health_url)
@@ -1192,25 +1725,27 @@ function ConnectorCard({
         ? String(snapshotDetails.public_endpoint_url)
         : lingzhuPublicSseUrl(config)
     const generatedConfig =
-      typeof testDetails.generated_openclaw_config === 'string' && testDetails.generated_openclaw_config
-        ? String(testDetails.generated_openclaw_config)
-        : typeof snapshotDetails.generated_openclaw_config === 'string' && snapshotDetails.generated_openclaw_config
-          ? String(snapshotDetails.generated_openclaw_config)
-          : lingzhuGeneratedOpenclawConfig(config)
+      typeof snapshotDetails.generated_openclaw_config === 'string' && snapshotDetails.generated_openclaw_config
+        ? String(snapshotDetails.generated_openclaw_config)
+        : lingzhuGeneratedOpenclawConfig(config)
     const generatedCurl =
-      typeof testDetails.generated_curl === 'string' && testDetails.generated_curl
-        ? String(testDetails.generated_curl)
-        : typeof snapshotDetails.generated_curl === 'string' && snapshotDetails.generated_curl
-          ? String(snapshotDetails.generated_curl)
-          : lingzhuGeneratedCurl(config)
+      typeof snapshotDetails.generated_curl === 'string' && snapshotDetails.generated_curl
+        ? String(snapshotDetails.generated_curl)
+        : lingzhuGeneratedCurl(config)
     const supportedCommandsRaw =
-      (Array.isArray(testDetails.supported_commands) ? testDetails.supported_commands : null) ||
-      (Array.isArray(snapshotDetails.supported_commands) ? snapshotDetails.supported_commands : null) ||
-      []
+      (Array.isArray(snapshotDetails.supported_commands) ? snapshotDetails.supported_commands : null) || []
     const supportedCommands = supportedCommandsRaw.map((item) => String(item)).filter(Boolean)
     const authAk = lingzhuConfigString(config, 'auth_ak')
     const publicReady = Boolean(lingzhuPublicBaseUrl(config))
-    const endpointReady = Boolean(enabled && authAk && publicReady)
+    const endpointReady = Boolean(enabled && publicReady)
+    const platformReady = Boolean(endpointReady && authAk)
+    const runtimeReady = Boolean(
+      platformReady && (
+        (snapshot?.target_count ?? snapshot?.discovered_targets?.length ?? 0) > 0
+        || (typeof snapshot?.connection_state === 'string' && snapshot.connection_state.trim() && snapshot.connection_state !== 'idle')
+        || (typeof snapshot?.auth_state === 'string' && snapshot.auth_state.trim() && snapshot.auth_state !== 'idle')
+      )
+    )
 
     return (
       <div className="space-y-5">
@@ -1227,8 +1762,24 @@ function ConnectorCard({
               <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.lingzhuStepEndpoint}</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.lingzhuNeedPublicIp}</p>
             </div>
-            <StepStateBadge state={endpointReady ? 'done' : enabled ? 'current' : 'pending'} locale={locale} />
+            <StepStateBadge state={endpointReady ? 'done' : 'current'} locale={locale} />
           </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            {lingzhuGuide.links.map((link) => (
+              <ConnectorGuideLinkButton
+                key={`lingzhu-endpoint:${link.kind}:${localizedGuideText(locale, link.label)}`}
+                link={link}
+                locale={locale}
+              />
+            ))}
+          </div>
+
+          {endpointGuideStep?.image ? (
+            <div className="mt-5">
+              <ConnectorGuideImageCard image={endpointGuideStep.image} locale={locale} />
+            </div>
+          ) : null}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
@@ -1270,15 +1821,15 @@ function ConnectorCard({
           </div>
 
           <div className="mt-5 flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => onUpdateConnector(entry.name, { local_host: '127.0.0.1', gateway_port: '18789' })}
-                >
-                  {t.lingzhuUseLocalDefaults}
-                </Button>
-            <Button onClick={onSave} disabled={saving || !enabled}>
+            <Button
+              variant="secondary"
+              onClick={() => onUpdateConnector(entry.name, { local_host: '127.0.0.1', gateway_port: '18789' })}
+            >
+              {t.lingzhuUseLocalDefaults}
+            </Button>
+            <Button onClick={onSave} disabled={saving || !endpointReady}>
               <Save className="h-4 w-4" />
-              {saving ? t.saving : t.save}
+              {saving ? t.saving : t.stepSaveAction}
             </Button>
           </div>
         </section>
@@ -1296,8 +1847,18 @@ function ConnectorCard({
               <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.lingzhuGeneratedValues}</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.lingzhuPlatformReminder}</p>
             </div>
-            <StepStateBadge state={endpointReady ? 'current' : 'pending'} locale={locale} />
+            <StepStateBadge state={!endpointReady ? 'pending' : platformReady ? 'done' : 'current'} locale={locale} />
           </div>
+
+          {!endpointReady ? (
+            <StepBlockerNotice locale={locale} description={t.lingzhuCompleteEndpointFirst} />
+          ) : null}
+
+          {platformGuideStep?.image ? (
+            <div className="mt-5">
+              <ConnectorGuideImageCard image={platformGuideStep.image} locale={locale} />
+            </div>
+          ) : null}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             {authAkField ? (
@@ -1364,6 +1925,13 @@ function ConnectorCard({
               <Textarea value={generatedCurl} readOnly className="mt-3 min-h-[240px] rounded-[18px] border-black/[0.08] bg-white/[0.44] font-mono text-xs shadow-none dark:bg-white/[0.03]" />
             </div>
           </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <Button onClick={onSave} disabled={saving || !platformReady}>
+              <Save className="h-4 w-4" />
+              {saving ? t.saving : t.stepSaveAction}
+            </Button>
+          </div>
         </section>
 
         <section
@@ -1379,8 +1947,18 @@ function ConnectorCard({
               <h4 className="mt-2 text-lg font-semibold tracking-tight">{t.lingzhuProbeResult}</h4>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">{t.lingzhuSnapshotHint}</p>
             </div>
-            <StepStateBadge state={testItem?.ok ? 'done' : endpointReady ? 'current' : 'pending'} locale={locale} />
+            <StepStateBadge state={runtimeReady ? 'done' : platformReady ? 'current' : 'pending'} locale={locale} />
           </div>
+
+          {!platformReady ? (
+            <StepBlockerNotice locale={locale} description={t.lingzhuSavePlatformValuesFirst} />
+          ) : null}
+
+          {probeGuideStep?.image ? (
+            <div className="mt-5">
+              <ConnectorGuideImageCard image={probeGuideStep.image} locale={locale} />
+            </div>
+          ) : null}
 
           <div className="mt-5 grid gap-4 md:grid-cols-2">
             <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
@@ -1400,16 +1978,11 @@ function ConnectorCard({
             <div className="rounded-[22px] border border-black/[0.08] bg-white/[0.52] p-4 dark:border-white/[0.12] dark:bg-white/[0.04]">
               <div className="text-sm font-medium">{t.lingzhuAgentIdHint}</div>
               <div className="mt-2 text-sm text-muted-foreground">{lingzhuAgentId(config)}</div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button variant="secondary" onClick={() => onTest(entry.name)} disabled={testing || !enabled}>
-                  <Send className="h-4 w-4" />
-                  {testing ? t.testing : t.lingzhuRunProbe}
-                </Button>
+              <div className="mt-4 text-sm text-muted-foreground">
+                {runtimeReady ? t.ok : t.stepProbeHint}
               </div>
             </div>
           </div>
-
-          {!testItem ? <div className="mt-4 text-sm text-muted-foreground">{t.lingzhuNoProbeYet}</div> : null}
 
           <div className="mt-5 border-t border-black/[0.06] pt-5 dark:border-white/[0.08]">
             <div className="grid gap-4 md:grid-cols-2">
@@ -1478,7 +2051,6 @@ function ConnectorCard({
                   label={`${translateSettingsCatalogText(locale, entry.subtitle)} ${translateSettingsCatalogText(locale, entry.deliveryNote)}`.trim()}
                 />
                 <span className="text-xs text-muted-foreground">{enabled ? t.enabled : t.disabled}</span>
-                {testItem ? <span className="text-xs text-muted-foreground">{testItem.ok ? t.ok : t.needsWork}</span> : null}
               </div>
             </div>
           </div>
@@ -1512,7 +2084,7 @@ function ConnectorCard({
             ? renderQqSetup()
             : entry.name === 'lingzhu'
               ? renderLingzhuSetup()
-              : renderGenericSections()}
+              : renderGuidedSetup()}
         </div>
 
         <aside className="space-y-6 xl:border-l xl:border-black/[0.08] xl:pl-6 xl:dark:border-white/[0.08]">
@@ -1605,89 +2177,7 @@ function ConnectorCard({
                   <div className="text-sm text-muted-foreground">{t.noEvents}</div>
                 )}
               </section>
-
-              <section className="border-t border-black/[0.08] pt-4 dark:border-white/[0.08]">
-                <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-                  <RadioTower className="h-4 w-4 text-muted-foreground" />
-                  <span>{t.testTarget}</span>
-                </div>
-                <div className="grid gap-3">
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium">{t.chatType}</label>
-                    <select
-                      value={deliveryTarget.chat_type}
-                      onChange={(event) => onUpdateDelivery(entry.name, { chat_type: event.target.value as DeliveryTargetState['chat_type'] })}
-                      className="flex h-11 w-full rounded-[18px] border border-black/[0.08] bg-white/[0.44] px-3 py-2 text-sm dark:border-white/[0.12] dark:bg-white/[0.03]"
-                    >
-                      <option value="direct">{t.direct}</option>
-                      <option value="group">{t.group}</option>
-                    </select>
-                  </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium">{t.chatId}</label>
-                    <Input
-                      value={deliveryTarget.chat_id}
-                      onChange={(event) => onUpdateDelivery(entry.name, { chat_id: event.target.value })}
-                      placeholder={chatIdPlaceholder}
-                      className="rounded-[18px] border-black/[0.08] bg-white/[0.44] shadow-none dark:bg-white/[0.03]"
-                    />
-                    {entry.name === 'qq' ? <div className="text-xs text-muted-foreground">{t.qqChatIdHint}</div> : null}
-                  </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium">{t.discoveredTargets}</label>
-                    {snapshot?.discovered_targets?.length ? (
-                      <div className="flex flex-wrap gap-2">
-                        {snapshot.discovered_targets.map((target) => (
-                          <button
-                            key={target.conversation_id}
-                            type="button"
-                            onClick={() =>
-                              onUpdateDelivery(entry.name, {
-                                chat_type: target.chat_type === 'group' ? 'group' : 'direct',
-                                chat_id: target.chat_id,
-                              })
-                            }
-                            className={cn(
-                              'rounded-full border px-3 py-2 text-xs transition',
-                              deliveryTarget.chat_id === target.chat_id && deliveryTarget.chat_type === (target.chat_type === 'group' ? 'group' : 'direct')
-                                ? 'border-black/[0.14] bg-black/[0.05] text-foreground dark:border-white/[0.18] dark:bg-white/[0.08]'
-                                : 'border-black/[0.08] bg-white/[0.44] text-muted-foreground hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]'
-                            )}
-                          >
-                            {connectorTargetLabel(target)}
-                          </button>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-muted-foreground">{t.noTargets}</div>
-                    )}
-                  </div>
-                  <div className="grid gap-2">
-                    <label className="text-sm font-medium">{t.probeText}</label>
-                    <Textarea
-                      value={deliveryTarget.text}
-                      onChange={(event) => onUpdateDelivery(entry.name, { text: event.target.value })}
-                      placeholder={t.probePlaceholder}
-                      className="min-h-[96px] rounded-[18px] border-black/[0.08] bg-white/[0.44] shadow-none dark:bg-white/[0.03]"
-                    />
-                  </div>
-                  <Button variant="secondary" onClick={() => onTest(entry.name)} disabled={testing || !enabled}>
-                    <Send className="h-4 w-4" />
-                    {testing ? t.testing : t.testConnector}
-                  </Button>
-                </div>
-              </section>
             </>
-          ) : null}
-
-          {testItem ? (
-            <ResultNotice
-              title={entry.name === 'lingzhu' ? t.lingzhuProbeResult : t.testResult}
-              ok={testItem.ok}
-              warnings={testItem.warnings}
-              errors={testItem.errors}
-              empty={entry.name === 'lingzhu' ? t.lingzhuNoProbeYet : t.emptyTest}
-            />
           ) : null}
         </aside>
       </div>
@@ -1699,41 +2189,29 @@ export function ConnectorSettingsForm({
   locale,
   value,
   connectors,
-  validation,
-  testResult,
   saving,
   isDirty,
-  validating,
-  testingConnectorName,
-  testingAll,
+  selectedConnectorName,
   onChange,
   onSave,
-  onValidate,
-  onTestAll,
-  onTestConnector,
+  onSelectConnector,
+  onBackToConnectorCatalog,
   onJumpToAnchor,
 }: {
   locale: Locale
   value: ConnectorConfigMap
   connectors: ConnectorSnapshot[]
-  validation: ConfigValidationPayload | null
-  testResult: ConfigTestPayload | null
   saving: boolean
   isDirty: boolean
-  validating: boolean
-  testingConnectorName: ConnectorName | null
-  testingAll: boolean
+  selectedConnectorName?: ConnectorName | null
   onChange: (next: ConnectorConfigMap) => void
   onSave: () => void
-  onValidate: () => void
-  onTestAll: () => void
-  onTestConnector: (connectorName: ConnectorName, deliveryTarget: DeliveryTargetState) => void
+  onSelectConnector: (connectorName: ConnectorName) => void
+  onBackToConnectorCatalog: () => void
   onJumpToAnchor?: (anchorId: string) => void
 }) {
   const t = copy[locale]
-  const [deliveryTargets, setDeliveryTargets] = useState<Record<string, DeliveryTargetState>>({})
   const snapshots = useMemo(() => snapshotByName(connectors), [connectors])
-  const testItems = useMemo(() => testItemByName(testResult), [testResult])
   const routing = useMemo(() => routingConfig(value), [value])
   const enabledEntries = useMemo(
     () => connectorCatalog.filter((entry) => Boolean(value[entry.name]?.enabled)),
@@ -1742,6 +2220,8 @@ export function ConnectorSettingsForm({
   const preferredConnector = typeof routing.primary_connector === 'string' ? routing.primary_connector : ''
   const deliveryPolicy =
     typeof routing.artifact_delivery_policy === 'string' ? routing.artifact_delivery_policy : 'fanout_all'
+  const selectedEntry =
+    selectedConnectorName ? connectorCatalog.find((entry) => entry.name === selectedConnectorName) || null : null
 
   useEffect(() => {
     const nextPreferred =
@@ -1794,150 +2274,140 @@ export function ConnectorSettingsForm({
     })
   }
 
-  const updateDeliveryTarget = (connectorName: ConnectorName, patch: Partial<DeliveryTargetState>) => {
-    setDeliveryTargets((current) => ({
-      ...current,
-      [connectorName]: {
-        chat_type: 'direct',
-        chat_id: '',
-        text: '',
-        ...(current[connectorName] || {}),
-        ...patch,
-      },
-    }))
-  }
+  const renderRoutingSection = () => (
+    <section className="border-b border-black/[0.08] pb-6 dark:border-white/[0.08]">
+      <div id="connectors-routing" className="mb-3 flex items-center gap-2 text-sm font-medium">
+        <span>{t.routingTitle}</span>
+        <HintDot label={t.routingSubtitle} />
+        <AnchorJumpButton anchorId="connectors-routing" onJumpToAnchor={onJumpToAnchor} />
+      </div>
+
+      {enabledEntries.length === 0 ? (
+        <div className="text-sm text-muted-foreground">{t.routingEmpty}</div>
+      ) : (
+        <div className="space-y-5">
+          <div>
+            <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">{t.primaryConnector}</div>
+            <div className="flex flex-wrap gap-2">
+              {enabledEntries.map((entry) => {
+                const selected = preferredConnector === entry.name
+                return (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    onClick={() => updateRouting({ primary_connector: entry.name })}
+                    className={cn(
+                      'rounded-full border px-3 py-2 text-sm transition',
+                      selected
+                        ? 'border-black/[0.14] bg-black/[0.05] text-foreground dark:border-white/[0.18] dark:bg-white/[0.08]'
+                        : 'border-black/[0.08] bg-white/[0.44] text-muted-foreground hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]'
+                    )}
+                  >
+                    {translateSettingsCatalogText(locale, entry.label)}
+                  </button>
+                )
+              })}
+            </div>
+            {enabledEntries.length === 1 ? <div className="mt-2 text-xs text-muted-foreground">{t.routingAutoSingle}</div> : null}
+          </div>
+
+          <div>
+            <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">{t.deliveryPolicy}</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'fanout_all', label: t.fanoutAll },
+                { value: 'primary_only', label: t.primaryOnly },
+                { value: 'primary_plus_local', label: t.primaryPlusLocal },
+              ].map((option) => {
+                const selected = deliveryPolicy === option.value
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => updateRouting({ artifact_delivery_policy: option.value })}
+                    className={cn(
+                      'rounded-full border px-3 py-2 text-sm transition',
+                      selected
+                        ? 'border-black/[0.14] bg-black/[0.05] text-foreground dark:border-white/[0.18] dark:bg-white/[0.08]'
+                        : 'border-black/[0.08] bg-white/[0.44] text-muted-foreground hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]'
+                    )}
+                  >
+                    {translateSettingsCatalogText(locale, option.label)}
+                  </button>
+                )
+              })}
+            </div>
+            <div className="mt-2 text-xs text-muted-foreground">{t.localMirror}</div>
+          </div>
+        </div>
+      )}
+    </section>
+  )
 
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-4 border-b border-black/[0.08] pb-5 lg:flex-row lg:items-start lg:justify-between dark:border-white/[0.08]">
-        <div className="flex items-center gap-2">
-          <h2 className="text-2xl font-semibold tracking-tight">{t.title}</h2>
-          <HintDot label={t.subtitle} />
+        <div className="min-w-0">
+          {selectedEntry ? (
+            <>
+              <Button variant="secondary" onClick={onBackToConnectorCatalog} className="mb-3">
+                <ArrowLeft className="h-4 w-4" />
+                {t.backToCatalog}
+              </Button>
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-semibold tracking-tight">{translateSettingsCatalogText(locale, selectedEntry.label)}</h2>
+                <HintDot label={localizedGuideText(locale, connectorGuideCatalog[selectedEntry.name].summary)} />
+              </div>
+              <div className="mt-2 text-sm text-muted-foreground">{t.detailSubtitle}</div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-semibold tracking-tight">{t.overviewTitle}</h2>
+              <HintDot label={t.overviewSubtitle} />
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={onSave} disabled={saving}>
             <Save className="h-4 w-4" />
-            {saving ? t.saving : t.save}
-          </Button>
-          <Button variant="secondary" onClick={onValidate} disabled={validating}>
-            <ShieldCheck className="h-4 w-4" />
-            {validating ? t.validating : t.validate}
-          </Button>
-          <Button variant="secondary" onClick={onTestAll} disabled={testingAll}>
-            <Send className="h-4 w-4" />
-            {testingAll ? t.testing : t.testAll}
+            {saving ? t.saving : selectedEntry ? t.stepSaveAction : t.save}
           </Button>
         </div>
       </header>
 
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_260px]">
+      <div className="space-y-8">
         <div className="space-y-8">
-          <section className="border-b border-black/[0.08] pb-6 dark:border-white/[0.08]">
-            <div id="connectors-routing" className="mb-3 flex items-center gap-2 text-sm font-medium">
-              <span>{t.routingTitle}</span>
-              <HintDot label={t.routingSubtitle} />
-              <AnchorJumpButton anchorId="connectors-routing" onJumpToAnchor={onJumpToAnchor} />
-            </div>
-
-            {enabledEntries.length === 0 ? (
-              <div className="text-sm text-muted-foreground">{t.routingEmpty}</div>
-            ) : (
-              <div className="space-y-5">
-                <div>
-                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">{t.primaryConnector}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {enabledEntries.map((entry) => {
-                      const selected = preferredConnector === entry.name
-                      return (
-                        <button
-                          key={entry.name}
-                          type="button"
-                          onClick={() => updateRouting({ primary_connector: entry.name })}
-                          className={cn(
-                            'rounded-full border px-3 py-2 text-sm transition',
-                            selected
-                              ? 'border-black/[0.14] bg-black/[0.05] text-foreground dark:border-white/[0.18] dark:bg-white/[0.08]'
-                              : 'border-black/[0.08] bg-white/[0.44] text-muted-foreground hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]'
-                          )}
-                        >
-                          {translateSettingsCatalogText(locale, entry.label)}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {enabledEntries.length === 1 ? <div className="mt-2 text-xs text-muted-foreground">{t.routingAutoSingle}</div> : null}
-                </div>
-
-                <div>
-                  <div className="mb-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">{t.deliveryPolicy}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { value: 'fanout_all', label: t.fanoutAll },
-                      { value: 'primary_only', label: t.primaryOnly },
-                      { value: 'primary_plus_local', label: t.primaryPlusLocal },
-                    ].map((option) => {
-                      const selected = deliveryPolicy === option.value
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          onClick={() => updateRouting({ artifact_delivery_policy: option.value })}
-                          className={cn(
-                            'rounded-full border px-3 py-2 text-sm transition',
-                            selected
-                              ? 'border-black/[0.14] bg-black/[0.05] text-foreground dark:border-white/[0.18] dark:bg-white/[0.08]'
-                              : 'border-black/[0.08] bg-white/[0.44] text-muted-foreground hover:text-foreground dark:border-white/[0.12] dark:bg-white/[0.03]'
-                          )}
-                        >
-                          {translateSettingsCatalogText(locale, option.label)}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  <div className="mt-2 text-xs text-muted-foreground">{t.localMirror}</div>
-                </div>
-              </div>
-            )}
-          </section>
-
-          {connectorCatalog.map((entry) => (
+          {selectedEntry ? (
             <ConnectorCard
-              key={entry.name}
-              entry={entry}
+              key={selectedEntry.name}
+              entry={selectedEntry}
               locale={locale}
-              config={value[entry.name] || {}}
-              snapshot={snapshots.get(entry.name)}
-              testItem={testItems.get(entry.name)}
+              config={value[selectedEntry.name] || {}}
+              snapshot={snapshots.get(selectedEntry.name)}
               saving={saving}
               isDirty={isDirty}
-              testing={testingConnectorName === entry.name}
-              deliveryTarget={deliveryTargets[entry.name] || { chat_type: 'direct', chat_id: '', text: '' }}
               onUpdateField={updateConnectorField}
               onUpdateConnector={updateConnectorFields}
-              onUpdateDelivery={updateDeliveryTarget}
               onSave={onSave}
-              onTest={(connectorName) => onTestConnector(connectorName, deliveryTargets[connectorName] || { chat_type: 'direct', chat_id: '', text: '' })}
               onJumpToAnchor={onJumpToAnchor}
             />
-          ))}
+          ) : (
+            <>
+              {renderRoutingSection()}
+              <div className="grid gap-5 xl:grid-cols-2">
+                {connectorCatalog.map((entry) => (
+                  <ConnectorOverviewCard
+                    key={entry.name}
+                    entry={entry}
+                    locale={locale}
+                    config={value[entry.name] || {}}
+                    onOpenConnector={onSelectConnector}
+                  />
+                ))}
+              </div>
+            </>
+          )}
         </div>
-
-        <aside className="space-y-0 xl:border-l xl:border-black/[0.08] xl:pl-6 xl:dark:border-white/[0.08]">
-          <ResultNotice
-            title={t.validation}
-            ok={validation?.ok ?? true}
-            warnings={validation?.warnings || []}
-            errors={validation?.errors || []}
-            empty={t.emptyValidation}
-          />
-          <ResultNotice
-            title={t.testResult}
-            ok={testResult?.ok ?? true}
-            warnings={testResult?.warnings || []}
-            errors={testResult?.errors || []}
-            empty={t.emptyTest}
-          />
-        </aside>
       </div>
     </div>
   )

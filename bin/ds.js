@@ -3,13 +3,16 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const readline = require('node:readline');
 const { pathToFileURL } = require('node:url');
 const { spawn, spawnSync } = require('node:child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
-const srcPath = path.join(repoRoot, 'src');
 const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+const pyprojectToml = fs.readFileSync(path.join(repoRoot, 'pyproject.toml'), 'utf8');
 const pythonCandidates = process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python'];
+const requiredPythonSpec = parseRequiredPythonSpec(pyprojectToml);
+const minimumPythonVersion = parseMinimumPythonVersion(requiredPythonSpec);
 const pythonCommands = new Set([
   'init',
   'new',
@@ -29,6 +32,9 @@ const pythonCommands = new Set([
   'latex',
   'config',
 ]);
+const UPDATE_PACKAGE_NAME = String(packageJson.name || '@researai/deepscientist').trim() || '@researai/deepscientist';
+const UPDATE_CHECK_TTL_MS = 12 * 60 * 60 * 1000;
+const UPDATE_PROMPT_TTL_MS = 12 * 60 * 60 * 1000;
 
 const optionsWithValues = new Set(['--home', '--host', '--port', '--quest-id', '--mode']);
 
@@ -37,13 +43,41 @@ function printLauncherHelp() {
 
 Usage:
   ds
+  ds update
+  ds update --check
+  ds update --yes
   ds --tui
   ds --both
+  ds --host 0.0.0.0 --port 21000
   ds --stop
   ds --restart
+  ds --status
   ds doctor
   ds latex status
   ds --home ~/DeepScientist --port 20999
+
+Launcher flags:
+  --host <host>         Bind host for the local web daemon
+  --port <port>         Bind port for the local web daemon
+  --tui                 Start the terminal workspace only
+  --both                Start web + terminal workspace together
+  --no-browser          Do not auto-open the browser
+  --daemon-only         Start the managed daemon and exit
+  --status              Print managed daemon health as JSON
+  --stop                Stop the managed daemon
+  --restart             Restart the managed daemon
+  --home <path>         Use a custom DeepScientist home
+  --quest-id <id>       Open the TUI on one quest directly
+
+Update:
+  ds update             Check the npm package version and offer update actions
+  ds update --check     Print structured update status
+  ds update --yes       Install the latest npm release immediately
+
+Runtime:
+  DeepScientist uses uv to manage a locked local Python runtime.
+  If an active conda environment provides Python ${requiredPythonSpec}, ds prefers it.
+  Otherwise uv provisions a managed Python under the DeepScientist home automatically.
 
 Advanced Python CLI:
   ds init
@@ -58,6 +92,278 @@ function ensureDir(targetPath) {
   fs.mkdirSync(targetPath, { recursive: true });
 }
 
+function updateStatePath(home) {
+  return path.join(home, 'runtime', 'update-state.json');
+}
+
+function readUpdateState(home) {
+  return readJsonFile(updateStatePath(home)) || {};
+}
+
+function writeUpdateState(home, payload) {
+  const statePath = updateStatePath(home);
+  ensureDir(path.dirname(statePath));
+  fs.writeFileSync(statePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
+
+function mergeUpdateState(home, patch) {
+  const current = readUpdateState(home);
+  const next = {
+    ...current,
+    ...patch,
+  };
+  writeUpdateState(home, next);
+  return next;
+}
+
+function parseTimestamp(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isExpired(value, ttlMs) {
+  const parsed = parseTimestamp(value);
+  if (parsed === null) {
+    return true;
+  }
+  return Date.now() - parsed > ttlMs;
+}
+
+function normalizeVersion(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^v/i, '');
+}
+
+function compareVersions(left, right) {
+  const leftParts = normalizeVersion(left).split('.').map((item) => Number.parseInt(item, 10) || 0);
+  const rightParts = normalizeVersion(right).split('.').map((item) => Number.parseInt(item, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length, 3);
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = leftParts[index] || 0;
+    const rightValue = rightParts[index] || 0;
+    if (leftValue > rightValue) {
+      return 1;
+    }
+    if (leftValue < rightValue) {
+      return -1;
+    }
+  }
+  return 0;
+}
+
+function detectInstallMode(rootPath = repoRoot) {
+  const normalized = String(rootPath || '');
+  return normalized.includes(`${path.sep}node_modules${path.sep}`) ? 'npm-package' : 'source-checkout';
+}
+
+function updateManualCommand(installMode) {
+  if (installMode === 'npm-package') {
+    return `npm install -g ${UPDATE_PACKAGE_NAME}@latest`;
+  }
+  return 'git pull && bash install.sh';
+}
+
+function updateSupportSummary(installMode, npmBinary, launcherPath) {
+  if (!npmBinary) {
+    return {
+      canCheck: false,
+      canSelfUpdate: false,
+      reason: '`npm` is not available on PATH.',
+    };
+  }
+  if (installMode !== 'npm-package') {
+    return {
+      canCheck: true,
+      canSelfUpdate: false,
+      reason: 'This DeepScientist installation comes from a source checkout and should be updated from Git.',
+    };
+  }
+  if (!launcherPath || !fs.existsSync(launcherPath)) {
+    return {
+      canCheck: true,
+      canSelfUpdate: false,
+      reason: 'The launcher entrypoint could not be resolved.',
+    };
+  }
+  return {
+    canCheck: true,
+    canSelfUpdate: true,
+    reason: null,
+  };
+}
+
+function resolveNpmBinary() {
+  return resolveExecutableOnPath(process.platform === 'win32' ? 'npm.cmd' : 'npm') || resolveExecutableOnPath('npm');
+}
+
+function resolveLauncherPath() {
+  const configured = String(process.env.DEEPSCIENTIST_LAUNCHER_PATH || '').trim();
+  if (configured && fs.existsSync(configured)) {
+    return configured;
+  }
+  const candidate = path.join(repoRoot, 'bin', 'ds.js');
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+function fetchLatestPublishedVersion({ npmBinary, timeoutMs = 3500 }) {
+  if (!npmBinary) {
+    return {
+      ok: false,
+      error: '`npm` is not available on PATH.',
+      latestVersion: null,
+    };
+  }
+  const result = spawnSync(npmBinary, ['view', UPDATE_PACKAGE_NAME, 'version', '--json'], {
+    encoding: 'utf8',
+    env: process.env,
+    timeout: timeoutMs,
+  });
+  if (result.error) {
+    return {
+      ok: false,
+      error: result.error.message,
+      latestVersion: null,
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      error: (result.stderr || result.stdout || '').trim() || `npm exited with status ${result.status}`,
+      latestVersion: null,
+    };
+  }
+  try {
+    const parsed = JSON.parse(String(result.stdout || 'null'));
+    const latestVersion = Array.isArray(parsed) ? normalizeVersion(parsed[parsed.length - 1]) : normalizeVersion(parsed);
+    if (!latestVersion) {
+      throw new Error('npm returned an empty version string.');
+    }
+    return {
+      ok: true,
+      error: null,
+      latestVersion,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Could not parse npm version output.',
+      latestVersion: null,
+    };
+  }
+}
+
+function buildUpdateStatus(home, statePatch = {}) {
+  const state = { ...readUpdateState(home), ...statePatch };
+  const installMode = detectInstallMode(repoRoot);
+  const npmBinary = resolveNpmBinary();
+  const launcherPath = resolveLauncherPath();
+  const support = updateSupportSummary(installMode, npmBinary, launcherPath);
+  const currentVersion = normalizeVersion(state.current_version || packageJson.version);
+  const latestVersion = normalizeVersion(state.latest_version || '');
+  const updateAvailable = Boolean(latestVersion) && compareVersions(latestVersion, currentVersion) > 0;
+  const skippedVersion = normalizeVersion(state.last_skipped_version || '');
+  const skippedCurrentTarget = Boolean(updateAvailable && skippedVersion && skippedVersion === latestVersion);
+  const promptRecommended =
+    Boolean(updateAvailable)
+    && !Boolean(state.busy)
+    && !skippedCurrentTarget
+    && isExpired(state.last_prompted_at || state.last_deferred_at, UPDATE_PROMPT_TTL_MS);
+
+  return {
+    ok: true,
+    package_name: UPDATE_PACKAGE_NAME,
+    install_mode: installMode,
+    can_check: support.canCheck,
+    can_self_update: support.canSelfUpdate,
+    current_version: currentVersion,
+    latest_version: latestVersion || null,
+    update_available: updateAvailable,
+    prompt_recommended: promptRecommended,
+    busy: Boolean(state.busy),
+    last_checked_at: state.last_checked_at || null,
+    last_check_error: state.last_check_error || null,
+    last_prompted_at: state.last_prompted_at || null,
+    last_deferred_at: state.last_deferred_at || null,
+    last_skipped_version: skippedVersion || null,
+    last_update_started_at: state.last_update_started_at || null,
+    last_update_finished_at: state.last_update_finished_at || null,
+    last_update_result: state.last_update_result || null,
+    target_version: normalizeVersion(state.target_version || '') || null,
+    manual_update_command: updateManualCommand(installMode),
+    reason: support.reason,
+  };
+}
+
+function checkForUpdates(home, { force = false, timeoutMs = 3500 } = {}) {
+  const currentVersion = normalizeVersion(packageJson.version);
+  const existing = readUpdateState(home);
+  const installMode = detectInstallMode(repoRoot);
+  const npmBinary = resolveNpmBinary();
+  const launcherPath = resolveLauncherPath();
+  const support = updateSupportSummary(installMode, npmBinary, launcherPath);
+
+  if (!force && existing.current_version === currentVersion && !isExpired(existing.last_checked_at, UPDATE_CHECK_TTL_MS)) {
+    return buildUpdateStatus(home);
+  }
+
+  if (!support.canCheck) {
+    const patched = mergeUpdateState(home, {
+      current_version: currentVersion,
+      last_checked_at: new Date().toISOString(),
+      last_check_error: support.reason,
+    });
+    return buildUpdateStatus(home, patched);
+  }
+
+  const probe = fetchLatestPublishedVersion({ npmBinary, timeoutMs });
+  const patched = mergeUpdateState(home, {
+    current_version: currentVersion,
+    latest_version: probe.latestVersion || existing.latest_version || null,
+    last_checked_at: new Date().toISOString(),
+    last_check_error: probe.ok ? null : probe.error,
+  });
+  return buildUpdateStatus(home, patched);
+}
+
+function markUpdateDeferred(home, version) {
+  const patched = mergeUpdateState(home, {
+    last_prompted_at: new Date().toISOString(),
+    last_deferred_at: new Date().toISOString(),
+    latest_version: normalizeVersion(version || readUpdateState(home).latest_version || '') || null,
+  });
+  return buildUpdateStatus(home, patched);
+}
+
+function markUpdateSkipped(home, version) {
+  const normalized = normalizeVersion(version);
+  const patched = mergeUpdateState(home, {
+    last_prompted_at: new Date().toISOString(),
+    last_skipped_version: normalized || null,
+  });
+  return buildUpdateStatus(home, patched);
+}
+
+function parseRequiredPythonSpec(pyprojectText) {
+  const match = String(pyprojectText || '').match(/^\s*requires-python\s*=\s*["']([^"']+)["']/m);
+  return match ? match[1].trim() : '>=3.11';
+}
+
+function parseMinimumPythonVersion(spec) {
+  const match = String(spec || '').match(/>=\s*(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) {
+    return { major: 3, minor: 11, patch: 0 };
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3] || 0),
+  };
+}
+
 function resolveHome(args) {
   const index = args.indexOf('--home');
   if (index >= 0 && index + 1 < args.length) {
@@ -65,6 +371,9 @@ function resolveHome(args) {
   }
   if (process.env.DEEPSCIENTIST_HOME) {
     return path.resolve(process.env.DEEPSCIENTIST_HOME);
+  }
+  if (process.env.DS_HOME) {
+    return path.resolve(process.env.DS_HOME);
   }
   return path.join(os.homedir(), 'DeepScientist');
 }
@@ -176,11 +485,86 @@ function renderBrandArtwork() {
   return [];
 }
 
-function printLaunchCard({ url, bindUrl, mode, autoOpenRequested, browserOpened, daemonOnly }) {
+function truncateMiddle(text, maxLength = 120) {
+  const value = String(text || '');
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const head = Math.max(24, Math.floor((maxLength - 1) / 2));
+  const tail = Math.max(16, maxLength - head - 1);
+  return `${value.slice(0, head)}…${value.slice(-tail)}`;
+}
+
+function renderKeyValueRows(rows) {
+  const labelWidth = Math.max(...rows.map(([label]) => String(label).length), 8);
+  for (const [label, value] of rows) {
+    console.log(`  ${String(label).padEnd(labelWidth)}  ${value}`);
+  }
+}
+
+function pythonMajorMinor(probe) {
+  if (!probe || typeof probe.major !== 'number' || typeof probe.minor !== 'number') {
+    return '';
+  }
+  return `${probe.major}.${probe.minor}`;
+}
+
+function pythonVersionText(probe) {
+  if (!probe) {
+    return 'unknown';
+  }
+  const version = probe.version || pythonMajorMinor(probe) || 'unknown';
+  if (probe.executable) {
+    return `${version}  (${probe.executable})`;
+  }
+  return version;
+}
+
+function renderLaunchHints({ home, url, bindUrl, pythonSelection }) {
+  const runtimeRows = [
+    ['Version', packageJson.version],
+    ['Home', truncateMiddle(home)],
+    ['Browser URL', url],
+    ['Bind URL', bindUrl],
+    ['Python', truncateMiddle(pythonVersionText(pythonSelection))],
+  ];
+  if (pythonSelection && pythonSelection.sourceLabel) {
+    runtimeRows.push(['Python source', pythonSelection.sourceLabel]);
+  }
+  console.log(colorize('\u001B[1;38;5;39m', 'Runtime'));
+  renderKeyValueRows(runtimeRows);
+  console.log('');
+
+  console.log(colorize('\u001B[1;38;5;39m', 'Quick Flags'));
+  renderKeyValueRows([
+    ['ds --port 21000', 'Change the web port'],
+    ['ds --host 0.0.0.0 --port 21000', 'Bind on all interfaces'],
+    ['ds --both', 'Start web + TUI together'],
+    ['ds --tui', 'Start the terminal workspace only'],
+    ['ds --no-browser', 'Do not auto-open the browser'],
+    ['ds --status', 'Show daemon health as JSON'],
+    ['ds --restart', 'Restart the managed daemon'],
+    ['ds --stop', 'Stop the managed daemon'],
+    ['ds --help', 'Show the full launcher help'],
+  ]);
+  console.log('');
+}
+
+function printLaunchCard({
+  url,
+  bindUrl,
+  mode,
+  autoOpenRequested,
+  browserOpened,
+  daemonOnly,
+  home,
+  pythonSelection,
+}) {
   const width = Math.max(72, Math.min(process.stdout.columns || 100, 108));
   const divider = colorize('\u001B[38;5;245m', '─'.repeat(Math.max(36, width - 6)));
   const title = colorize('\u001B[1;38;5;39m', 'ResearAI');
   const subtitle = colorize('\u001B[38;5;110m', 'Local-first research operating system');
+  const versionLine = colorize('\u001B[38;5;245m', `Version ${packageJson.version}`);
   const urlLabel = colorize('\u001B[1;38;5;45m', hyperlink(url, url));
   const workspaceMode =
     mode === 'both'
@@ -218,6 +602,7 @@ function printLaunchCard({ url, bindUrl, mode, autoOpenRequested, browserOpened,
     '                 |_|                                          ',
   ];
   console.log(centerText(title, width));
+  console.log(centerText(versionLine, width));
   for (const line of wordmark) {
     console.log(centerText(colorize('\u001B[1;38;5;39m', line), width));
   }
@@ -228,10 +613,10 @@ function printLaunchCard({ url, bindUrl, mode, autoOpenRequested, browserOpened,
   console.log(centerText(urlLabel, width));
   console.log(centerText(divider, width));
   console.log(centerText(browserLine, width));
-  console.log(centerText(`Daemon bind: ${bindUrl}`, width));
   console.log(centerText(nextStep, width));
   console.log(centerText('Run ds --stop to stop the managed daemon.', width));
   console.log('');
+  renderLaunchHints({ home, url, bindUrl, pythonSelection });
 }
 
 function escapeHtml(value) {
@@ -354,7 +739,7 @@ function writeCodexPreflightReport(home, probe) {
   };
 }
 
-function readCodexBootstrapState(home, venvPython) {
+function readCodexBootstrapState(home, runtimePython) {
   const snippet = [
     'import json, pathlib, sys',
     'from deepscientist.config import ConfigManager',
@@ -362,7 +747,7 @@ function readCodexBootstrapState(home, venvPython) {
     'manager = ConfigManager(home)',
     'print(json.dumps(manager.codex_bootstrap_state(), ensure_ascii=False))',
   ].join('\n');
-  const result = runSync(venvPython, ['-c', snippet, home], { capture: true, allowFailure: true });
+  const result = runSync(runtimePython, ['-c', snippet, home], { capture: true, allowFailure: true });
   if (result.status !== 0) {
     return { codex_ready: false, codex_last_checked_at: null, codex_last_result: {} };
   }
@@ -373,7 +758,7 @@ function readCodexBootstrapState(home, venvPython) {
   }
 }
 
-function probeCodexBootstrap(home, venvPython) {
+function probeCodexBootstrap(home, runtimePython) {
   const snippet = [
     'import json, pathlib, sys',
     'from deepscientist.config import ConfigManager',
@@ -381,7 +766,7 @@ function probeCodexBootstrap(home, venvPython) {
     'manager = ConfigManager(home)',
     'print(json.dumps(manager.probe_codex_bootstrap(persist=True), ensure_ascii=False))',
   ].join('\n');
-  const result = runSync(venvPython, ['-c', snippet, home], { capture: true, allowFailure: true });
+  const result = runSync(runtimePython, ['-c', snippet, home], { capture: true, allowFailure: true });
   let payload = null;
   try {
     payload = JSON.parse(result.stdout || '{}');
@@ -430,6 +815,7 @@ function parseLauncherArgs(argv) {
   let questId = null;
   let status = false;
   let daemonOnly = false;
+  let skipUpdateCheck = false;
 
   if (args[0] === 'ui') {
     args.shift();
@@ -447,6 +833,7 @@ function parseLauncherArgs(argv) {
     else if (arg === '--no-browser') openBrowser = false;
     else if (arg === '--open-browser') openBrowser = true;
     else if (arg === '--daemon-only') daemonOnly = true;
+    else if (arg === '--skip-update-check') skipUpdateCheck = true;
     else if (arg === '--host' && args[index + 1]) host = args[++index];
     else if (arg === '--port' && args[index + 1]) port = Number(args[++index]);
     else if (arg === '--home' && args[index + 1]) home = path.resolve(args[++index]);
@@ -468,6 +855,83 @@ function parseLauncherArgs(argv) {
     openBrowser,
     questId,
     daemonOnly,
+    skipUpdateCheck,
+  };
+}
+
+function printUpdateHelp() {
+  console.log(`DeepScientist update
+
+Usage:
+  ds update
+  ds update --check
+  ds update --yes
+  ds update --remind-later
+  ds update --skip-version
+
+Flags:
+  --check            Return the current update status without installing
+  --yes              Install the latest published npm package immediately
+  --json             Print structured JSON output
+  --force-check      Ignore the cached version probe
+  --remind-later     Defer prompts for the current published version
+  --skip-version     Skip reminders for the current published version
+`);
+}
+
+function parseUpdateArgs(argv) {
+  const args = [...argv];
+  if (args[0] === 'update') {
+    args.shift();
+  }
+  let json = false;
+  let check = false;
+  let yes = false;
+  let forceCheck = false;
+  let remindLater = false;
+  let skipVersion = false;
+  let background = false;
+  let worker = false;
+  let home = null;
+  let host = null;
+  let port = null;
+  let restartDaemon = null;
+  let skipUpdateCheck = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === '--json') json = true;
+    else if (arg === '--check') check = true;
+    else if (arg === '--yes') yes = true;
+    else if (arg === '--force-check') forceCheck = true;
+    else if (arg === '--remind-later') remindLater = true;
+    else if (arg === '--skip-version') skipVersion = true;
+    else if (arg === '--background') background = true;
+    else if (arg === '--worker') worker = true;
+    else if (arg === '--restart-daemon') restartDaemon = true;
+    else if (arg === '--skip-update-check') skipUpdateCheck = true;
+    else if (arg === '--home' && args[index + 1]) home = path.resolve(args[++index]);
+    else if (arg === '--host' && args[index + 1]) host = args[++index];
+    else if (arg === '--port' && args[index + 1]) port = Number(args[++index]);
+    else if (arg === '--help' || arg === '-h') return { help: true };
+    else if (!arg.startsWith('--')) return null;
+  }
+
+  return {
+    help: false,
+    json,
+    check,
+    yes,
+    forceCheck,
+    remindLater,
+    skipVersion,
+    background,
+    worker,
+    home,
+    host,
+    port,
+    restartDaemon,
+    skipUpdateCheck,
   };
 }
 
@@ -486,39 +950,252 @@ function findFirstPositionalArg(args) {
   return null;
 }
 
-function resolveSystemPython() {
-  for (const binary of pythonCandidates) {
-    const result = spawnSync(binary, ['--version'], { stdio: 'ignore' });
-    if (result.status === 0) {
-      return binary;
-    }
+function realpathOrSelf(targetPath) {
+  try {
+    return fs.realpathSync(targetPath);
+  } catch {
+    return targetPath;
   }
-  console.error('DeepScientist could not find a working Python 3 interpreter.');
-  process.exit(1);
 }
 
-function venvPythonPath(home) {
+function pythonMeetsMinimum(probe) {
+  if (!probe || typeof probe.major !== 'number' || typeof probe.minor !== 'number') {
+    return false;
+  }
+  if (probe.major !== minimumPythonVersion.major) {
+    return probe.major > minimumPythonVersion.major;
+  }
+  if (probe.minor !== minimumPythonVersion.minor) {
+    return probe.minor > minimumPythonVersion.minor;
+  }
+  return probe.patch >= minimumPythonVersion.patch;
+}
+
+function pythonSelectionLabel(source) {
+  if (source === 'conda') {
+    const envName = String(process.env.CONDA_DEFAULT_ENV || '').trim();
+    return envName ? `conda:${envName}` : 'conda';
+  }
+  if (source === 'uv-managed') {
+    return 'uv-managed';
+  }
+  return 'path';
+}
+
+function buildCondaPythonCandidates() {
+  const prefix = String(process.env.CONDA_PREFIX || '').trim();
+  if (!prefix) {
+    return [];
+  }
+  if (process.platform === 'win32') {
+    return [path.join(prefix, 'python.exe'), path.join(prefix, 'Scripts', 'python.exe')];
+  }
+  return [path.join(prefix, 'bin', 'python'), path.join(prefix, 'bin', 'python3')];
+}
+
+function probePython(binary) {
+  const snippet = [
+    'import json, sys',
+    'print(json.dumps({',
+    '  "executable": sys.executable,',
+    '  "version": ".".join(str(part) for part in sys.version_info[:3]),',
+    '  "major": sys.version_info[0],',
+    '  "minor": sys.version_info[1],',
+    '  "patch": sys.version_info[2],',
+    '}, ensure_ascii=False))',
+  ].join('\n');
+  const result = spawnSync(binary, ['-c', snippet], {
+    encoding: 'utf8',
+    env: process.env,
+  });
+  if (result.error) {
+    return {
+      ok: false,
+      binary,
+      error: result.error.message,
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      ok: false,
+      binary,
+      error: (result.stderr || result.stdout || '').trim() || `exit ${result.status}`,
+    };
+  }
+  try {
+    const payload = JSON.parse(result.stdout || '{}');
+    const executable = String(payload.executable || '').trim();
+    return {
+      ok: true,
+      binary,
+      executable,
+      realExecutable: executable ? realpathOrSelf(executable) : '',
+      version: String(payload.version || '').trim(),
+      major: Number(payload.major),
+      minor: Number(payload.minor),
+      patch: Number(payload.patch),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      binary,
+      error: error instanceof Error ? error.message : 'Could not parse Python version probe.',
+    };
+  }
+}
+
+function minimumPythonRequest() {
+  return `${minimumPythonVersion.major}.${minimumPythonVersion.minor}`;
+}
+
+function decoratePythonProbe(probe, source) {
+  if (!probe || !probe.ok) {
+    return null;
+  }
+  return {
+    ...probe,
+    source,
+    sourceLabel: pythonSelectionLabel(source),
+  };
+}
+
+function collectPythonProbes(binaries, source, seenExecutables) {
+  const probes = [];
+  for (const candidate of binaries) {
+    const resolved = decoratePythonProbe(probePython(candidate), source);
+    if (!resolved) {
+      continue;
+    }
+    const executableKey = resolved.realExecutable || resolved.executable || resolved.binary;
+    if (seenExecutables.has(executableKey)) {
+      continue;
+    }
+    seenExecutables.add(executableKey);
+    probes.push(resolved);
+  }
+  return probes;
+}
+
+function createPythonRuntimePlan({ condaProbes = [], pathProbes = [], minimumVersionRequest = minimumPythonRequest() }) {
+  const validConda = condaProbes.find((probe) => pythonMeetsMinimum(probe)) || null;
+  if (validConda) {
+    return {
+      runtimeKind: 'system',
+      selectedProbe: validConda,
+      source: 'conda',
+      sourceLabel: validConda.sourceLabel,
+    };
+  }
+  const firstConda = condaProbes[0] || null;
+  if (firstConda) {
+    return {
+      runtimeKind: 'managed',
+      selectedProbe: null,
+      rejectedProbe: firstConda,
+      source: 'conda',
+      sourceLabel: pythonSelectionLabel('uv-managed'),
+      minimumVersionRequest,
+    };
+  }
+
+  const validPath = pathProbes.find((probe) => pythonMeetsMinimum(probe)) || null;
+  if (validPath) {
+    return {
+      runtimeKind: 'system',
+      selectedProbe: validPath,
+      source: 'path',
+      sourceLabel: validPath.sourceLabel,
+    };
+  }
+  const firstPath = pathProbes[0] || null;
+  if (firstPath) {
+    return {
+      runtimeKind: 'managed',
+      selectedProbe: null,
+      rejectedProbe: firstPath,
+      source: 'path',
+      sourceLabel: pythonSelectionLabel('uv-managed'),
+      minimumVersionRequest,
+    };
+  }
+
+  return {
+    runtimeKind: 'managed',
+    selectedProbe: null,
+    rejectedProbe: null,
+    source: 'uv-managed',
+    sourceLabel: pythonSelectionLabel('uv-managed'),
+    minimumVersionRequest,
+  };
+}
+
+function printManagedPythonFallbackNotice({ rejectedProbe, source, minimumVersionRequest, installDir }) {
+  if (!rejectedProbe) {
+    return;
+  }
+  const envName = String(process.env.CONDA_DEFAULT_ENV || '').trim();
+  const sourceLabel =
+    source === 'conda'
+      ? (envName ? `active conda environment \`${envName}\`` : 'active conda environment')
+      : 'detected system Python';
+  console.warn('');
+  console.warn(
+    `DeepScientist found ${sourceLabel} at ${pythonVersionText(rejectedProbe)}, which does not satisfy Python ${requiredPythonSpec}.`
+  );
+  console.warn(
+    `DeepScientist will provision a uv-managed Python ${minimumVersionRequest}+ runtime under ${installDir}.`
+  );
+  console.warn('');
+}
+
+function resolvePythonRuntimePlan() {
+  const seenExecutables = new Set();
+  const condaProbes = collectPythonProbes(buildCondaPythonCandidates(), 'conda', seenExecutables);
+  const pathProbes = collectPythonProbes(pythonCandidates, 'path', seenExecutables);
+  return createPythonRuntimePlan({ condaProbes, pathProbes, minimumVersionRequest: minimumPythonRequest() });
+}
+
+function runtimePythonEnvPath(home) {
+  return path.join(home, 'runtime', 'python-env');
+}
+
+function runtimePythonPath(home) {
   return process.platform === 'win32'
-    ? path.join(home, 'runtime', 'venv', 'Scripts', 'python.exe')
-    : path.join(home, 'runtime', 'venv', 'bin', 'python');
+    ? path.join(runtimePythonEnvPath(home), 'Scripts', 'python.exe')
+    : path.join(runtimePythonEnvPath(home), 'bin', 'python');
 }
 
-function venvRootPath(home) {
+function runtimeUvCachePath(home) {
+  return path.join(home, 'runtime', 'uv-cache');
+}
+
+function runtimeUvPythonInstallPath(home) {
+  return path.join(home, 'runtime', 'python');
+}
+
+function legacyVenvRootPath(home) {
   return path.join(home, 'runtime', 'venv');
+}
+
+function useEditableProjectInstall() {
+  return fs.existsSync(path.join(repoRoot, '.git'));
+}
+
+function uvLockPath() {
+  return path.join(repoRoot, 'uv.lock');
 }
 
 function sha256File(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-function hashSkillTree() {
-  const skillsRoot = path.join(repoRoot, 'src', 'skills');
+function hashDirectoryTree(rootPath, predicate = null) {
   const hasher = crypto.createHash('sha256');
-  if (!fs.existsSync(skillsRoot)) {
+  if (!fs.existsSync(rootPath)) {
     hasher.update('missing');
     return hasher.digest('hex');
   }
-  const stack = [skillsRoot];
+  const stack = [rootPath];
   const files = [];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -529,16 +1206,27 @@ function hashSkillTree() {
         continue;
       }
       if (entry.isFile()) {
+        if (typeof predicate === 'function' && !predicate(fullPath)) {
+          continue;
+        }
         files.push(fullPath);
       }
     }
   }
   files.sort();
   for (const filePath of files) {
-    hasher.update(path.relative(skillsRoot, filePath));
+    hasher.update(path.relative(rootPath, filePath));
     hasher.update(fs.readFileSync(filePath));
   }
   return hasher.digest('hex');
+}
+
+function hashSkillTree() {
+  return hashDirectoryTree(path.join(repoRoot, 'src', 'skills'));
+}
+
+function hashPythonSourceTree() {
+  return hashDirectoryTree(path.join(repoRoot, 'src', 'deepscientist'), (filePath) => filePath.endsWith('.py'));
 }
 
 function discoverSkillIds() {
@@ -571,14 +1259,9 @@ function globalSkillsInstalled() {
 
 function runSync(binary, args, options = {}) {
   const result = spawnSync(binary, args, {
-    cwd: repoRoot,
+    cwd: options.cwd || repoRoot,
     stdio: options.capture ? 'pipe' : 'inherit',
-    env: {
-      ...process.env,
-      PYTHONPATH: process.env.PYTHONPATH
-        ? `${srcPath}${path.delimiter}${process.env.PYTHONPATH}`
-        : srcPath,
-    },
+    env: options.env || process.env,
     encoding: 'utf8',
   });
   if (result.error) {
@@ -597,72 +1280,273 @@ function step(index, total, message) {
   console.log(`[${index}/${total}] ${message}`);
 }
 
-function installPythonBundle(venvPython) {
-  runSync(venvPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'setuptools', 'wheel']);
-  runSync(venvPython, ['-m', 'pip', 'install', '--upgrade', repoRoot]);
-}
-
-function verifyPythonRuntime(venvPython) {
+function verifyPythonRuntime(runtimePython) {
   const result = runSync(
-    venvPython,
+    runtimePython,
     ['-c', 'import deepscientist.cli; import cryptography; import _cffi_backend; print("ok")'],
     { capture: true, allowFailure: true }
   );
   return result.status === 0;
 }
 
-function recreatePythonRuntime(home, systemPython) {
-  fs.rmSync(venvRootPath(home), { recursive: true, force: true });
-  step(1, 4, 'Creating local Python runtime');
-  runSync(systemPython, ['-m', 'venv', venvRootPath(home)]);
+function readJsonFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function resolveUvBinary() {
+  const configured = String(process.env.DEEPSCIENTIST_UV || process.env.UV_BIN || '').trim();
+  if (configured) {
+    return configured;
+  }
+  return resolveExecutableOnPath('uv');
+}
+
+function printUvInstallGuidance() {
+  console.error('');
+  console.error('DeepScientist now requires `uv` to manage its locked local Python runtime.');
+  console.error('Install `uv`, then run `ds` again.');
+  console.error('');
+  if (process.platform === 'win32') {
+    console.error('Windows PowerShell:');
+    console.error('  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"');
+  } else {
+    console.error('macOS / Linux:');
+    console.error('  curl -LsSf https://astral.sh/uv/install.sh | sh');
+  }
+  console.error('Alternative:');
+  console.error('  pipx install uv');
+  console.error('');
+}
+
+function buildUvRuntimeEnv(home, extraEnv = {}) {
+  return {
+    ...process.env,
+    UV_CACHE_DIR: runtimeUvCachePath(home),
+    UV_PROJECT_ENVIRONMENT: runtimePythonEnvPath(home),
+    UV_PYTHON_INSTALL_DIR: runtimeUvPythonInstallPath(home),
+    ...extraEnv,
+  };
+}
+
+function ensureUvLockPresent() {
+  const lockPath = uvLockPath();
+  if (fs.existsSync(lockPath)) {
+    return lockPath;
+  }
+  console.error('DeepScientist is missing `uv.lock` in the installed package.');
+  console.error('Reinstall the npm package, or from a source checkout run `uv lock` and try again.');
+  process.exit(1);
+}
+
+function resolveUvVersion(uvBinary) {
+  const result = runSync(uvBinary, ['--version'], { capture: true, allowFailure: true });
+  if (result.status !== 0) {
+    return null;
+  }
+  return String(result.stdout || '').trim() || null;
+}
+
+function ensureUvManagedPython(home, uvBinary, minimumVersionRequest) {
+  ensureDir(runtimeUvPythonInstallPath(home));
+  ensureDir(runtimeUvCachePath(home));
+  step(1, 4, `Provisioning uv-managed Python ${minimumVersionRequest}+`);
+  const installResult = runSync(
+    uvBinary,
+    ['python', 'install', minimumVersionRequest],
+    {
+      allowFailure: true,
+      env: buildUvRuntimeEnv(home),
+    }
+  );
+  if (installResult.status !== 0) {
+    console.error('DeepScientist could not install a uv-managed Python runtime.');
+    process.exit(installResult.status ?? 1);
+  }
+
+  const findResult = runSync(
+    uvBinary,
+    ['python', 'find', '--managed-python', minimumVersionRequest],
+    {
+      capture: true,
+      allowFailure: true,
+      env: buildUvRuntimeEnv(home),
+    }
+  );
+  const managedPython = String(findResult.stdout || '')
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .pop();
+  if (!managedPython) {
+    console.error('DeepScientist installed uv-managed Python, but could not locate the interpreter afterward.');
+    process.exit(findResult.status ?? 1);
+  }
+  const probe = decoratePythonProbe(probePython(managedPython), 'uv-managed');
+  if (!probe || !pythonMeetsMinimum(probe)) {
+    console.error('DeepScientist found a uv-managed Python, but it does not satisfy the required version.');
+    process.exit(1);
+  }
+  return probe;
+}
+
+function syncUvProjectEnvironment(home, uvBinary, pythonTarget, editable) {
+  const args = ['sync', '--frozen', '--no-dev', '--compile-bytecode', '--python', pythonTarget];
+  if (!editable) {
+    args.push('--no-editable');
+  }
+  step(2, 4, 'Syncing locked Python environment');
+  const result = runSync(uvBinary, args, {
+    allowFailure: true,
+    env: buildUvRuntimeEnv(home),
+  });
+  if (result.status === 0) {
+    return;
+  }
+  console.error('DeepScientist could not sync the locked Python environment with uv.');
+  console.error('If you are working from a source checkout, run `uv lock` after dependency changes and try again.');
+  process.exit(result.status ?? 1);
+}
+
+function createRuntimeSelectionProbe(runtimeProbe, sourceLabel) {
+  return {
+    ...runtimeProbe,
+    sourceLabel,
+  };
 }
 
 function ensurePythonRuntime(home) {
   ensureDir(path.join(home, 'runtime'));
   ensureDir(path.join(home, 'runtime', 'bundle'));
-  const systemPython = resolveSystemPython();
+  ensureDir(runtimeUvCachePath(home));
+  ensureDir(runtimeUvPythonInstallPath(home));
+  const uvBinary = resolveUvBinary();
+  if (!uvBinary) {
+    printUvInstallGuidance();
+    process.exit(1);
+  }
+  const runtimePlan = resolvePythonRuntimePlan();
+  if (runtimePlan.runtimeKind === 'managed') {
+    printManagedPythonFallbackNotice({
+      rejectedProbe: runtimePlan.rejectedProbe || null,
+      source: runtimePlan.source,
+      minimumVersionRequest: runtimePlan.minimumVersionRequest,
+      installDir: runtimeUvPythonInstallPath(home),
+    });
+  }
+  const lockPath = ensureUvLockPresent();
   const stampPath = path.join(home, 'runtime', 'bundle', 'python-stamp.json');
+  const editable = useEditableProjectInstall();
   const desiredStamp = {
+    runtimeManager: 'uv',
     version: packageJson.version,
     pyprojectHash: sha256File(path.join(repoRoot, 'pyproject.toml')),
+    uvLockHash: sha256File(lockPath),
+    editable,
+    sourceTreeHash: editable ? null : hashPythonSourceTree(),
+    uvVersion: resolveUvVersion(uvBinary),
+    envPath: runtimePythonEnvPath(home),
+    source:
+      runtimePlan.runtimeKind === 'system'
+        ? {
+            kind: 'system',
+            source: runtimePlan.selectedProbe.source,
+            sourceExecutable:
+              runtimePlan.selectedProbe.realExecutable
+              || runtimePlan.selectedProbe.executable
+              || runtimePlan.selectedProbe.binary,
+            sourceVersion: runtimePlan.selectedProbe.version,
+            sourceMajorMinor: pythonMajorMinor(runtimePlan.selectedProbe),
+          }
+        : {
+            kind: 'uv-managed',
+            minimumVersionRequest: runtimePlan.minimumVersionRequest,
+          },
   };
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const venvPython = venvPythonPath(home);
-    if (!fs.existsSync(venvPython)) {
-      recreatePythonRuntime(home, systemPython);
-    }
+    const runtimePython = runtimePythonPath(home);
+    const currentStamp = readJsonFile(stampPath);
+    const runtimeProbe = fs.existsSync(runtimePython) ? probePython(runtimePython) : null;
+    const runtimeBroken = !runtimeProbe || !runtimeProbe.ok || !pythonMeetsMinimum(runtimeProbe);
+    const stampChanged = JSON.stringify(currentStamp || null) !== JSON.stringify(desiredStamp);
 
-    let currentStamp = null;
-    if (fs.existsSync(stampPath)) {
-      try {
-        currentStamp = JSON.parse(fs.readFileSync(stampPath, 'utf8'));
-      } catch {
-        currentStamp = null;
+    if (runtimeBroken || stampChanged) {
+      const reason = runtimeBroken
+        ? 'DeepScientist is repairing the local uv-managed Python runtime.'
+        : 'DeepScientist detected a runtime change and is rebuilding the local uv-managed environment.';
+      console.warn(reason);
+      fs.rmSync(stampPath, { force: true });
+      fs.rmSync(runtimePythonEnvPath(home), { recursive: true, force: true });
+
+      let pythonTarget = null;
+      let sourceLabel = null;
+      if (runtimePlan.runtimeKind === 'system' && runtimePlan.selectedProbe) {
+        pythonTarget =
+          runtimePlan.selectedProbe.realExecutable
+          || runtimePlan.selectedProbe.executable
+          || runtimePlan.selectedProbe.binary;
+        sourceLabel = `${runtimePlan.selectedProbe.sourceLabel} via uv-env`;
+        step(1, 4, 'Preparing uv-managed Python runtime');
+      } else {
+        const managedPython = ensureUvManagedPython(home, uvBinary, runtimePlan.minimumVersionRequest);
+        pythonTarget = managedPython.realExecutable || managedPython.executable || managedPython.binary;
+        sourceLabel = managedPython.sourceLabel;
+      }
+
+      syncUvProjectEnvironment(home, uvBinary, pythonTarget, editable);
+      fs.writeFileSync(stampPath, `${JSON.stringify(desiredStamp, null, 2)}\n`, 'utf8');
+      const syncedProbe = fs.existsSync(runtimePython) ? probePython(runtimePython) : null;
+      if (syncedProbe && syncedProbe.ok && pythonMeetsMinimum(syncedProbe) && verifyPythonRuntime(runtimePython)) {
+        fs.rmSync(legacyVenvRootPath(home), { recursive: true, force: true });
+        return {
+          runtimePython,
+          uvBinary,
+          runtimeManager: 'uv',
+          runtimeProbe: createRuntimeSelectionProbe(syncedProbe, sourceLabel || 'uv-managed'),
+          sourcePython: runtimePlan.selectedProbe || null,
+        };
       }
     }
 
-    if (!currentStamp || currentStamp.version !== desiredStamp.version || currentStamp.pyprojectHash !== desiredStamp.pyprojectHash) {
-      step(2, 4, 'Installing Python package and dependencies');
-      installPythonBundle(venvPython);
-      fs.writeFileSync(stampPath, `${JSON.stringify(desiredStamp, null, 2)}\n`, 'utf8');
+    if (runtimeProbe && runtimeProbe.ok && pythonMeetsMinimum(runtimeProbe) && verifyPythonRuntime(runtimePython)) {
+      fs.rmSync(legacyVenvRootPath(home), { recursive: true, force: true });
+      return {
+        runtimePython,
+        uvBinary,
+        runtimeManager: 'uv',
+        runtimeProbe: createRuntimeSelectionProbe(
+          runtimeProbe,
+          runtimePlan.runtimeKind === 'system' && runtimePlan.selectedProbe
+            ? `${runtimePlan.selectedProbe.sourceLabel} via uv-env`
+            : 'uv-managed'
+        ),
+        sourcePython: runtimePlan.selectedProbe || null,
+      };
     }
 
-    if (verifyPythonRuntime(venvPython)) {
-      return venvPython;
-    }
-
-    console.warn('DeepScientist is repairing the local Python runtime...');
+    console.warn('DeepScientist is retrying the local uv-managed Python runtime repair.');
     fs.rmSync(stampPath, { force: true });
-    fs.rmSync(venvRootPath(home), { recursive: true, force: true });
+    fs.rmSync(runtimePythonEnvPath(home), { recursive: true, force: true });
   }
 
-  console.error('DeepScientist could not prepare a healthy local Python runtime.');
+  console.error('DeepScientist could not prepare a healthy uv-managed Python runtime.');
   process.exit(1);
 }
 
-function runPythonCli(venvPython, args, options = {}) {
-  return runSync(venvPython, ['-m', 'deepscientist.cli', ...args], options);
+function runPythonCli(runtimePython, args, options = {}) {
+  const env = {
+    ...process.env,
+    DEEPSCIENTIST_REPO_ROOT: repoRoot,
+    ...(options.env || {}),
+  };
+  return runSync(runtimePython, ['-m', 'deepscientist.cli', ...args], { ...options, env });
 }
 
 function normalizePythonCliArgs(args, home) {
@@ -678,7 +1562,7 @@ function normalizePythonCliArgs(args, home) {
   return ['--home', home, ...normalized];
 }
 
-function ensureInitialized(home, venvPython) {
+function ensureInitialized(home, runtimePython) {
   const stampPath = path.join(home, 'runtime', 'bundle', 'init-stamp.json');
   let currentStamp = null;
   if (fs.existsSync(stampPath)) {
@@ -703,7 +1587,7 @@ function ensureInitialized(home, venvPython) {
     return;
   }
   step(3, 4, 'Preparing DeepScientist home, config, skills, and Git checks');
-  const result = runPythonCli(venvPython, ['--home', home, 'init'], { capture: true, allowFailure: true });
+  const result = runPythonCli(runtimePython, ['--home', home, 'init'], { capture: true, allowFailure: true });
   const stdout = result.stdout || '';
   let payload = {};
   try {
@@ -1102,9 +1986,469 @@ async function stopDaemon(home) {
   console.log('DeepScientist daemon stopped.');
 }
 
-async function readConfiguredUiAddress(home, venvPython, fallbackHost, fallbackPort) {
+function writeUpdateLog(home, content) {
+  const logPath = path.join(home, 'logs', 'update.log');
+  ensureDir(path.dirname(logPath));
+  fs.appendFileSync(logPath, `${content.replace(/\s+$/, '')}\n`, 'utf8');
+  return logPath;
+}
+
+function summarizeUpdateFailure(result) {
+  const lines = [];
+  if (result.error) {
+    lines.push(result.error);
+  }
+  if (result.stderr) {
+    lines.push(String(result.stderr).trim());
+  }
+  if (result.stdout) {
+    lines.push(String(result.stdout).trim());
+  }
+  return lines.filter(Boolean).join('\n').trim() || 'Unknown update failure.';
+}
+
+function runNpmInstallLatest(home, npmBinary) {
+  const args = ['install', '-g', `${UPDATE_PACKAGE_NAME}@latest`, '--no-audit', '--no-fund'];
+  const startedAt = new Date().toISOString();
+  const result = spawnSync(npmBinary, args, {
+    encoding: 'utf8',
+    env: process.env,
+    timeout: 15 * 60 * 1000,
+  });
+  const finishedAt = new Date().toISOString();
+  const logPath = writeUpdateLog(
+    home,
+    [
+      `=== ${startedAt} installing ${UPDATE_PACKAGE_NAME}@latest ===`,
+      `$ ${npmBinary} ${args.join(' ')}`,
+      String(result.stdout || '').trim(),
+      String(result.stderr || '').trim(),
+      `exit=${result.status ?? 'null'} error=${result.error ? result.error.message : 'none'}`,
+      `=== finished ${finishedAt} ===`,
+      '',
+    ].join('\n')
+  );
+  return {
+    ok: !result.error && result.status === 0,
+    stdout: String(result.stdout || ''),
+    stderr: String(result.stderr || ''),
+    error: result.error ? result.error.message : null,
+    status: result.status ?? null,
+    logPath,
+  };
+}
+
+async function promptUpdateAction(status) {
+  const options = [
+    {
+      value: 'update',
+      label: status.can_self_update ? 'Update now' : 'Show manual update',
+    },
+    { value: 'later', label: 'Remind me later' },
+    { value: 'skip', label: 'Skip this version' },
+  ];
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return 'later';
+  }
+  return new Promise((resolve) => {
+    let selected = 1;
+    const lines = [
+      '',
+      'A new DeepScientist version is available.',
+      '',
+      `Current: ${status.current_version}`,
+      `Latest:  ${status.latest_version || 'unknown'}`,
+      '',
+      status.can_self_update
+        ? 'What do you want to do?'
+        : 'Self-update is not available for this installation. Choose an action:',
+    ];
+
+    const cleanup = () => {
+      process.stdin.off('keypress', onKeypress);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
+      process.stdin.pause();
+      console.log('');
+    };
+
+    const render = () => {
+      console.clear();
+      for (const line of lines) {
+        console.log(line);
+      }
+      for (let index = 0; index < options.length; index += 1) {
+        const option = options[index];
+        console.log(`${index === selected ? '>' : ' '} ${option.label}`);
+      }
+      console.log('');
+      console.log('Use ↑/↓ and Enter.');
+    };
+
+    const onKeypress = (_str, key) => {
+      if (key?.name === 'up') {
+        selected = (selected - 1 + options.length) % options.length;
+        render();
+        return;
+      }
+      if (key?.name === 'down') {
+        selected = (selected + 1) % options.length;
+        render();
+        return;
+      }
+      if (key?.name === 'return') {
+        const choice = options[selected].value;
+        cleanup();
+        resolve(choice);
+        return;
+      }
+      if (key?.ctrl && key?.name === 'c') {
+        cleanup();
+        resolve('later');
+      }
+    };
+
+    readline.emitKeypressEvents(process.stdin);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on('keypress', onKeypress);
+    render();
+  });
+}
+
+function printUpdateStatus(status, { compact = false } = {}) {
+  if (compact) {
+    if (status.update_available) {
+      console.log(
+        `DeepScientist update available: ${status.current_version} -> ${status.latest_version}`
+      );
+      if (status.can_self_update) {
+        console.log('Run `ds update --yes` to install it.');
+      } else {
+        console.log(`Manual update: ${status.manual_update_command}`);
+      }
+      return;
+    }
+    console.log(`DeepScientist is up to date (${status.current_version}).`);
+    return;
+  }
+
+  console.log('DeepScientist update status');
+  renderKeyValueRows([
+    ['Current', status.current_version],
+    ['Latest', status.latest_version || 'unknown'],
+    ['Available', status.update_available ? 'yes' : 'no'],
+    ['Install mode', status.install_mode],
+    ['Self-update', status.can_self_update ? 'supported' : 'manual-only'],
+    ['Last checked', status.last_checked_at || 'never'],
+  ]);
+  if (status.last_check_error) {
+    console.log('');
+    console.log(`Version check error: ${status.last_check_error}`);
+  }
+  if (!status.can_self_update) {
+    console.log('');
+    console.log(`Manual update command: ${status.manual_update_command}`);
+    if (status.reason) {
+      console.log(status.reason);
+    }
+  }
+  const npmBinary = resolveNpmBinary();
+  if (!npmBinary) {
+    return {
+      ok: false,
+      updated: false,
+      status,
+      message: '`npm` is not available on PATH.',
+    };
+  }
+}
+
+function spawnDetachedNode(args, options = {}) {
+  const out = options.logPath ? fs.openSync(options.logPath, 'a') : 'ignore';
+  const child = spawn(process.execPath, args, {
+    cwd: options.cwd || repoRoot,
+    detached: true,
+    stdio: ['ignore', out, out],
+    env: options.env || process.env,
+  });
+  child.unref();
+  return child;
+}
+
+async function restartIntoUpdatedLauncher(rawArgs) {
+  const launcherPath = resolveLauncherPath();
+  if (!launcherPath) {
+    throw new Error('Could not resolve the DeepScientist launcher after the update.');
+  }
+  const args = [launcherPath, '--skip-update-check', ...rawArgs.filter((item) => item !== '--skip-update-check')];
+  const child = spawn(process.execPath, args, {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: process.env,
+  });
+  await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      process.exit(code ?? 0);
+      resolve();
+    });
+  });
+}
+
+async function performSelfUpdate(home, options = {}) {
+  const status = checkForUpdates(home, { force: true });
+  if (!status.update_available) {
+    return {
+      ok: true,
+      updated: false,
+      status,
+      message: `DeepScientist is already on the latest version (${status.current_version}).`,
+    };
+  }
+  if (!status.can_self_update) {
+    return {
+      ok: false,
+      updated: false,
+      status,
+      message: status.reason || `Manual update required: ${status.manual_update_command}`,
+    };
+  }
+
+  const daemonState = readDaemonState(home);
+  const configuredUi = readConfiguredUiAddressFromFile(home, options.host, options.port);
+  const host = options.host || daemonState?.host || configuredUi.host;
+  const port = options.port || daemonState?.port || configuredUi.port;
+  const targetVersion = status.latest_version;
+
+  mergeUpdateState(home, {
+    current_version: status.current_version,
+    latest_version: targetVersion,
+    target_version: targetVersion,
+    busy: true,
+    last_update_started_at: new Date().toISOString(),
+    last_update_result: null,
+  });
+
   try {
-    const result = runPythonCli(venvPython, ['--home', home, 'config', 'show', 'config'], { capture: true, allowFailure: true });
+    if (daemonState?.pid || daemonState?.daemon_id) {
+      await stopDaemon(home);
+    }
+  } catch (error) {
+    mergeUpdateState(home, {
+      busy: false,
+      last_update_finished_at: new Date().toISOString(),
+      last_update_result: {
+        ok: false,
+        target_version: targetVersion,
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+    return {
+      ok: false,
+      updated: false,
+      status,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const installResult = runNpmInstallLatest(home, npmBinary);
+  if (!installResult.ok) {
+    const message = summarizeUpdateFailure(installResult);
+    mergeUpdateState(home, {
+      busy: false,
+      last_update_finished_at: new Date().toISOString(),
+      last_update_result: {
+        ok: false,
+        target_version: targetVersion,
+        message,
+        log_path: installResult.logPath,
+      },
+    });
+    return {
+      ok: false,
+      updated: false,
+      status,
+      message,
+      log_path: installResult.logPath,
+    };
+  }
+
+  const restartDaemon =
+    options.restartDaemon === true
+    || (options.restartDaemon !== false && Boolean(daemonState?.pid || daemonState?.daemon_id));
+  if (restartDaemon) {
+    const launcherPath = resolveLauncherPath();
+    if (!launcherPath) {
+      const message = 'DeepScientist was updated, but the new launcher path could not be resolved for daemon restart.';
+      mergeUpdateState(home, {
+        busy: false,
+        last_update_finished_at: new Date().toISOString(),
+        last_update_result: {
+          ok: false,
+          target_version: targetVersion,
+          message,
+          log_path: installResult.logPath,
+        },
+      });
+      return {
+        ok: false,
+        updated: true,
+        status,
+        message,
+        log_path: installResult.logPath,
+      };
+    }
+    spawnDetachedNode(
+      [
+        launcherPath,
+        '--home',
+        home,
+        '--host',
+        String(host),
+        '--port',
+        String(port),
+        '--daemon-only',
+        '--no-browser',
+        '--skip-update-check',
+      ],
+      {
+        cwd: repoRoot,
+        env: process.env,
+        logPath: path.join(home, 'logs', 'daemon-restart.log'),
+      }
+    );
+  }
+
+  mergeUpdateState(home, {
+    busy: false,
+    current_version: targetVersion,
+    latest_version: targetVersion,
+    target_version: null,
+    last_checked_at: new Date().toISOString(),
+    last_check_error: null,
+    last_update_finished_at: new Date().toISOString(),
+    last_update_result: {
+      ok: true,
+      target_version: targetVersion,
+      message: restartDaemon
+        ? `DeepScientist updated to ${targetVersion}. The daemon is restarting.`
+        : `DeepScientist updated to ${targetVersion}.`,
+      log_path: installResult.logPath,
+    },
+  });
+
+  return {
+    ok: true,
+    updated: true,
+    status: buildUpdateStatus(home),
+    message: restartDaemon
+      ? `DeepScientist updated to ${targetVersion}. The daemon is restarting.`
+      : `DeepScientist updated to ${targetVersion}.`,
+    log_path: installResult.logPath,
+  };
+}
+
+async function maybeHandleStartupUpdate(home, rawArgs, options = {}) {
+  if (options.skipUpdateCheck || process.env.DS_SKIP_UPDATE_PROMPT === '1') {
+    return false;
+  }
+  const status = checkForUpdates(home, { force: false });
+  if (!status.update_available) {
+    return false;
+  }
+  if (!status.prompt_recommended) {
+    return false;
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    printUpdateStatus(status, { compact: true });
+    mergeUpdateState(home, {
+      last_prompted_at: new Date().toISOString(),
+    });
+    return false;
+  }
+
+  const action = await promptUpdateAction(status);
+  if (action === 'later') {
+    markUpdateDeferred(home, status.latest_version);
+    return false;
+  }
+  if (action === 'skip') {
+    markUpdateSkipped(home, status.latest_version);
+    return false;
+  }
+  if (action === 'update' && !status.can_self_update) {
+    console.log(`Manual update required: ${status.manual_update_command}`);
+    if (status.reason) {
+      console.log(status.reason);
+    }
+    markUpdateDeferred(home, status.latest_version);
+    return false;
+  }
+  if (action === 'update') {
+    console.log(`Updating DeepScientist ${status.current_version} -> ${status.latest_version} ...`);
+    const result = await performSelfUpdate(home, { restartDaemon: false });
+    if (!result.ok) {
+      console.error(result.message);
+      return false;
+    }
+    console.log(result.message);
+    await restartIntoUpdatedLauncher(rawArgs);
+    return true;
+  }
+  return false;
+}
+
+async function startBackgroundUpdateWorker(home, options = {}) {
+  const launcherPath = resolveLauncherPath();
+  if (!launcherPath) {
+    return {
+      ok: false,
+      started: false,
+      message: 'Could not resolve the launcher path for the background update worker.',
+    };
+  }
+  const status = checkForUpdates(home, { force: false });
+  mergeUpdateState(home, {
+    current_version: status.current_version,
+    latest_version: status.latest_version,
+    target_version: status.latest_version,
+    busy: true,
+    last_update_started_at: new Date().toISOString(),
+    last_update_result: null,
+  });
+  const workerArgs = [
+    launcherPath,
+    'update',
+    '--yes',
+    '--worker',
+    '--home',
+    home,
+    '--host',
+    String(options.host || '0.0.0.0'),
+    '--port',
+    String(options.port || 20999),
+    '--restart-daemon',
+    '--skip-update-check',
+  ];
+  spawnDetachedNode(workerArgs, {
+    cwd: repoRoot,
+    env: process.env,
+    logPath: path.join(home, 'logs', 'update-worker.log'),
+  });
+  return {
+    ok: true,
+    started: true,
+    message: 'DeepScientist update worker started.',
+    status: buildUpdateStatus(home),
+  };
+}
+
+async function readConfiguredUiAddress(home, runtimePython, fallbackHost, fallbackPort) {
+  try {
+    const result = runPythonCli(runtimePython, ['--home', home, 'config', 'show', 'config'], { capture: true, allowFailure: true });
     const text = result.stdout || '';
     const hostMatch = text.match(/^\s*host:\s*["']?([^"'\n]+)["']?\s*$/m);
     const portMatch = text.match(/^\s*port:\s*(\d+)\s*$/m);
@@ -1158,7 +2502,7 @@ function readConfiguredUiAddressFromFile(home, fallbackHost, fallbackPort) {
   }
 }
 
-async function startDaemon(home, venvPython, host, port) {
+async function startDaemon(home, runtimePython, host, port) {
   const browserUrl = browserUiUrl(host, port);
   const daemonBindUrl = bindUiUrl(host, port);
   const state = readDaemonState(home);
@@ -1182,10 +2526,10 @@ async function startDaemon(home, venvPython, host, port) {
     removeDaemonState(home);
   }
 
-  const bootstrapState = readCodexBootstrapState(home, venvPython);
+  const bootstrapState = readCodexBootstrapState(home, runtimePython);
   if (!bootstrapState.codex_ready) {
     console.log('Codex is not marked ready yet. Running startup probe...');
-    const probe = probeCodexBootstrap(home, venvPython);
+    const probe = probeCodexBootstrap(home, runtimePython);
     if (!probe || probe.ok !== true) {
       throw createCodexPreflightError(home, probe);
     }
@@ -1198,7 +2542,7 @@ async function startDaemon(home, venvPython, host, port) {
   const out = fs.openSync(logPath, 'a');
   const daemonId = crypto.randomUUID();
   const child = spawn(
-    venvPython,
+    runtimePython,
     ['-m', 'deepscientist.cli', '--home', home, 'daemon', '--host', host, '--port', String(port)],
     {
       cwd: repoRoot,
@@ -1206,11 +2550,11 @@ async function startDaemon(home, venvPython, host, port) {
       stdio: ['ignore', out, out],
       env: {
         ...process.env,
+        DEEPSCIENTIST_REPO_ROOT: repoRoot,
+        DEEPSCIENTIST_NODE_BINARY: process.execPath,
+        DEEPSCIENTIST_LAUNCHER_PATH: path.join(repoRoot, 'bin', 'ds.js'),
         DS_DAEMON_ID: daemonId,
         DS_DAEMON_MANAGED_BY: 'ds-launcher',
-        PYTHONPATH: process.env.PYTHONPATH
-          ? `${srcPath}${path.delimiter}${process.env.PYTHONPATH}`
-          : srcPath,
       },
     }
   );
@@ -1304,7 +2648,7 @@ function handleCodexPreflightFailure(error) {
   return true;
 }
 
-function launchTui(url, questId, home, venvPython) {
+function launchTui(url, questId, home, runtimePython) {
   const entry = ensureNodeBundle('src/tui', 'dist/index.js');
   const args = [entry, '--base-url', url];
   if (questId) {
@@ -1316,13 +2660,136 @@ function launchTui(url, questId, home, venvPython) {
     env: {
       ...process.env,
       DEEPSCIENTIST_TUI_HOME: home,
-      DEEPSCIENTIST_TUI_PYTHON: venvPython,
-      DEEPSCIENTIST_VENV_PYTHON: venvPython,
+      DEEPSCIENTIST_TUI_PYTHON: runtimePython,
+      DEEPSCIENTIST_RUNTIME_PYTHON: runtimePython,
     },
   });
   child.on('exit', (code) => {
     process.exit(code ?? 0);
   });
+}
+
+async function updateMain(rawArgs) {
+  const options = parseUpdateArgs(rawArgs);
+  if (!options) {
+    printUpdateHelp();
+    process.exit(1);
+  }
+  if (options.help) {
+    printUpdateHelp();
+    process.exit(0);
+  }
+
+  const home = options.home || resolveHome(rawArgs);
+  ensureDir(home);
+
+  if (options.background && options.yes && !options.worker) {
+    const payload = await startBackgroundUpdateWorker(home, {
+      host: options.host,
+      port: options.port,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(payload.message);
+    }
+    process.exit(payload.ok ? 0 : 1);
+  }
+
+  const status = checkForUpdates(home, { force: options.forceCheck || options.check || options.yes || options.worker });
+
+  if (options.remindLater) {
+    const payload = markUpdateDeferred(home, status.latest_version);
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(`DeepScientist will remind you later about ${payload.latest_version || 'the next release'}.`);
+    }
+    process.exit(0);
+  }
+
+  if (options.skipVersion) {
+    const payload = markUpdateSkipped(home, status.latest_version);
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(`DeepScientist will stop prompting for ${payload.last_skipped_version || payload.latest_version || 'this release'}.`);
+    }
+    process.exit(0);
+  }
+
+  if (options.worker) {
+    const payload = await performSelfUpdate(home, {
+      host: options.host,
+      port: options.port,
+      restartDaemon: options.restartDaemon,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(payload.message);
+    }
+    process.exit(payload.ok ? 0 : 1);
+  }
+
+  if (options.yes) {
+    const payload = await performSelfUpdate(home, {
+      host: options.host,
+      port: options.port,
+      restartDaemon: options.restartDaemon,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+    } else {
+      console.log(payload.message);
+    }
+    process.exit(payload.ok ? 0 : 1);
+  }
+
+  if (options.check || options.json) {
+    if (options.json) {
+      console.log(JSON.stringify(status, null, 2));
+    } else {
+      printUpdateStatus(status);
+    }
+    process.exit(0);
+  }
+
+  if (!status.update_available) {
+    printUpdateStatus(status, { compact: true });
+    process.exit(0);
+  }
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    printUpdateStatus(status, { compact: true });
+    process.exit(0);
+  }
+
+  const action = await promptUpdateAction(status);
+  if (action === 'later') {
+    markUpdateDeferred(home, status.latest_version);
+    console.log('Update reminder deferred.');
+    process.exit(0);
+  }
+  if (action === 'skip') {
+    markUpdateSkipped(home, status.latest_version);
+    console.log(`Skipped ${status.latest_version}.`);
+    process.exit(0);
+  }
+  if (!status.can_self_update) {
+    console.log(`Manual update command: ${status.manual_update_command}`);
+    if (status.reason) {
+      console.log(status.reason);
+    }
+    process.exit(0);
+  }
+  const payload = await performSelfUpdate(home, {
+    host: options.host,
+    port: options.port,
+    restartDaemon: options.restartDaemon,
+  });
+  console.log(payload.message);
+  process.exit(payload.ok ? 0 : 1);
 }
 
 async function launcherMain(rawArgs) {
@@ -1368,11 +2835,15 @@ async function launcherMain(rawArgs) {
     process.exit(healthy && (!state || identityMatch) ? 0 : 1);
   }
 
-  const venvPython = ensurePythonRuntime(home);
-  ensureInitialized(home, venvPython);
+  const pythonRuntime = ensurePythonRuntime(home);
+  const runtimePython = pythonRuntime.runtimePython;
+  ensureInitialized(home, runtimePython);
+  if (await maybeHandleStartupUpdate(home, rawArgs, options)) {
+    return true;
+  }
   maybePrintOptionalLatexNotice(home);
 
-  const configuredUi = await readConfiguredUiAddress(home, venvPython, options.host, options.port);
+  const configuredUi = await readConfiguredUiAddress(home, runtimePython, options.host, options.port);
   const host = configuredUi.host;
   const port = configuredUi.port;
   const mode = normalizeMode(options.mode ?? 'web');
@@ -1388,7 +2859,7 @@ async function launcherMain(rawArgs) {
   step(4, 4, 'Starting local daemon and UI surfaces');
   let started;
   try {
-    started = await startDaemon(home, venvPython, host, port);
+    started = await startDaemon(home, runtimePython, host, port);
   } catch (error) {
     if (handleCodexPreflightFailure(error)) return true;
     throw error;
@@ -1401,6 +2872,8 @@ async function launcherMain(rawArgs) {
     autoOpenRequested: shouldOpenBrowser,
     browserOpened,
     daemonOnly: options.daemonOnly,
+    home,
+    pythonSelection: pythonRuntime.runtimeProbe,
   });
 
   if (options.daemonOnly) {
@@ -1409,13 +2882,17 @@ async function launcherMain(rawArgs) {
   if (mode === 'web') {
     process.exit(0);
   }
-  launchTui(started.url, options.questId, home, venvPython);
+  launchTui(started.url, options.questId, home, runtimePython);
   return true;
 }
 
 async function main() {
   const args = process.argv.slice(2);
   const positional = findFirstPositionalArg(args);
+  if (positional && positional.value === 'update') {
+    await updateMain(args);
+    return;
+  }
   if (args.length === 0 || args[0] === 'ui' || (!positional && args[0]?.startsWith('--'))) {
     await launcherMain(args);
     return;
@@ -1426,15 +2903,16 @@ async function main() {
   }
   if (positional && pythonCommands.has(positional.value)) {
     const home = resolveHome(args);
-    const venvPython = ensurePythonRuntime(home);
+    const pythonRuntime = ensurePythonRuntime(home);
+    const runtimePython = pythonRuntime.runtimePython;
     if (positional.value === 'run' || positional.value === 'daemon') {
       maybePrintOptionalLatexNotice(home);
     }
     if (positional.value === 'run' || positional.value === 'daemon') {
-      const bootstrapState = readCodexBootstrapState(home, venvPython);
+      const bootstrapState = readCodexBootstrapState(home, runtimePython);
       if (!bootstrapState.codex_ready) {
         try {
-          const probe = probeCodexBootstrap(home, venvPython);
+          const probe = probeCodexBootstrap(home, runtimePython);
           if (!probe || probe.ok !== true) {
             throw createCodexPreflightError(home, probe);
           }
@@ -1444,14 +2922,32 @@ async function main() {
         }
       }
     }
-    const result = runPythonCli(venvPython, normalizePythonCliArgs(args, home), { allowFailure: true });
+    const result = runPythonCli(runtimePython, normalizePythonCliArgs(args, home), { allowFailure: true });
     process.exit(result.status ?? 0);
     return;
   }
   await launcherMain(args);
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+module.exports = {
+  __internal: {
+    minimumPythonRequest,
+    createPythonRuntimePlan,
+    buildUvRuntimeEnv,
+    runtimePythonEnvPath,
+    runtimePythonPath,
+    legacyVenvRootPath,
+    resolveHome,
+    useEditableProjectInstall,
+    compareVersions,
+    detectInstallMode,
+    buildUpdateStatus,
+  },
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

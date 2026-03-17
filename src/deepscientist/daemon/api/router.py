@@ -8,6 +8,8 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
     ("GET", re.compile(r"^/ui/(?P<ui_path>.+)$"), "ui_asset"),
     ("GET", re.compile(r"^/(?P<spa_path>(?!api(?:/|$)|ui(?:/|$)|assets(?:/|$)).+)$"), "spa_root"),
     ("GET", re.compile(r"^/api/health$"), "health"),
+    ("GET", re.compile(r"^/api/system/update$"), "system_update"),
+    ("POST", re.compile(r"^/api/system/update$"), "system_update_action"),
     ("GET", re.compile(r"^/api/v1/health/cli$"), "cli_health"),
     ("POST", re.compile(r"^/api/admin/shutdown$"), "admin_shutdown"),
     ("GET", re.compile(r"^/api/acp/status$"), "acp_status"),

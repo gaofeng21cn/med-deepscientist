@@ -34,15 +34,15 @@ export const configSections: SettingsSection[] = [
         label: 'Home path',
         kind: 'text',
         placeholder: '/home/you/DeepScientist',
-        description: 'Root directory for config, quests, memory, logs, and caches.',
+        description: 'Root directory for config, projects, memory, logs, and caches.',
         whereToGet: 'Use your installed DeepScientist home directory. Usually keep the generated path.',
       },
       {
         key: 'default_runner',
         label: 'Default runner',
         kind: 'select',
-        description: 'Runner used by default when a quest does not override it.',
-        whereToGet: 'Choose the runner id that should execute quests most of the time.',
+        description: 'Runner used by default when a project does not override it.',
+        whereToGet: 'Choose the runner id that should execute projects most of the time.',
         options: [
           { label: 'Codex', value: 'codex' },
         ],
@@ -69,16 +69,16 @@ export const configSections: SettingsSection[] = [
         key: 'daemon.session_restore_on_start',
         label: 'Restore sessions on start',
         kind: 'boolean',
-        description: 'Reopen previous quest sessions when the daemon starts.',
+        description: 'Reopen previous project sessions when the daemon starts.',
         whereToGet: 'Enable when you want the daemon to resume previous working state automatically.',
       },
       {
         key: 'daemon.max_concurrent_quests',
-        label: 'Max concurrent quests',
+        label: 'Max concurrent projects',
         kind: 'number',
         placeholder: '1',
-        description: 'Upper bound on how many quests the daemon may run at the same time.',
-        whereToGet: 'Keep `1` unless you intentionally want parallel quest execution.',
+        description: 'Upper bound on how many projects the daemon may run at the same time.',
+        whereToGet: 'Keep `1` unless you intentionally want parallel project execution.',
       },
       {
         key: 'daemon.ack_timeout_ms',
@@ -170,13 +170,13 @@ export const configSections: SettingsSection[] = [
   {
     id: 'git',
     title: 'Git behavior',
-    description: 'How DeepScientist checkpoints and exports quest state.',
+    description: 'How DeepScientist checkpoints and exports project state.',
     fields: [
       {
         key: 'git.auto_checkpoint',
         label: 'Auto-checkpoint',
         kind: 'boolean',
-        description: 'Create Git checkpoints automatically during quest progress.',
+        description: 'Create Git checkpoints automatically during project progress.',
         whereToGet: 'Keep enabled unless you want to manage commits entirely by hand.',
       },
       {
@@ -184,7 +184,7 @@ export const configSections: SettingsSection[] = [
         label: 'Auto-push',
         kind: 'boolean',
         description: 'Push checkpoint commits to the default remote automatically.',
-        whereToGet: 'Enable only when the remote is trusted and quest repos are safe to push.',
+        whereToGet: 'Enable only when the remote is trusted and project repos are safe to push.',
       },
       {
         key: 'git.default_remote',
@@ -192,14 +192,14 @@ export const configSections: SettingsSection[] = [
         kind: 'text',
         placeholder: 'origin',
         description: 'Remote name used when auto-push or export actions need a destination.',
-        whereToGet: 'Use the Git remote name configured in your quest repositories.',
+        whereToGet: 'Use the Git remote name configured in your project repositories.',
       },
       {
         key: 'git.graph_formats',
         label: 'Graph export formats',
         kind: 'list',
         placeholder: 'svg, png, json',
-        description: 'Formats generated for Git / quest graph exports.',
+        description: 'Formats generated for Git / project graph exports.',
         whereToGet: 'Keep the default trio unless you intentionally want fewer export artifacts.',
       },
     ],
@@ -207,7 +207,7 @@ export const configSections: SettingsSection[] = [
   {
     id: 'skills',
     title: 'Skill synchronization',
-    description: 'How global and quest-local skills are mirrored into runner homes.',
+    description: 'How global and project-local skills are mirrored into runner homes.',
     fields: [
       {
         key: 'skills.sync_global_on_init',
@@ -218,17 +218,17 @@ export const configSections: SettingsSection[] = [
       },
       {
         key: 'skills.sync_quest_on_create',
-        label: 'Sync quest skills on create',
+        label: 'Sync project skills on create',
         kind: 'boolean',
-        description: 'Mirror skills into a quest-local runner home when a new quest is created.',
-        whereToGet: 'Keep enabled so new quests start with the expected skills immediately available.',
+        description: 'Mirror skills into a project-local runner home when a new project is created.',
+        whereToGet: 'Keep enabled so new projects start with the expected skills immediately available.',
       },
       {
         key: 'skills.sync_quest_on_open',
-        label: 'Sync quest skills on open',
+        label: 'Sync project skills on open',
         kind: 'boolean',
-        description: 'Refresh the quest-local skill mirror when an existing quest is opened.',
-        whereToGet: 'Enable if you update repo skills frequently and want open quests to pick them up.',
+        description: 'Refresh the project-local skill mirror when an existing project is opened.',
+        whereToGet: 'Enable if you update repo skills frequently and want open projects to pick them up.',
       },
     ],
   },
@@ -271,7 +271,7 @@ export const configSections: SettingsSection[] = [
         key: 'connectors.auto_ack',
         label: 'Auto-ack incoming messages',
         kind: 'boolean',
-        description: 'Send immediate short acknowledgments before the full quest work completes.',
+        description: 'Send immediate short acknowledgments before the full project work completes.',
         whereToGet: 'Enable for chat-first operators who expect a quick “received” response.',
       },
       {
@@ -285,7 +285,7 @@ export const configSections: SettingsSection[] = [
         key: 'connectors.direct_chat_enabled',
         label: 'Enable direct chat',
         kind: 'boolean',
-        description: 'Allow connectors to start or continue quests from direct messages.',
+        description: 'Allow connectors to start or continue projects from direct messages.',
         whereToGet: 'Disable if all connector traffic should be funneled through approved group chats only.',
       },
     ],
@@ -358,7 +358,7 @@ export const configSections: SettingsSection[] = [
         label: 'Compatibility profile',
         kind: 'text',
         placeholder: 'deepscientist-acp-compat/v1',
-        description: 'Named ACP compatibility profile used when exposing quest sessions to external consumers.',
+        description: 'Named ACP compatibility profile used when exposing project sessions to external consumers.',
         whereToGet: 'Keep the built-in profile unless you are intentionally matching another ACP consumer.',
       },
       {
@@ -474,7 +474,7 @@ export const runnerFields: SettingsField[] = [
     label: 'Default model',
     kind: 'text',
     placeholder: 'gpt-5.4',
-    description: 'Default model used when the quest or request does not override it.',
+    description: 'Default model used when the project or request does not override it.',
     whereToGet: 'Use the model id accepted by the selected runner.',
   },
   {
@@ -521,7 +521,7 @@ export const runnerFields: SettingsField[] = [
     key: 'retry_on_failure',
     label: 'Retry on failure',
     kind: 'boolean',
-    description: 'Automatically retry a failed runner turn instead of immediately ending the quest turn as an error.',
+    description: 'Automatically retry a failed runner turn instead of immediately ending the project turn as an error.',
     whereToGet: 'Keep enabled for Codex so transient CLI or transport failures can recover automatically.',
   },
   {
@@ -529,7 +529,7 @@ export const runnerFields: SettingsField[] = [
     label: 'Max attempts',
     kind: 'number',
     placeholder: '5',
-    description: 'Upper bound on total attempts for one quest turn, including the first run.',
+    description: 'Upper bound on total attempts for one project turn, including the first run.',
     whereToGet: 'Use a small number; DeepScientist hard-caps this at `5` even if a larger value is entered.',
   },
   {
@@ -554,7 +554,7 @@ export const runnerFields: SettingsField[] = [
     kind: 'number',
     placeholder: '8',
     description: 'Maximum delay allowed between retries after exponential growth is applied.',
-    whereToGet: 'Use a small ceiling so transient failures recover quickly without stalling the quest for too long.',
+    whereToGet: 'Use a small ceiling so transient failures recover quickly without stalling the project for too long.',
   },
   {
     key: 'status',

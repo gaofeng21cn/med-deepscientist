@@ -4,7 +4,11 @@
 
 ## 推荐使用流程
 
-1. 先安装 DeepScientist 和 Codex：
+1. 先安装 `uv`，再安装 DeepScientist 和 Codex：
+
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
    ```bash
    npm install -g @openai/codex @researai/deepscientist
@@ -30,6 +34,7 @@
 
 - 本地 Python 运行时是否健康
 - `~/DeepScientist` 是否存在且可写
+- `uv` 是否可用，以便管理本地 Python 运行时
 - `git` 是否安装并完成基本配置
 - 必需配置文件是否有效
 - 当前开源版本是否仍然使用 `codex` 作为可运行 runner
@@ -58,6 +63,20 @@ codex
 
 先完成一次登录，再重新执行 `ds doctor`。
 
+### 没有安装 `uv`
+
+运行：
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+如果你在 Windows PowerShell：
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
 ### 本地论文 PDF 编译暂时不可用
 
 如果你希望直接在 DeepScientist 里本地编译论文，可以安装一个轻量级 TinyTeX `pdflatex` 运行时：
@@ -85,6 +104,33 @@ ds --stop
 ```
 
 里的 `ui.port`。
+
+也可以直接临时换一个端口启动：
+
+```bash
+ds --port 21000
+```
+
+### 当前激活的是 Python `3.10` 或更低版本
+
+如果你已经在使用 conda，而当前环境过旧，请先激活正确环境：
+
+```bash
+conda activate ds311
+python3 --version
+which python3
+ds
+```
+
+或者新建一个可用环境：
+
+```bash
+conda create -n ds311 python=3.11 -y
+conda activate ds311
+ds
+```
+
+如果你不手动切换，`uv` 也可以在 DeepScientist home 下自动准备受管 Python 运行时。
 
 ### Git 用户身份没有配置
 

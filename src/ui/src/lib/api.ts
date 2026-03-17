@@ -25,6 +25,7 @@ import type {
   QuestDocument,
   QuestSummary,
   SessionPayload,
+  SystemUpdateStatus,
   WorkflowPayload,
 } from '@/types'
 
@@ -74,6 +75,12 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const client = {
+  systemUpdateStatus: () => api<SystemUpdateStatus>('/api/system/update'),
+  systemUpdateAction: (action: 'install_latest' | 'remind_later' | 'skip_version') =>
+    api<Record<string, unknown>>('/api/system/update', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
   quests: () => api<QuestSummary[]>('/api/quests'),
   nextQuestId: () => api<{ quest_id: string }>('/api/quest-id/next'),
   baselines: () => api<BaselineRegistryEntry[]>('/api/baselines'),
@@ -110,9 +117,17 @@ export const client = {
       ...body,
     } as Record<string, unknown>
   },
-  events: (questId: string, after: number, options?: { limit?: number; tail?: boolean }) => {
+  events: (
+    questId: string,
+    after: number,
+    options?: { before?: number | null; limit?: number; tail?: boolean }
+  ) => {
     const params = new URLSearchParams()
-    params.set('after', String(after))
+    if (typeof options?.before === 'number' && Number.isFinite(options.before) && options.before > 0) {
+      params.set('before', String(Math.floor(options.before)))
+    } else {
+      params.set('after', String(after))
+    }
     params.set('format', 'acp')
     params.set('session_id', `quest:${questId}`)
     if (typeof options?.limit === 'number' && Number.isFinite(options.limit) && options.limit > 0) {

@@ -83,6 +83,10 @@ export type SessionPayload = {
 
 export type FeedEnvelope = {
   cursor: number
+  has_more?: boolean
+  oldest_cursor?: number | null
+  newest_cursor?: number | null
+  direction?: 'after' | 'before' | 'tail' | string
   acp_updates: Array<{
     method: string
     params: {

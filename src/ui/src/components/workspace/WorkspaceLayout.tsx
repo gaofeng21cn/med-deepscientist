@@ -157,23 +157,6 @@ function truncateNavbarProjectTitle(
   return `${glyphs.slice(0, maxChars).join('')}...`
 }
 
-function scheduleIdle(work: () => void, timeoutMs = 1200) {
-  if (typeof window === 'undefined') {
-    work()
-    return () => {}
-  }
-  const win = window as Window & {
-    requestIdleCallback?: (cb: IdleRequestCallback, opts?: IdleRequestOptions) => number
-    cancelIdleCallback?: (id: number) => void
-  }
-  if (win.requestIdleCallback) {
-    const id = win.requestIdleCallback(() => work(), { timeout: timeoutMs })
-    return () => win.cancelIdleCallback?.(id)
-  }
-  const timer = window.setTimeout(work, timeoutMs)
-  return () => window.clearTimeout(timer)
-}
-
 function isMarkdownContext(resourceName?: string, mimeType?: string, docKind?: unknown) {
   if (docKind === 'markdown') return true
   if (mimeType && MARKDOWN_MIME_TYPES.has(mimeType)) return true
@@ -2191,7 +2174,7 @@ function LeftPanel({
                   ? readOnlyMode
                     ? t('leftpanel_view_only')
                     : localQuestMode
-                      ? 'Create files from the document editor in local quest mode.'
+                      ? 'Create files from the document editor in local project mode.'
                     : t('leftpanel_view_only')
                   : t('explorer_new_file')
               }
@@ -2211,7 +2194,7 @@ function LeftPanel({
                   ? readOnlyMode
                     ? t('leftpanel_view_only')
                     : localQuestMode
-                      ? 'Folder creation is not exposed in local quest mode.'
+                      ? 'Folder creation is not exposed in local project mode.'
                     : t('leftpanel_view_only')
                   : t('explorer_new_folder')
               }
@@ -2231,7 +2214,7 @@ function LeftPanel({
                   ? readOnlyMode
                     ? t('leftpanel_view_only')
                     : localQuestMode
-                      ? 'Upload is disabled in local quest mode.'
+                      ? 'Upload is disabled in local project mode.'
                     : t('leftpanel_view_only')
                   : t('explorer_upload_files')
               }
@@ -3460,22 +3443,6 @@ export function WorkspaceLayout({
       if (doneTimer) window.clearTimeout(doneTimer)
     }
   }, [projectId])
-
-  // Preload file tree after first paint to keep the initial render light.
-  React.useEffect(() => {
-    if (!projectId) return
-    let cancelled = false
-    const cleanup = scheduleIdle(() => {
-      if (cancelled) return
-      loadFiles(projectId).catch((e) => {
-        console.error('[WorkspaceLayout] Failed to preload file tree:', e)
-      })
-    }, 1400)
-    return () => {
-      cancelled = true
-      cleanup()
-    }
-  }, [projectId, loadFiles])
 
   const openSearch = React.useCallback(
     (nextQuery?: string, questId?: string) => {

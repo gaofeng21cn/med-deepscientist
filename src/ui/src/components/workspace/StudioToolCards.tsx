@@ -303,7 +303,7 @@ function buildMemoryModel(item: RenderOperationFeedItem): StudioToolCardModel {
       : tool === 'list_recent'
         ? typeof count === 'number'
           ? `${count} recent cards`
-          : 'Recent quest memory'
+          : 'Recent project memory'
         : [
             asString(memoryCard?.type) || asString(memoryCard?.kind) || asString(args?.kind),
             asString(memoryCard?.scope) || asString(args?.scope),

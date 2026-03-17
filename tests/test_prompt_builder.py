@@ -160,6 +160,10 @@ def test_prompt_builder_loads_lingzhu_connector_contract_when_bound(temp_home: P
     assert "surface_actions" in prompt
     assert "bridge itself emits the immediate transport-level receipt acknowledgement" in prompt
     assert "do not waste your first model response" in prompt
+    assert "through `artifact.interact(...)`" in prompt
+    assert "clear, concise, respectful, and high-information-density" in prompt
+    assert "for each Lingzhu-facing `artifact.interact(...)` message" in prompt
+    assert "only the synopsis and key facts" in prompt
 
 
 @pytest.mark.parametrize(("skill_id",), [("decision",), ("baseline",), ("analysis-campaign",), ("write",)])
@@ -335,6 +339,10 @@ def test_prompt_builder_mentions_decision_request_options_and_timeout(temp_home:
     assert "wait up to 1 day" in prompt
     assert "choose the best option yourself" in prompt
     assert "notify the user of the chosen option" in prompt
+    assert "GitHub key/token" in prompt
+    assert "Hugging Face key/token" in prompt
+    assert "do not fabricate placeholder credentials" in prompt
+    assert "sleep 3600" in prompt
 
 
 def test_prompt_builder_mentions_algorithm_first_mode_when_paper_disabled(temp_home: Path) -> None:
@@ -627,12 +635,19 @@ def test_prompt_builder_includes_paper_bundle_and_claim_snapshot(temp_home: Path
             '"writing_plan_path":"paper/writing_plan.md",'
             '"references_path":"paper/references.bib",'
             '"claim_evidence_map_path":"paper/claim_evidence_map.json",'
+            '"baseline_inventory_path":"paper/baseline_inventory.json",'
             '"compile_report_path":"paper/build/compile_report.json",'
             '"pdf_path":"paper/paper.pdf",'
-            '"latex_root_path":"paper/latex"'
+            '"latex_root_path":"paper/latex",'
+            '"open_source_manifest_path":"release/open_source/manifest.json",'
+            '"open_source_cleanup_plan_path":"release/open_source/cleanup_plan.md"'
             '}'
         )
         + "\n",
+        encoding="utf-8",
+    )
+    (paper_root / "baseline_inventory.json").write_text(
+        '{"supplementary_baselines":[{"baseline_id":"cmp-1"}]}\n',
         encoding="utf-8",
     )
     (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
@@ -640,6 +655,10 @@ def test_prompt_builder_includes_paper_bundle_and_claim_snapshot(temp_home: Path
     (paper_root / "references.bib").write_text("% refs\n", encoding="utf-8")
     (paper_root / "review").mkdir(parents=True, exist_ok=True)
     (paper_root / "review" / "review.md").write_text("# Review\n", encoding="utf-8")
+    release_root = quest_root / "release" / "open_source"
+    release_root.mkdir(parents=True, exist_ok=True)
+    (release_root / "manifest.json").write_text('{"release_branch":"release/demo"}\n', encoding="utf-8")
+    (release_root / "cleanup_plan.md").write_text("# Cleanup\n", encoding="utf-8")
 
     prompt = builder.build(
         quest_id=snapshot["quest_id"],
@@ -652,6 +671,9 @@ def test_prompt_builder_includes_paper_bundle_and_claim_snapshot(temp_home: Path
     assert "selected_outline_title: Outline Title" in prompt
     assert "claim_status_counts: supported=1, partial=1, unsupported=0, deferred=0" in prompt
     assert "downgrade_watchlist: C2 [partial]" in prompt
+    assert "baseline_inventory_status: paper/baseline_inventory.json [exists]" in prompt
+    assert "open_source_manifest_status: release/open_source/manifest.json [exists]" in prompt
+    assert "open_source_release_branch: release/demo" in prompt
     assert "paper_state_rule:" in prompt
 
 
@@ -676,6 +698,8 @@ def test_prompt_builder_mentions_long_running_bash_exec_monitoring_protocol(temp
     assert "each completed sleep/await cycle" in prompt
     assert "estimated next reply time" in prompt
     assert "__DS_PROGRESS__" in prompt
+    assert "estimate whether the command can finish within the selected wait window" in prompt
+    assert "use bash_exec(mode='detach', ...) and monitor" in prompt
 
 
 def test_prompt_builder_requires_all_shell_like_commands_to_use_bash_exec(temp_home: Path) -> None:

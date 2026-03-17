@@ -82,6 +82,47 @@ def test_acp_event_message_preserves_run_metadata(temp_home: Path) -> None:
     assert update["skill_id"] == "decision"
 
 
+def test_acp_event_polling_supports_loading_older_pages(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("acp older quest")
+    quest_id = quest["quest_id"]
+    app = DaemonApp(temp_home)
+
+    for index in range(1, 8):
+        app.quest_service.append_message(
+            quest_id,
+            role="assistant" if index % 2 == 0 else "user",
+            content=f"message-{index}",
+            source="local:default",
+        )
+
+    latest_payload = app.handlers.quest_events(
+        quest_id,
+        path=f"/api/quests/{quest_id}/events?format=acp&session_id=session:test&limit=3&tail=1",
+    )
+    assert latest_payload["direction"] == "tail"
+    assert latest_payload["has_more"] is True
+    assert latest_payload["oldest_cursor"] == 5
+    assert latest_payload["newest_cursor"] == 7
+
+    older_payload = app.handlers.quest_events(
+        quest_id,
+        path=f"/api/quests/{quest_id}/events?format=acp&session_id=session:test&limit=2&before=5",
+    )
+    assert older_payload["direction"] == "before"
+    assert older_payload["has_more"] is True
+    assert older_payload["oldest_cursor"] == 3
+    assert older_payload["newest_cursor"] == 4
+
+    older_messages = [
+        update["params"]["update"]["message"]["content"]
+        for update in older_payload["acp_updates"]
+        if update["params"]["update"]["kind"] == "message"
+    ]
+    assert older_messages == ["message-3", "message-4"]
+
+
 def test_acp_artifact_update_exposes_interaction_metadata(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

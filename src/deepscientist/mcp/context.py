@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..home import default_home
+
 
 @dataclass(frozen=True)
 class McpContext:
@@ -24,7 +26,7 @@ class McpContext:
             value = os.environ.get(name, "").strip()
             return Path(value).expanduser() if value else None
 
-        home = _path("DS_HOME") or (Path.home() / "DeepScientist")
+        home = _path("DEEPSCIENTIST_HOME") or _path("DS_HOME") or default_home()
         return cls(
             home=home,
             quest_id=os.environ.get("DS_QUEST_ID") or None,

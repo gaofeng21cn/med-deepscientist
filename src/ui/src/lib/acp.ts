@@ -17,9 +17,9 @@ import type {
 } from '@/types'
 
 const MAX_PENDING_ITEMS = 18
-const RESTORE_EVENT_LIMIT = 400
-const FULL_HISTORY_MAX_BATCHES = 25
-const MAX_FEED_HISTORY = RESTORE_EVENT_LIMIT * FULL_HISTORY_MAX_BATCHES
+const INITIAL_EVENT_LIMIT = 120
+const OLDER_HISTORY_PAGE_LIMIT = 80
+const MAX_FEED_HISTORY = 2400
 const LOCAL_USER_SOURCE = 'web-local'
 
 type ParsedEvent = {
@@ -233,6 +233,35 @@ function appendHistoryItem(history: FeedItem[], item: FeedItem): FeedItem[] {
     return history
   }
   return [...history, item].slice(-MAX_FEED_HISTORY)
+}
+
+function prependHistoryItems(history: FeedItem[], incoming: FeedItem[]): FeedItem[] {
+  if (incoming.length === 0) {
+    return history
+  }
+  const existingIds = new Set(history.map((item) => item.id))
+  const prefix: FeedItem[] = []
+  for (const item of incoming) {
+    if (existingIds.has(item.id)) {
+      continue
+    }
+    existingIds.add(item.id)
+    prefix.push(item)
+  }
+  return prefix.length > 0 ? [...prefix, ...history] : history
+}
+
+function parseCursorValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.floor(value)
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed)
+    }
+  }
+  return null
 }
 
 function mergeAssistantMessageContent(left: string, right: string) {
@@ -472,10 +501,10 @@ export function useQuestWorkspace(questId: string | null) {
   const [pendingFeed, setPendingFeed] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(false)
   const [restoring, setRestoring] = useState(false)
-  const [historyTruncated, setHistoryTruncated] = useState(false)
-  const [historyLimit, setHistoryLimit] = useState<number | null>(null)
-  const [historyExpanded, setHistoryExpanded] = useState(false)
-  const [historyLoadingFull, setHistoryLoadingFull] = useState(false)
+  const [hasOlderHistory, setHasOlderHistory] = useState(false)
+  const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
+  const [oldestLoadedCursor, setOldestLoadedCursor] = useState<number | null>(null)
+  const [newestLoadedCursor, setNewestLoadedCursor] = useState<number | null>(null)
   const [connectionState, setConnectionState] = useState<QuestConnectionState>('connecting')
   const [error, setError] = useState<string | null>(null)
   const [activeDocument, setActiveDocument] = useState<OpenDocumentPayload | null>(null)
@@ -489,8 +518,13 @@ export function useQuestWorkspace(questId: string | null) {
   const detailsRefreshTimerRef = useRef<number | null>(null)
   const detailsRefreshInFlightRef = useRef(false)
   const detailsRefreshPendingRef = useRef(false)
+  const sessionRefreshTimerRef = useRef<number | null>(null)
+  const sessionRefreshInFlightRef = useRef(false)
+  const sessionRefreshPendingRef = useRef(false)
   const pendingStreamCleanupTimerRef = useRef<number | null>(null)
   const lastEventIdRef = useRef<string | null>(null)
+  const oldestLoadedCursorRef = useRef<number | null>(null)
+  const newestLoadedCursorRef = useRef<number | null>(null)
 
   const feed = useMemo(() => [...history, ...pendingFeed], [history, pendingFeed])
   const slashCommands = useMemo(() => session?.acp_session?.slash_commands ?? [], [session])
@@ -522,6 +556,26 @@ export function useQuestWorkspace(questId: string | null) {
     pendingFeedRef.current = nextState.pending
     setHistory(nextState.history)
     setPendingFeed(nextState.pending)
+  }, [])
+
+  const updateHistoryWindow = useCallback((args: {
+    oldestCursor?: number | null
+    newestCursor?: number | null
+    hasOlder?: boolean
+  }) => {
+    if ('oldestCursor' in args) {
+      const nextOldest = args.oldestCursor ?? null
+      oldestLoadedCursorRef.current = nextOldest
+      setOldestLoadedCursor(nextOldest)
+    }
+    if ('newestCursor' in args) {
+      const nextNewest = args.newestCursor ?? null
+      newestLoadedCursorRef.current = nextNewest
+      setNewestLoadedCursor(nextNewest)
+    }
+    if ('hasOlder' in args && typeof args.hasOlder === 'boolean') {
+      setHasOlderHistory(args.hasOlder)
+    }
   }, [])
 
   const hydrateState = useCallback(async (targetQuestId: string) => {
@@ -565,6 +619,14 @@ export function useQuestWorkspace(questId: string | null) {
       detailsRefreshTimerRef.current = null
     }
     detailsRefreshPendingRef.current = false
+  }, [])
+
+  const clearSessionRefresh = useCallback(() => {
+    if (sessionRefreshTimerRef.current) {
+      window.clearTimeout(sessionRefreshTimerRef.current)
+      sessionRefreshTimerRef.current = null
+    }
+    sessionRefreshPendingRef.current = false
   }, [])
 
   const clearPendingStreamCleanup = useCallback(() => {
@@ -636,6 +698,31 @@ export function useQuestWorkspace(questId: string | null) {
     [hydrateDetailsState]
   )
 
+  const flushSessionRefresh = useCallback(
+    async (targetQuestId: string) => {
+      if (questIdRef.current !== targetQuestId) {
+        return
+      }
+      if (sessionRefreshInFlightRef.current) {
+        sessionRefreshPendingRef.current = true
+        return
+      }
+      sessionRefreshInFlightRef.current = true
+      try {
+        await syncSessionSnapshot(targetQuestId)
+      } finally {
+        sessionRefreshInFlightRef.current = false
+        if (sessionRefreshPendingRef.current && questIdRef.current === targetQuestId) {
+          sessionRefreshPendingRef.current = false
+          window.setTimeout(() => {
+            void flushSessionRefresh(targetQuestId)
+          }, 120)
+        }
+      }
+    },
+    [syncSessionSnapshot]
+  )
+
   const queueDetailsRefresh = useCallback(
     (targetQuestId: string, delay = 180) => {
       if (questIdRef.current !== targetQuestId || !detailsEnabledRef.current) {
@@ -653,11 +740,35 @@ export function useQuestWorkspace(questId: string | null) {
     [flushDetailsRefresh]
   )
 
+  const queueSessionRefresh = useCallback(
+    (targetQuestId: string, delay = 240) => {
+      if (questIdRef.current !== targetQuestId) {
+        return
+      }
+      if (sessionRefreshTimerRef.current) {
+        sessionRefreshPendingRef.current = true
+        return
+      }
+      sessionRefreshTimerRef.current = window.setTimeout(() => {
+        sessionRefreshTimerRef.current = null
+        void flushSessionRefresh(targetQuestId)
+      }, delay)
+    },
+    [flushSessionRefresh]
+  )
+
   const applyUpdates = useCallback(
     async (targetQuestId: string, updates: Array<Record<string, unknown>>) => {
       if (questIdRef.current !== targetQuestId || updates.length === 0) {
         return
       }
+      const highestCursor = updates.reduce<number | null>((current, item) => {
+        const nextValue = parseCursorValue(item.cursor)
+        if (nextValue == null) {
+          return current
+        }
+        return current == null ? nextValue : Math.max(current, nextValue)
+      }, null)
       const normalized = updates.map((item) => normalizeUpdate(item))
       const finishedRunIds = updates.flatMap((item) => {
         if (String(item.event_type ?? '') !== 'runner.turn_finish') {
@@ -681,6 +792,11 @@ export function useQuestWorkspace(questId: string | null) {
         nextState = sealPendingAssistantStreams(nextState, finishedRunIds)
       }
       updateFeedState(nextState)
+      if (highestCursor != null) {
+        updateHistoryWindow({
+          newestCursor: Math.max(newestLoadedCursorRef.current ?? 0, highestCursor),
+        })
+      }
       if (normalized.some((item) => shouldRefreshSessionSnapshot(item))) {
         const nextSession = await syncSessionSnapshot(targetQuestId)
         if (snapshotIndicatesLiveRun(nextSession?.snapshot ?? null)) {
@@ -715,14 +831,16 @@ export function useQuestWorkspace(questId: string | null) {
         queueDetailsRefresh(targetQuestId)
       }
       if (normalized.some((item) => item.type === 'artifact')) {
-        await syncSessionSnapshot(targetQuestId)
+        queueSessionRefresh(targetQuestId)
       }
     },
     [
       clearPendingStreamCleanup,
       queueDetailsRefresh,
+      queueSessionRefresh,
       syncSessionSnapshot,
       updateFeedState,
+      updateHistoryWindow,
     ]
   )
 
@@ -738,10 +856,12 @@ export function useQuestWorkspace(questId: string | null) {
         setConnectionState('connecting')
         cursorRef.current = 0
         lastEventIdRef.current = null
-        setHistoryTruncated(false)
-        setHistoryLimit(null)
-        setHistoryExpanded(false)
-        setHistoryLoadingFull(false)
+        updateHistoryWindow({
+          oldestCursor: null,
+          newestCursor: null,
+          hasOlder: false,
+        })
+        setLoadingOlderHistory(false)
         updateFeedState({ history: [], pending: [] })
       }
       try {
@@ -749,7 +869,7 @@ export function useQuestWorkspace(questId: string | null) {
         const [hydrated, nextFeed] = await Promise.all([
           hydrateState(targetQuestId),
           reset
-            ? client.events(targetQuestId, 0, { limit: RESTORE_EVENT_LIMIT, tail: true })
+            ? client.events(targetQuestId, 0, { limit: INITIAL_EVENT_LIMIT, tail: true })
             : client.events(targetQuestId, after),
         ])
         if (!hydrated || questIdRef.current !== targetQuestId) {
@@ -770,9 +890,22 @@ export function useQuestWorkspace(questId: string | null) {
         cursorRef.current = typeof nextFeed.cursor === 'number' ? nextFeed.cursor : after
         lastEventIdRef.current = String(cursorRef.current)
         if (reset) {
-          const truncated = Boolean(nextFeed.has_more)
-          setHistoryTruncated(truncated)
-          setHistoryLimit(truncated ? normalized.length : null)
+          updateHistoryWindow({
+            oldestCursor: parseCursorValue(nextFeed.oldest_cursor),
+            newestCursor:
+              parseCursorValue(nextFeed.newest_cursor) ??
+              parseCursorValue(nextFeed.cursor),
+            hasOlder: Boolean(nextFeed.has_more),
+          })
+        } else {
+          const nextNewestCursor =
+            parseCursorValue(nextFeed.newest_cursor) ??
+            parseCursorValue(nextFeed.cursor)
+          if (nextNewestCursor != null) {
+            updateHistoryWindow({
+              newestCursor: Math.max(newestLoadedCursorRef.current ?? 0, nextNewestCursor),
+            })
+          }
         }
         setError(null)
         setConnectionState('connected')
@@ -788,72 +921,48 @@ export function useQuestWorkspace(questId: string | null) {
         }
       }
     },
-    [hydrateState, questId, updateFeedState]
+    [hydrateState, questId, updateFeedState, updateHistoryWindow]
   )
 
-  const loadFullHistory = useCallback(async () => {
-    if (!questId || historyLoadingFull) {
+  const loadOlderHistory = useCallback(async () => {
+    if (!questId || loadingOlderHistory || !hasOlderHistory) {
+      return
+    }
+    const before = oldestLoadedCursorRef.current
+    if (!before || before <= 1) {
+      updateHistoryWindow({ hasOlder: false })
       return
     }
     const targetQuestId = questId
-    setHistoryLoadingFull(true)
+    setLoadingOlderHistory(true)
     setError(null)
     try {
-      const hydrated = await hydrateState(targetQuestId)
-      if (!hydrated || questIdRef.current !== targetQuestId) {
+      const response = await client.events(targetQuestId, 0, {
+        before,
+        limit: OLDER_HISTORY_PAGE_LIMIT,
+      })
+      if (questIdRef.current !== targetQuestId) {
         return
       }
-
-      let after = 0
-      let batches = 0
-      let lastCursor = 0
-      let hasMore = true
-      const aggregated: FeedItem[] = []
-
-      while (hasMore && batches < FULL_HISTORY_MAX_BATCHES) {
-        const response = await client.events(targetQuestId, after, { limit: RESTORE_EVENT_LIMIT })
-        if (questIdRef.current !== targetQuestId) {
-          return
-        }
-        const normalized = (response.acp_updates ?? []).map((item) => normalizeUpdate(item.params.update))
-        aggregated.push(...normalized)
-        lastCursor = typeof response.cursor === 'number' ? response.cursor : after
-        hasMore = Boolean(response.has_more)
-        after = lastCursor
-        batches += 1
-        if ((response.acp_updates ?? []).length === 0) {
-          break
-        }
-      }
-
-      let nextState = applyIncomingFeedUpdates(
-        {
-          history: [],
-          pending: [],
-        },
-        aggregated
-      )
-
-      if (hydrated.snapshot?.status && hydrated.snapshot.status !== 'running') {
-        nextState = sealPendingAssistantStreams(nextState)
-      }
-
-      updateFeedState(nextState)
-      cursorRef.current = lastCursor
-      lastEventIdRef.current = String(lastCursor)
-      setHistoryTruncated(hasMore)
-      setHistoryLimit(hasMore ? aggregated.length : null)
-      setHistoryExpanded(!hasMore)
+      const normalized = (response.acp_updates ?? []).map((item) => normalizeUpdate(item.params.update))
+      updateFeedState({
+        history: prependHistoryItems(historyRef.current, normalized),
+        pending: pendingFeedRef.current,
+      })
+      updateHistoryWindow({
+        oldestCursor: parseCursorValue(response.oldest_cursor) ?? oldestLoadedCursorRef.current,
+        hasOlder: Boolean(response.has_more),
+      })
     } catch (caught) {
       if (questIdRef.current === targetQuestId) {
         setError(caught instanceof Error ? caught.message : String(caught))
       }
     } finally {
       if (questIdRef.current === targetQuestId) {
-        setHistoryLoadingFull(false)
+        setLoadingOlderHistory(false)
       }
     }
-  }, [historyLoadingFull, hydrateState, questId, updateFeedState])
+  }, [hasOlderHistory, loadingOlderHistory, questId, updateFeedState, updateHistoryWindow])
 
   const submit = useCallback(
     async (value: string) => {
@@ -948,15 +1057,18 @@ export function useQuestWorkspace(questId: string | null) {
     historyRef.current = []
     pendingFeedRef.current = []
     cursorRef.current = 0
-    setHistoryTruncated(false)
-    setHistoryLimit(null)
-    setHistoryExpanded(false)
-    setHistoryLoadingFull(false)
+    oldestLoadedCursorRef.current = null
+    newestLoadedCursorRef.current = null
+    setHasOlderHistory(false)
+    setLoadingOlderHistory(false)
+    setOldestLoadedCursor(null)
+    setNewestLoadedCursor(null)
     setConnectionState(questId ? 'connecting' : 'connected')
     setError(null)
     detailsEnabledRef.current = false
     detailsRefreshInFlightRef.current = false
     clearDetailsRefresh()
+    clearSessionRefresh()
     clearPendingStreamCleanup()
     stopEventStream()
     lastEventIdRef.current = null
@@ -965,7 +1077,7 @@ export function useQuestWorkspace(questId: string | null) {
     }
     setRestoring(true)
     void bootstrap(true)
-  }, [bootstrap, clearDetailsRefresh, clearPendingStreamCleanup, questId, stopEventStream])
+  }, [bootstrap, clearDetailsRefresh, clearPendingStreamCleanup, clearSessionRefresh, questId, stopEventStream])
 
   const runEventStream = useCallback(
     async (targetQuestId: string, attempt = 0) => {
@@ -1081,9 +1193,10 @@ export function useQuestWorkspace(questId: string | null) {
     return () => {
       stopEventStream()
       clearDetailsRefresh()
+      clearSessionRefresh()
       clearPendingStreamCleanup()
     }
-  }, [clearDetailsRefresh, clearPendingStreamCleanup, questId, restoring, runEventStream, stopEventStream])
+  }, [clearDetailsRefresh, clearPendingStreamCleanup, clearSessionRefresh, questId, restoring, runEventStream, stopEventStream])
 
   const refreshWorkspace = useCallback(
     async (reset = true) => {
@@ -1110,10 +1223,14 @@ export function useQuestWorkspace(questId: string | null) {
     pendingFeed,
     loading,
     restoring,
-    historyTruncated,
-    historyLimit,
-    historyExpanded,
-    historyLoadingFull,
+    hasOlderHistory,
+    loadingOlderHistory,
+    oldestLoadedCursor,
+    newestLoadedCursor,
+    historyTruncated: hasOlderHistory,
+    historyLimit: history.length,
+    historyExpanded: !hasOlderHistory,
+    historyLoadingFull: loadingOlderHistory,
     hasLiveRun,
     streaming,
     activeToolCount,
@@ -1125,7 +1242,8 @@ export function useQuestWorkspace(questId: string | null) {
     setActiveDocument,
     refresh: refreshWorkspace,
     ensureViewData,
-    loadFullHistory,
+    loadOlderHistory,
+    loadFullHistory: loadOlderHistory,
     submit,
     stopRun,
   }

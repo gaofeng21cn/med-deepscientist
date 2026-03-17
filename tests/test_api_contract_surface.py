@@ -14,6 +14,8 @@ def _read(path: str) -> str:
 
 def test_backend_routes_cover_shared_web_and_tui_surface() -> None:
     expected_routes = [
+        ("GET", "/api/system/update", "system_update"),
+        ("POST", "/api/system/update", "system_update_action"),
         ("GET", "/api/baselines", "baselines"),
         ("GET", "/api/quests", "quests"),
         ("GET", "/api/quest-id/next", "quest_next_id"),
@@ -84,6 +86,7 @@ def test_web_client_uses_acp_and_git_surface_expected_by_backend() -> None:
 
     expected_fragments = [
         "/api/baselines",
+        "/api/system/update",
         "/api/quests/${questId}/session",
         "/api/quest-id/next",
         "/api/quests/${questId}/settings",

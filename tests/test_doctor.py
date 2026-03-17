@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,25 @@ def test_doctor_report_covers_ready_local_install(monkeypatch, temp_home: Path) 
     monkeypatch.setattr("deepscientist.doctor.resolve_runner_binary", lambda binary, runner_name=None: "/usr/bin/codex")
     monkeypatch.setattr("deepscientist.doctor._query_local_health", lambda url: None)
     monkeypatch.setattr("deepscientist.doctor._port_is_bindable", lambda host, port: (True, None))
+    monkeypatch.setattr(
+        "deepscientist.doctor._check_bundles",
+        lambda root: {
+            "id": "bundles",
+            "label": "UI bundles",
+            "ok": True,
+            "status": "ok",
+            "summary": "Web and TUI bundles are present.",
+            "warnings": [],
+            "errors": [],
+            "guidance": [],
+            "details": {},
+        },
+    )
+    monkeypatch.setattr("deepscientist.doctor.which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+    monkeypatch.setattr(
+        "deepscientist.doctor.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="uv 0.9.2\n", stderr=""),
+    )
 
     def fake_git_readiness(self):  # type: ignore[no-untyped-def]
         return {
@@ -78,6 +98,25 @@ def test_doctor_reports_optional_latex_runtime(monkeypatch, temp_home: Path) -> 
     monkeypatch.setattr("deepscientist.doctor.resolve_runner_binary", lambda binary, runner_name=None: "/usr/bin/codex")
     monkeypatch.setattr("deepscientist.doctor._query_local_health", lambda url: None)
     monkeypatch.setattr("deepscientist.doctor._port_is_bindable", lambda host, port: (True, None))
+    monkeypatch.setattr(
+        "deepscientist.doctor._check_bundles",
+        lambda root: {
+            "id": "bundles",
+            "label": "UI bundles",
+            "ok": True,
+            "status": "ok",
+            "summary": "Web and TUI bundles are present.",
+            "warnings": [],
+            "errors": [],
+            "guidance": [],
+            "details": {},
+        },
+    )
+    monkeypatch.setattr("deepscientist.doctor.which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+    monkeypatch.setattr(
+        "deepscientist.doctor.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="uv 0.9.2\n", stderr=""),
+    )
 
     def fake_git_readiness(self):  # type: ignore[no-untyped-def]
         return {

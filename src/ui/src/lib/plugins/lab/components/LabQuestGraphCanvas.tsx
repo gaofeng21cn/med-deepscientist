@@ -19,6 +19,7 @@ import {
   type NodeTypes,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import '@/lib/plugins/lab/lab.css'
 import dagre from '@dagrejs/dagre'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ChevronDown, Clock, FileText, GitBranch } from 'lucide-react'

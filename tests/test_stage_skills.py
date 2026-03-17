@@ -190,6 +190,14 @@ def test_all_stage_skills_document_blocking_decision_request_options_and_timeout
         assert "wait up to 1 day" in text
 
 
+def test_all_stage_skills_document_credential_wait_exception() -> None:
+    root = repo_root() / "src" / "skills"
+    for skill_id in EXPECTED_STAGE_SKILLS:
+        text = (root / skill_id / "SKILL.md").read_text(encoding="utf-8")
+        assert "missing external credential or secret" in text
+        assert "sleep 3600" in text
+
+
 def test_all_stage_skills_document_mailbox_preemption_and_acknowledgement() -> None:
     root = repo_root() / "src" / "skills"
     for skill_id in EXPECTED_STAGE_SKILLS:

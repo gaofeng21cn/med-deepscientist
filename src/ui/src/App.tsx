@@ -2,15 +2,33 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate, usePa
 
 import { DocsPage } from '@/components/docs/DocsPage'
 import { SettingsPage, type ConfigDocumentName } from '@/components/settings/SettingsPage'
+import type { ConnectorName } from '@/components/settings/connectorCatalog'
 import { I18nProvider, useI18n } from '@/lib/i18n'
 import { LandingPage } from '@/pages/LandingPage'
 import { ProjectWorkspacePage } from '@/pages/ProjectWorkspacePage'
 
 function normalizeConfigName(value?: string): ConfigDocumentName | null {
-  if (value && ['config', 'runners', 'connectors', 'plugins', 'mcp_servers'].includes(value)) {
+  if (value === 'connector' || value === 'connectors') {
+    return 'connectors'
+  }
+  if (value && ['config', 'runners', 'plugins', 'mcp_servers'].includes(value)) {
     return value as ConfigDocumentName
   }
   return null
+}
+
+function normalizeConnectorName(value?: string): ConnectorName | null {
+  if (value && ['qq', 'telegram', 'discord', 'slack', 'feishu', 'whatsapp', 'lingzhu'].includes(value)) {
+    return value as ConnectorName
+  }
+  return null
+}
+
+function settingsRoutePath(name?: ConfigDocumentName | null, connectorName?: ConnectorName | null) {
+  if (name === 'connectors') {
+    return connectorName ? `/settings/connector/${connectorName}` : '/settings/connector'
+  }
+  return name ? `/settings/${name}` : '/settings'
 }
 
 function normalizeRequestedDocSlug(pathname: string): string | null {
@@ -41,7 +59,7 @@ function DocsRoutePage() {
       onOpenSettings={(name?: ConfigDocumentName, hash?: string) =>
         navigate(
           {
-            pathname: name ? `/settings/${name}` : '/settings',
+            pathname: settingsRoutePath(name),
             hash: hash ? (hash.startsWith('#') ? hash : `#${hash}`) : '',
           },
           { state: name && !hash ? { configName: name } : null }
@@ -54,14 +72,16 @@ function DocsRoutePage() {
 function SettingsRoutePage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { configName } = useParams()
+  const { configName, connectorName } = useParams()
   const { locale } = useI18n()
   const state = (location.state as { configName?: ConfigDocumentName | null } | null) ?? null
-  const routeConfigName = normalizeConfigName(configName)
+  const routeConfigName = normalizeConfigName(configName || (location.pathname.startsWith('/settings/connector') ? 'connector' : undefined))
+  const routeConnectorName = normalizeConnectorName(connectorName)
 
   return (
     <SettingsPage
       requestedConfigName={routeConfigName ?? state?.configName ?? null}
+      requestedConnectorName={routeConnectorName}
       onRequestedConfigConsumed={() => navigate('.', { replace: true, state: null })}
       runtimeAddress={window.location.origin}
       locale={locale}
@@ -75,6 +95,9 @@ function AppRoutes() {
       <Route path="/" element={<LandingPage />} />
       <Route path="/projects/:projectId" element={<ProjectWorkspacePage />} />
       <Route path="/docs/*" element={<DocsRoutePage />} />
+      <Route path="/settings/connector" element={<SettingsRoutePage />} />
+      <Route path="/settings/connector/:connectorName" element={<SettingsRoutePage />} />
+      <Route path="/settings/connectors" element={<SettingsRoutePage />} />
       <Route path="/settings" element={<SettingsRoutePage />} />
       <Route path="/settings/:configName" element={<SettingsRoutePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

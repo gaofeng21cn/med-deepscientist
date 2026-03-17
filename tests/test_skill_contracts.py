@@ -39,6 +39,11 @@ def test_experiment_skill_requires_incremental_seven_field_recording() -> None:
     assert "experiment tier: `auxiliary/dev` or `main/test`" in text
     assert "minimum -> solid -> maximum" in text
     assert "significance-testing plan" in text
+    assert "evaluation_summary" in text
+    assert "claim_update" in text
+    assert "baseline_relation" in text
+    assert "failure_mode" in text
+    assert "next_action" in text
 
 
 def test_analysis_campaign_skill_requires_outline_bound_campaign_fields() -> None:
@@ -53,6 +58,11 @@ def test_analysis_campaign_skill_requires_outline_bound_campaign_fields() -> Non
     assert "contradiction" in text
     assert "`slice_class`, such as `auxiliary`, `claim-carrying`, or `supporting`" in text
     assert "move it from `minimum` to `solid`" in text
+    assert "required_baselines" in text
+    assert "comparison_baselines" in text
+    assert "evaluation_summary" in text
+    assert "takeaway" in text
+    assert "comparability" in text
 
 
 def test_write_skill_prefers_flexible_outline_flow_and_bundle_submission() -> None:
@@ -97,6 +107,8 @@ def test_finalize_and_decision_skills_require_bundle_and_outline_actions() -> No
     decision_text = _skill_text("decision")
 
     assert "paper/paper_bundle_manifest.json" in finalize_text
+    assert "baseline_inventory_path" in finalize_text
+    assert "release/open_source/manifest.json" in finalize_text
     assert "outline_path" in finalize_text
     assert "pdf_path" in finalize_text
     assert "artifact.submit_paper_outline(mode='select', ...)" in decision_text
@@ -144,6 +156,7 @@ def test_rebuttal_skill_requires_review_matrix_response_bundle_and_memory() -> N
     assert "analysis-campaign" in text
     assert "write" in text
     assert "memory.write" in text
+    assert "evaluation_summary" in text
 
 
 def test_review_skill_requires_independent_audit_outputs_and_followup_routing() -> None:
@@ -162,3 +175,4 @@ def test_review_skill_requires_independent_audit_outputs_and_followup_routing() 
     assert "analysis-campaign" in text
     assert "write" in text
     assert "memory.write" in text
+    assert "evaluation_summary" in text

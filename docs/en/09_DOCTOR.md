@@ -4,7 +4,11 @@ Use `ds doctor` when DeepScientist does not start cleanly after installation.
 
 ## Recommended flow
 
-1. Install DeepScientist and Codex:
+1. Install `uv`, then install DeepScientist and Codex:
+
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
    ```bash
    npm install -g @openai/codex @researai/deepscientist
@@ -30,6 +34,7 @@ Use `ds doctor` when DeepScientist does not start cleanly after installation.
 
 - local Python runtime health
 - whether `~/DeepScientist` exists and is writable
+- whether `uv` is available to manage the local Python runtime
 - whether `git` is installed and configured
 - whether required config files are valid
 - whether the current release is still using `codex` as the runnable runner
@@ -58,6 +63,20 @@ codex
 
 Finish login once, then rerun `ds doctor`.
 
+### `uv` is missing
+
+Run:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+On Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
 ### Local paper PDF compilation is unavailable
 
 DeepScientist can compile papers without a full TeX Live install if you add a lightweight TinyTeX runtime:
@@ -83,6 +102,35 @@ If another service already uses the port, change `ui.port` in:
 ```text
 ~/DeepScientist/config/config.yaml
 ```
+
+Or start on another port directly:
+
+```bash
+ds --port 21000
+```
+
+### Python `3.10` or older is active
+
+DeepScientist still prefers the active conda environment when it already satisfies Python `>=3.11`.
+
+If your current conda environment is too old, either activate a newer one:
+
+```bash
+conda activate ds311
+python3 --version
+which python3
+ds
+```
+
+Or create a suitable one:
+
+```bash
+conda create -n ds311 python=3.11 -y
+conda activate ds311
+ds
+```
+
+If you do nothing, `uv` can still provision a managed Python runtime automatically under the DeepScientist home.
 
 ### Git user identity is missing
 

@@ -18,6 +18,7 @@ import { BUILTIN_PLUGINS } from '@/lib/types/plugin'
 import { cn } from '@/lib/utils'
 import { toFilesResourcePath } from '@/lib/utils/resource-paths'
 import type {
+  EvaluationSummaryPayload,
   QuestStageField,
   QuestStageFileEntry,
   QuestStageHistoryEntry,
@@ -195,6 +196,40 @@ type StageSummaryCard = {
   label: string
   value: string
   hint?: string | null
+}
+
+function normalizeEvaluationSummary(value: unknown): EvaluationSummaryPayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  const summary: EvaluationSummaryPayload = {
+    takeaway: asString(raw.takeaway),
+    claim_update: asString(raw.claim_update),
+    baseline_relation: asString(raw.baseline_relation),
+    comparability: asString(raw.comparability),
+    failure_mode: asString(raw.failure_mode),
+    next_action: asString(raw.next_action),
+  }
+  return Object.values(summary).some(Boolean) ? summary : null
+}
+
+function evaluationSummaryCards(value: unknown): StageSummaryCard[] {
+  const summary = normalizeEvaluationSummary(value)
+  if (!summary) return []
+  const items: Array<[keyof EvaluationSummaryPayload, string, string | null]> = [
+    ['takeaway', 'Takeaway', 'One-sentence reusable conclusion.'],
+    ['claim_update', 'Claim Update', 'How this result changes the current claim.'],
+    ['baseline_relation', 'Baseline Relation', 'Overall relation to the accepted baseline.'],
+    ['comparability', 'Comparability', 'How fair or stable the comparison is.'],
+    ['failure_mode', 'Failure Mode', 'Primary failure class, if any.'],
+    ['next_action', 'Next Action', 'Immediate recommended route from this evidence.'],
+  ]
+  return items
+    .filter(([key]) => Boolean(summary[key]))
+    .map(([key, label, hint]) => ({
+      label,
+      value: summary[key] || '—',
+      hint,
+    }))
 }
 
 function StageSummaryGrid({ items }: { items: StageSummaryCard[] }) {
@@ -473,50 +508,58 @@ function AnalysisSliceList({
   }
   return (
     <div className="space-y-4">
-      {items.map((item, index) => (
-        <div
-          key={String(item.slice_id || index)}
-          className="rounded-[22px] border border-black/[0.06] bg-black/[0.02] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03]"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-foreground">
-              {asString(item.title) || asString(item.slice_id) || `Slice ${index + 1}`}
+      {items.map((item, index) => {
+        const summaryCards = evaluationSummaryCards(item.evaluation_summary)
+        return (
+          <div
+            key={String(item.slice_id || index)}
+            className="rounded-[22px] border border-black/[0.06] bg-black/[0.02] px-4 py-4 dark:border-white/[0.08] dark:bg-white/[0.03]"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-sm font-semibold text-foreground">
+                {asString(item.title) || asString(item.slice_id) || `Slice ${index + 1}`}
+              </div>
+              {asString(item.status) ? <StagePill>{asString(item.status)}</StagePill> : null}
+              {asString(item.run_kind) ? <StagePill>{asString(item.run_kind)}</StagePill> : null}
             </div>
-            {asString(item.status) ? <StagePill>{asString(item.status)}</StagePill> : null}
-            {asString(item.run_kind) ? <StagePill>{asString(item.run_kind)}</StagePill> : null}
-          </div>
-          <div className="mt-3">
-            <StageKeyValueList
-              items={[
-                { label: 'Slice ID', value: item.slice_id },
-                { label: 'Question', value: item.question },
-                { label: 'Hypothesis', value: item.hypothesis },
-                { label: 'Why Now', value: item.why_now },
-                { label: 'Success Criteria', value: item.success_criteria },
-                { label: 'Abandonment Criteria', value: item.abandonment_criteria },
-                { label: 'Reviewer Items', value: item.reviewer_item_ids },
-                { label: 'Manuscript Targets', value: item.manuscript_targets },
-                { label: 'Metric Summary', value: item.metric_summary },
-                { label: 'Claim Impact', value: item.claim_impact },
-                { label: 'Reviewer Resolution', value: item.reviewer_resolution },
-                { label: 'Manuscript Update Hint', value: item.manuscript_update_hint },
-                { label: 'Next Recommendation', value: item.next_recommendation },
-                { label: 'Deviations', value: item.deviations },
-                { label: 'Evidence Paths', value: item.evidence_paths },
+            <div className="mt-3">
+              <StageKeyValueList
+                items={[
+                  { label: 'Slice ID', value: item.slice_id },
+                  { label: 'Question', value: item.question },
+                  { label: 'Hypothesis', value: item.hypothesis },
+                  { label: 'Why Now', value: item.why_now },
+                  { label: 'Success Criteria', value: item.success_criteria },
+                  { label: 'Abandonment Criteria', value: item.abandonment_criteria },
+                  { label: 'Reviewer Items', value: item.reviewer_item_ids },
+                  { label: 'Manuscript Targets', value: item.manuscript_targets },
+                  { label: 'Metric Summary', value: item.metric_summary },
+                  { label: 'Claim Impact', value: item.claim_impact },
+                  { label: 'Reviewer Resolution', value: item.reviewer_resolution },
+                  { label: 'Manuscript Update Hint', value: item.manuscript_update_hint },
+                  { label: 'Next Recommendation', value: item.next_recommendation },
+                  { label: 'Deviations', value: item.deviations },
+                  { label: 'Evidence Paths', value: item.evidence_paths },
+                ]}
+              />
+            </div>
+            {summaryCards.length ? (
+              <div className="mt-3">
+                <StageSummaryGrid items={summaryCards} />
+              </div>
+            ) : null}
+            <StagePathActions
+              paths={[
+                { label: 'Plan', path: asString(item.plan_path) },
+                { label: 'Result', path: asString(item.result_path) },
+                { label: 'Mirror', path: asString(item.mirror_path) },
               ]}
+              resolveDocumentId={resolveDocumentId}
+              onOpenDocument={onOpenDocument}
             />
           </div>
-          <StagePathActions
-            paths={[
-              { label: 'Plan', path: asString(item.plan_path) },
-              { label: 'Result', path: asString(item.result_path) },
-              { label: 'Mirror', path: asString(item.mirror_path) },
-            ]}
-            resolveDocumentId={resolveDocumentId}
-            onOpenDocument={onOpenDocument}
-          />
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -673,6 +716,7 @@ export function QuestStageSurface({
   const paper = stagePaper
   const idea = asRecord(details.idea)
   const branch = asRecord(details.branch)
+  const experiment = asRecord(details.experiment)
   const paperDrafting = asRecord(paper.drafting)
   const paperBuild = stagePaperBuild
   const bundleManifest = asRecord(paperBuild.bundle_manifest)
@@ -778,6 +822,14 @@ export function QuestStageSurface({
         }
       : null,
   ].filter(Boolean) as QuestStageField[]
+
+  const experimentEvaluationSummaryCards = evaluationSummaryCards(experiment.evaluation_summary)
+  const branchEvaluationSummaryCards = evaluationSummaryCards(
+    branch.latest_main_experiment ? asRecord(branch.latest_main_experiment).evaluation_summary : null
+  )
+  const stageEvaluationSummaryCards = experimentEvaluationSummaryCards.length
+    ? experimentEvaluationSummaryCards
+    : branchEvaluationSummaryCards
 
   const paperSummaryCards = [
     {
@@ -948,6 +1000,15 @@ export function QuestStageSurface({
             <StageSection title="Key Facts">
               <StageFactRows items={stage.sections.key_facts || []} />
             </StageSection>
+
+            {stageEvaluationSummaryCards.length ? (
+              <StageSection
+                title="Evaluation Summary"
+                hint="This is the compact structured judgment attached to the latest recorded result."
+              >
+                <StageSummaryGrid items={stageEvaluationSummaryCards} />
+              </StageSection>
+            ) : null}
 
             {(latexRootPath || pdfPath || paper.selected_outline || countArray(paper.outline_candidates)) && (
           <StageSection

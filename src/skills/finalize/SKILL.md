@@ -17,7 +17,7 @@ Use this skill to close or pause a quest responsibly.
 - Default to plain-language summaries. Do not mention file paths, artifact ids, branch/worktree ids, session ids, raw commands, or raw logs unless the user asks or needs them to act.
 - If the runtime starts an auto-continue turn with no new user message, keep finalizing from the durable quest state and active requirements instead of replaying the previous user turn.
 - Use `reply_mode='blocking'` only for real user decisions that cannot be resolved from local evidence.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - If a threaded user reply arrives, interpret it relative to the latest finalize progress update before assuming the task changed completely.
 - When finalize reaches a real closure state, pause-ready packet, or route-back decision, send one threaded `artifact.interact(kind='milestone', ...)` update that names the recommendation, why it is the right call, and any reopen condition that still matters.
 - True quest completion still requires explicit user approval through the runtime completion flow before calling `artifact.complete_quest(...)`.
@@ -124,9 +124,12 @@ When a paper bundle exists, verify the manifest inventory explicitly, including:
 - referenced `writing_plan_path`
 - referenced `references_path`
 - referenced `claim_evidence_map_path`
+- referenced `baseline_inventory_path`
 - referenced `compile_report_path`
 - referenced `pdf_path`
 - referenced `latex_root_path`
+- `release/open_source/manifest.json` when open-source preparation has started
+- `release/open_source/cleanup_plan.md` when the paper line is being prepared for a public code release
 
 ### 2. Build the final claim ledger
 

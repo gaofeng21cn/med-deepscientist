@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import shutil
+import subprocess
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -106,6 +107,8 @@ class DaemonApp:
         self._terminal_attach_thread: threading.Thread | None = None
         self._terminal_attach_host: str | None = None
         self._terminal_attach_port: int | None = None
+        self._serve_host: str | None = None
+        self._serve_port: int | None = None
         self._shutdown_requested = threading.Event()
         self._qq_gateway: QQGatewayService | None = None
         self._telegram_polling: TelegramPollingService | None = None
@@ -121,6 +124,88 @@ class DaemonApp:
         if isinstance(lingzhu_config, dict):
             items.append(self.config_manager.lingzhu_snapshot(lingzhu_config))
         return items
+
+    def _launcher_update_base_command(self) -> list[str]:
+        node_binary = str(os.environ.get("DEEPSCIENTIST_NODE_BINARY") or "").strip() or which("node") or which("nodejs")
+        launcher_path = str(os.environ.get("DEEPSCIENTIST_LAUNCHER_PATH") or "").strip()
+        if not launcher_path:
+            launcher_path = str(self.repo_root / "bin" / "ds.js")
+        if not node_binary:
+            raise RuntimeError("Node.js is not available on PATH, so DeepScientist cannot check npm updates.")
+        if not Path(launcher_path).exists():
+            raise RuntimeError(f"DeepScientist launcher path does not exist: {launcher_path}")
+        return [node_binary, launcher_path, "update", "--home", str(self.home)]
+
+    def system_update_status(self) -> dict[str, object]:
+        command = [*self._launcher_update_base_command(), "--check", "--json"]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("DeepScientist update check timed out.") from exc
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "Update check failed.").strip())
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("DeepScientist update check returned invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("DeepScientist update check returned an invalid payload.")
+        return payload
+
+    def request_system_update(self, *, action: str) -> dict[str, object]:
+        normalized = str(action or "").strip().lower()
+        if normalized not in {"install_latest", "remind_later", "skip_version"}:
+            raise ValueError(f"Unsupported update action `{action}`.")
+        command = self._launcher_update_base_command()
+        if normalized == "install_latest":
+            host = self._serve_host or "0.0.0.0"
+            port = self._serve_port or 20999
+            command.extend(
+                [
+                    "--yes",
+                    "--background",
+                    "--restart-daemon",
+                    "--host",
+                    str(host),
+                    "--port",
+                    str(port),
+                    "--json",
+                ]
+            )
+        elif normalized == "remind_later":
+            command.extend(["--remind-later", "--json"])
+        else:
+            command.extend(["--skip-version", "--json"])
+
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(self.repo_root),
+                capture_output=True,
+                text=True,
+                timeout=8,
+                check=False,
+                env=os.environ.copy(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("DeepScientist update request timed out.") from exc
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "Update request failed.").strip())
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("DeepScientist update request returned invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("DeepScientist update request returned an invalid payload.")
+        return payload
 
     def _process_terminal_attach_request(
         self,
@@ -3667,7 +3752,7 @@ class DaemonApp:
                             headers=dict(self.headers.items()),
                             body=body,
                         )
-                    elif route_name in {"document_open", "document_asset_upload", "chat", "command", "quest_control", "config_save", "quest_create", "quest_baseline_binding", "run_create", "qq_inbound", "connector_inbound", "docs_open", "admin_shutdown", "bash_stop", "quest_settings", "quest_bindings", "quest_delete", "terminal_session_ensure", "terminal_attach", "terminal_input", "stage_view", "latex_init", "latex_compile"}:
+                    elif route_name in {"document_open", "document_asset_upload", "chat", "command", "quest_control", "config_save", "quest_create", "quest_baseline_binding", "run_create", "qq_inbound", "connector_inbound", "docs_open", "admin_shutdown", "bash_stop", "quest_settings", "quest_bindings", "quest_delete", "terminal_session_ensure", "terminal_attach", "terminal_input", "stage_view", "latex_init", "latex_compile", "system_update_action"}:
                         payload = result(**params, body=body)
                     elif route_name == "config_validate":
                         payload = result(body)
@@ -3711,6 +3796,8 @@ class DaemonApp:
         server = ThreadingHTTPServer((host, port), RequestHandler)
         server.daemon_threads = True
         self._server = server
+        self._serve_host = host
+        self._serve_port = port
         self._shutdown_requested.clear()
         self._start_terminal_attach_server(host, port)
         self._start_background_connectors()
@@ -3724,4 +3811,6 @@ class DaemonApp:
             self._stop_terminal_attach_server()
             self.bash_exec_service.shutdown()
             self._server = None
+            self._serve_host = None
+            self._serve_port = None
             server.server_close()

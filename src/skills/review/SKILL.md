@@ -23,7 +23,7 @@ It is also not the same as `rebuttal`.
 - Keep progress updates chat-like and easy to understand: say what changed, what it means, and what happens next.
 - Default to plain-language summaries. Do not mention file paths, artifact ids, branch/worktree ids, session ids, raw commands, or raw logs unless the user asks or needs them to act.
 - Use `reply_mode='blocking'` only for real user decisions that cannot be resolved from local evidence.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - When the review report, revision plan, or follow-up experiment TODO list becomes durable, send a richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says what the main risks are, what should be fixed next, and whether the next route is writing, experiment, or claim downgrade.
 
 ## Purpose
@@ -77,12 +77,14 @@ Use, in roughly this order:
 - the current paper or report draft
 - the selected outline if one exists
 - the claim-evidence map if one exists
+- the six-field `evaluation_summary` blocks from recent main experiments and analysis slices
 - recent main and analysis experiment results
 - figures, tables, and captions
 - prior self-review or reviewer-first notes as low-trust auxiliary input
 - nearby papers when novelty or comparison is unclear
 
 If the draft/result state is still unclear, open `intake-audit` first before continuing the review workflow.
+Before proposing extra experiments, read those structured `evaluation_summary` blocks first so you do not request work that the recorded evidence already resolved.
 
 ## Core outputs
 

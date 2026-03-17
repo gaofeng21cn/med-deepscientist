@@ -188,7 +188,7 @@ export function QuestSettingsSurface({
 
         toast({
           title: 'Saved',
-          description: conversationId ? 'Connector bound to this quest.' : 'Connector unbound.',
+          description: conversationId ? 'Connector bound to this project.' : 'Connector unbound.',
         })
         await Promise.all([onRefresh(), reloadConnectors()])
       } finally {
@@ -212,7 +212,7 @@ export function QuestSettingsSurface({
       <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-[28px] border border-black/[0.06] bg-white/[0.42] p-4 shadow-card backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.03] sm:p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">Quest settings</div>
+            <div className="text-sm font-semibold text-foreground">Project settings</div>
             <div className="mt-1 text-xs text-muted-foreground">
               Select which connector receives progress updates for <span className="font-mono">{questId}</span>.
             </div>
@@ -247,7 +247,7 @@ export function QuestSettingsSurface({
                 />
               </div>
               <div className="text-xs text-muted-foreground">
-                This setting applies to the whole web workspace (not just this quest).
+                This setting applies to the whole web workspace (not just this project).
               </div>
             </div>
           </EnhancedCard>

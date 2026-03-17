@@ -62,6 +62,38 @@ def _field(label: str, value: object, *, tone: str = "default") -> dict[str, Any
     }
 
 
+def _evaluation_summary(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for key in (
+        "takeaway",
+        "claim_update",
+        "baseline_relation",
+        "comparability",
+        "failure_mode",
+        "next_action",
+    ):
+        raw = value.get(key)
+        text = str(raw).strip() if raw is not None else ""
+        if text:
+            normalized[key] = text
+    return normalized
+
+
+def _evaluation_summary_fields(value: object, *, prefix: str = "Evaluation") -> list[dict[str, Any]]:
+    summary = _evaluation_summary(value)
+    labels = (
+        ("takeaway", f"{prefix} Takeaway"),
+        ("claim_update", f"{prefix} Claim Update"),
+        ("baseline_relation", f"{prefix} Baseline Relation"),
+        ("comparability", f"{prefix} Comparability"),
+        ("failure_mode", f"{prefix} Failure Mode"),
+        ("next_action", f"{prefix} Next Action"),
+    )
+    return [_field(label, summary[key]) for key, label in labels if summary.get(key)]
+
+
 def _artifact_sort_key(item: dict[str, Any]) -> tuple[str, str]:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     return (
@@ -814,6 +846,9 @@ class QuestStageViewBuilder:
         )
         latest_metrics_summary = latest_experiment_payload.get("metrics_summary") or latest_result_payload.get("metrics_summary") or {}
         latest_run_id = str(latest_experiment_payload.get("run_id") or "").strip() or None
+        latest_evaluation_summary = _evaluation_summary(
+            latest_experiment_payload.get("evaluation_summary") or latest_result_payload.get("evaluation_summary")
+        )
 
         analysis_manifests = self._analysis_manifests()
         analysis_manifest = next(
@@ -883,6 +918,7 @@ class QuestStageViewBuilder:
                 _field("Latest Metrics", latest_metrics_summary or "Not recorded"),
                 _field("Delta vs Baseline", latest_progress_eval.get("delta_vs_baseline") or "Not recorded"),
                 _field("Breakthrough", latest_progress_eval.get("breakthrough_level") or "Not recorded"),
+                *_evaluation_summary_fields(latest_evaluation_summary),
             ],
             key_files=self._dedupe_files(
                 [
@@ -940,6 +976,7 @@ class QuestStageViewBuilder:
                         "verdict": latest_experiment_payload.get("verdict"),
                         "metrics_summary": latest_metrics_summary,
                         "progress_eval": latest_progress_eval,
+                        "evaluation_summary": latest_evaluation_summary,
                         "run_md_path": latest_experiment_paths.get("run_md"),
                         "result_json_path": latest_experiment_paths.get("result_json"),
                     }
@@ -979,6 +1016,7 @@ class QuestStageViewBuilder:
         result_payload = read_json(Path(paths.get("result_json")), {}) if str(paths.get("result_json") or "").strip() else {}
         progress_eval = payload.get("progress_eval") or result_payload.get("progress_eval") or {}
         baseline_ref = payload.get("baseline_ref") or result_payload.get("baseline_ref") or {}
+        evaluation_summary = _evaluation_summary(payload.get("evaluation_summary") or result_payload.get("evaluation_summary"))
         run_id = str(payload.get("run_id") or "pending").strip() or "pending"
         note = (
             str(payload.get("summary") or result_payload.get("conclusion") or (progress_eval or {}).get("reason") or "").strip()
@@ -1028,6 +1066,7 @@ class QuestStageViewBuilder:
                 _field("Metrics Summary", metrics_summary or "Not recorded"),
                 _field("Delta vs Baseline", (progress_eval or {}).get("delta_vs_baseline") or "Not recorded"),
                 _field("Breakthrough Level", (progress_eval or {}).get("breakthrough_level") or "Not recorded"),
+                *_evaluation_summary_fields(evaluation_summary),
             ],
             key_files=key_files,
             history=self._artifact_history(experiment_items),
@@ -1040,6 +1079,7 @@ class QuestStageViewBuilder:
                     "baseline_ref": baseline_ref,
                     "metrics_summary": metrics_summary,
                     "progress_eval": progress_eval,
+                    "evaluation_summary": evaluation_summary,
                     "result_payload": result_payload,
                 }
             },
@@ -1141,6 +1181,9 @@ class QuestStageViewBuilder:
                     "reviewer_resolution": detail_payload.get("reviewer_resolution"),
                     "manuscript_update_hint": detail_payload.get("manuscript_update_hint"),
                     "next_recommendation": detail_payload.get("next_recommendation"),
+                    "evaluation_summary": _evaluation_summary(
+                        run_payload.get("evaluation_summary") or detail_payload.get("evaluation_summary")
+                    ),
                     "deviations": detail_payload.get("deviations") or [],
                     "evidence_paths": detail_payload.get("evidence_paths") or [],
                     "plan_path": item.get("plan_path"),
@@ -1233,8 +1276,11 @@ class QuestStageViewBuilder:
             self._file_entry("paper/writing_plan.md", label="Writing Plan", description="Paper writing plan."),
             self._file_entry("paper/references.bib", label="References", description="Bibliography file."),
             self._file_entry("paper/claim_evidence_map.json", label="Claim-Evidence Map", description="Claim to evidence mapping."),
+            self._file_entry("paper/baseline_inventory.json", label="Baseline Inventory", description="Canonical and supplementary baseline inventory for writing."),
             self._file_entry("paper/build/compile_report.json", label="Compile Report", description="Paper build/compile report."),
             self._file_entry("paper/paper_bundle_manifest.json", label="Bundle Manifest", description="Final paper bundle manifest."),
+            self._file_entry("release/open_source/manifest.json", label="Open Source Manifest", description="Open-source cleanup and release preparation manifest."),
+            self._file_entry("release/open_source/cleanup_plan.md", label="Open Source Cleanup Plan", description="Checklist for cleaning the paper branch into a public release."),
             self._file_entry(latex_root_rel, label="LaTeX Sources", description="LaTeX source folder.", expected_kind="directory"),
             self._file_entry(main_tex_rel, label="Main TeX", description="Primary TeX source file."),
         ]

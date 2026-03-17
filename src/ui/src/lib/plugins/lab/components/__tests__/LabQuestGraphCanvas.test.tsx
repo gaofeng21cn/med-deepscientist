@@ -55,6 +55,7 @@ jest.mock('@xyflow/react', () => {
 })
 
 jest.mock('@xyflow/react/dist/style.css', () => ({}))
+jest.mock('@/lib/plugins/lab/lab.css', () => ({}))
 
 describe('LabQuestGraphCanvas', () => {
   it('does not loop state updates when queries are disabled (empty projectId/questId)', () => {

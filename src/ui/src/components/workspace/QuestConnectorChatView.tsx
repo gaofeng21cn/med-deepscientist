@@ -33,6 +33,9 @@ type QuestConnectorChatViewProps = {
   stopping?: boolean
   showStopButton?: boolean
   slashCommands?: ConnectorCommand[]
+  hasOlderHistory?: boolean
+  loadingOlderHistory?: boolean
+  onLoadOlderHistory?: () => Promise<void>
   onSubmit: (message: string) => Promise<void>
   onStopRun: () => Promise<void>
 }
@@ -156,6 +159,9 @@ export function QuestConnectorChatView({
   stopping = false,
   showStopButton = false,
   slashCommands = [],
+  hasOlderHistory = false,
+  loadingOlderHistory = false,
+  onLoadOlderHistory,
   onSubmit,
   onStopRun,
 }: QuestConnectorChatViewProps) {
@@ -180,6 +186,11 @@ export function QuestConnectorChatView({
     scrollRef: listRef,
     contentRef,
     deps: [chatMessages.length, streaming, activeToolCount],
+  })
+  const prependAnchorRef = React.useRef<{ active: boolean; scrollHeight: number; scrollTop: number }>({
+    active: false,
+    scrollHeight: 0,
+    scrollTop: 0,
   })
 
   const filteredCommands = React.useMemo(() => {
@@ -230,6 +241,33 @@ export function QuestConnectorChatView({
       })
     }
   }, [addToast, onStopRun, stopping, t])
+
+  const handleLoadOlderHistory = React.useCallback(async () => {
+    if (!hasOlderHistory || loadingOlderHistory || !onLoadOlderHistory) return
+    const root = listRef.current
+    if (root) {
+      prependAnchorRef.current = {
+        active: true,
+        scrollHeight: root.scrollHeight,
+        scrollTop: root.scrollTop,
+      }
+    }
+    await onLoadOlderHistory()
+  }, [hasOlderHistory, loadingOlderHistory, onLoadOlderHistory])
+
+  React.useEffect(() => {
+    if (!prependAnchorRef.current.active || loadingOlderHistory) {
+      return
+    }
+    const root = listRef.current
+    if (!root) {
+      prependAnchorRef.current.active = false
+      return
+    }
+    const delta = root.scrollHeight - prependAnchorRef.current.scrollHeight
+    root.scrollTop = prependAnchorRef.current.scrollTop + Math.max(delta, 0)
+    prependAnchorRef.current.active = false
+  }, [chatMessages.length, loadingOlderHistory])
 
   return (
     <QuestCopilotPaneLayout
@@ -325,8 +363,27 @@ export function QuestConnectorChatView({
               paddingBottom: bottomInset,
               scrollPaddingBottom: bottomInset,
             }}
+            onWheel={(event) => {
+              const root = listRef.current
+              if (!root || event.deltaY >= 0 || root.scrollTop > 24) {
+                return
+              }
+              void handleLoadOlderHistory()
+            }}
           >
             <div ref={contentRef} className="flex min-w-0 flex-col gap-3">
+              {hasOlderHistory ? (
+                <div className="flex justify-center pb-1">
+                  <button
+                    type="button"
+                    className="rounded-full border border-black/[0.08] bg-white/[0.88] px-3 py-1 text-[11px] text-muted-foreground transition hover:bg-white dark:border-white/[0.10] dark:bg-white/[0.05] dark:hover:bg-white/[0.08]"
+                    disabled={loadingOlderHistory}
+                    onClick={() => void handleLoadOlderHistory()}
+                  >
+                    {loadingOlderHistory ? 'Loading older updates...' : 'Load older updates'}
+                  </button>
+                </div>
+              ) : null}
               {chatMessages.length === 0 ? (
                 <div className="flex min-h-full items-center justify-center text-sm text-muted-foreground">
                   {restoring || loading ? t('copilot_connector_restoring') : t('copilot_connector_ready')}

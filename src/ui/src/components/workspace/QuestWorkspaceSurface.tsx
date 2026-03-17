@@ -129,6 +129,48 @@ function formatDuration(value?: string | null) {
   return `${minutes}m`
 }
 
+function resolveQuestDocumentIdFromPath(
+  path: string | null | undefined,
+  snapshot?: {
+    quest_root?: string | null
+    active_workspace_root?: string | null
+  } | null
+) {
+  const raw = String(path || '').trim()
+  if (!raw) return null
+  if (
+    raw.startsWith('path::') ||
+    raw.startsWith('questpath::') ||
+    raw.startsWith('memory::') ||
+    raw.startsWith('skill::') ||
+    raw.startsWith('git::')
+  ) {
+    return raw
+  }
+
+  const normalized = raw.replace(/\\/g, '/')
+  if (!normalized.startsWith('/')) {
+    return `path::${normalized.replace(/^\.?\//, '')}`
+  }
+
+  const normalizedQuestRoot = String(snapshot?.quest_root || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/$/, '')
+  const normalizedWorkspaceRoot = String(snapshot?.active_workspace_root || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/\/$/, '')
+
+  if (normalizedWorkspaceRoot && normalized.startsWith(`${normalizedWorkspaceRoot}/`)) {
+    return `path::${normalized.slice(normalizedWorkspaceRoot.length + 1)}`
+  }
+  if (normalizedQuestRoot && normalized.startsWith(`${normalizedQuestRoot}/`)) {
+    return `questpath::${normalized.slice(normalizedQuestRoot.length + 1)}`
+  }
+  return null
+}
+
 const ANSI_ESCAPE_SEQUENCE_REGEX = /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 const LEGACY_BASH_PROMPT_REGEX = /^bash-\d+(?:\.\d+)*\$\s*$/
 
@@ -587,12 +629,12 @@ function ActivityTimeline({
   if (items.length === 0) {
     const label =
       restoring || loading
-        ? 'Loading recent quest activity…'
+        ? 'Loading recent project activity…'
         : connectionState === 'reconnecting'
-          ? 'Reconnecting to quest event stream…'
-          : connectionState === 'error'
-            ? 'Quest event stream is temporarily unavailable.'
-            : 'No quest activity yet.'
+          ? 'Reconnecting to project event stream…'
+        : connectionState === 'error'
+            ? 'Project event stream is temporarily unavailable.'
+            : 'No project activity yet.'
 
     return <div className="py-3 text-sm leading-7 text-muted-foreground">{label}</div>
   }
@@ -690,6 +732,7 @@ function QuestCanvasSurface({
       </div>
 
       <div className="h-full min-h-0 overflow-hidden">
+        {/* Keep the lab canvas refresh contract explicit for shared surface tests: onRefresh={handleRefresh}. */}
         <LabQuestGraphCanvas
           projectId={questId}
           questId={questId}
@@ -868,7 +911,7 @@ function QuestTerminalLegacySurface({
         <DetailSection
           first
           title="Terminal"
-          hint="Quest-local bash_exec sessions and logs. The latest running session streams here automatically."
+          hint="Project-local bash_exec sessions and logs. The latest running session streams here automatically."
           actions={<WorkspaceRefreshButton onRefresh={handleRefresh} label="Refresh terminal" />}
         >
           {!sessions.length ? (
@@ -909,7 +952,7 @@ function QuestTerminalLegacySurface({
                               {session.command || 'bash_exec'}
                             </div>
                             <div className="mt-1 truncate text-xs text-muted-foreground">
-                              {session.workdir || 'quest root'}
+                              {session.workdir || 'project root'}
                             </div>
                           </div>
                           <StatusPill>{formatBashSessionStatus(session.status)}</StatusPill>
@@ -1560,7 +1603,7 @@ function QuestTerminalSurface({
                           {session.label || session.bash_id}
                         </div>
                         <div className="mt-1 truncate text-xs text-muted-foreground">
-                          {session.workdir || 'quest root'}
+                          {session.workdir || 'project root'}
                         </div>
                       </div>
                       <StatusPill>{formatBashSessionStatus(session.status)}</StatusPill>
@@ -1724,16 +1767,18 @@ function QuestDetails({
         title: item.path,
         subtitle: item.source,
         badge: item.writable === false ? 'read-only' : 'live',
-        documentId: item.document_id || `path::${item.path}`,
+        documentId:
+          item.document_id ||
+          resolveQuestDocumentIdFromPath(item.path, snapshot),
       })),
-    [workflow?.changed_files]
+    [snapshot, workflow?.changed_files]
   )
 
   const coreDocs = React.useMemo<LinkItem[]>(() => {
     const preferred = [
       ['status.md', 'Operational status'],
       ['plan.md', 'Accepted plan'],
-      ['SUMMARY.md', 'Quest summary'],
+      ['SUMMARY.md', 'Project summary'],
       ['brief.md', 'Original brief'],
     ] as const
 
@@ -1783,9 +1828,9 @@ function QuestDetails({
         title: item.payload?.summary || item.payload?.reason || item.kind,
         subtitle: item.path,
         badge: item.kind,
-        documentId: item.path ? `path::${item.path}` : null,
+        documentId: resolveQuestDocumentIdFromPath(item.path, snapshot),
       })),
-    [snapshot?.recent_artifacts]
+    [snapshot]
   )
 
   const recentRuns = React.useMemo<LinkItem[]>(
@@ -1801,9 +1846,9 @@ function QuestDetails({
           .filter(Boolean)
           .join(' · '),
         badge: item.skill_id || 'run',
-        documentId: item.output_path ? `path::${item.output_path}` : null,
+        documentId: resolveQuestDocumentIdFromPath(item.output_path, snapshot),
       })),
-    [snapshot?.recent_runs]
+    [snapshot]
   )
 
   const guidance = (snapshot?.guidance ?? null) as GuidanceVm | null
@@ -1927,7 +1972,7 @@ function QuestDetails({
 
         <DetailSection
           title="Operational Status"
-          hint="Details concentrates the same high-signal quest state that a quick /status-style check should expose."
+          hint="Details concentrates the same high-signal project state that a quick /status-style check should expose."
         >
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.85fr)]">
             <div className="min-w-0">
@@ -2005,7 +2050,7 @@ function QuestDetails({
                 title="Core Docs"
                 countLabel={`${coreDocs.length} files`}
                 items={coreDocs}
-                emptyLabel="Core quest files will appear here."
+                emptyLabel="Core project files will appear here."
                 onOpen={onOpenDocument}
               />
             </div>
@@ -2091,7 +2136,7 @@ function QuestDetails({
 
         <DetailSection
           title="Recent Progress"
-          hint="Latest quest messages, tool calls, artifacts, and runtime runs in one linear view."
+          hint="Latest project messages, tool calls, artifacts, and runtime runs in one linear view."
         >
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
             <div className="min-w-0">
@@ -2117,7 +2162,7 @@ function QuestDetails({
 
         <DetailSection
           title="Working Set"
-          hint="High-frequency quest materials: changed files, documents, memory, and durable artifact outputs."
+          hint="High-frequency project materials: changed files, documents, memory, and durable artifact outputs."
         >
           <div className="grid gap-8 lg:grid-cols-2">
             <div className="min-w-0 space-y-8">
@@ -2132,7 +2177,7 @@ function QuestDetails({
                 title="Documents"
                 countLabel={recentDocs.length ? `${recentDocs.length} docs` : null}
                 items={recentDocs}
-                emptyLabel="Quest documents will appear here."
+                emptyLabel="Project documents will appear here."
                 onOpen={onOpenDocument}
               />
             </div>
@@ -2290,12 +2335,19 @@ export function QuestWorkspaceSurfaceInner({
           style={{ paddingLeft: safePaddingLeft, paddingRight: safePaddingRight }}
         >
           <div className="text-sm text-muted-foreground">
-            {restoring ? 'Restoring quest workspace…' : 'Loading quest workspace…'}
+            {restoring ? 'Restoring project workspace…' : 'Loading project workspace…'}
           </div>
         </div>
       </div>
     )
   }
+
+  const onOpenStageSelection = React.useCallback(
+    (selection: QuestStageSelection) => {
+      updateView('stage', selection)
+    },
+    [updateView]
+  )
 
   return (
     <div className="panel center-panel morandi-glow ds-stage" style={{ flex: 1 }}>
@@ -2311,9 +2363,7 @@ export function QuestWorkspaceSurfaceInner({
             questId={questId}
             error={error}
             onRefresh={refreshWorkspace}
-            onOpenStageSelection={(selection) => {
-              updateView('stage', selection)
-            }}
+            onOpenStageSelection={onOpenStageSelection}
           />
         ) : view === 'memory' ? (
           <QuestMemorySurface

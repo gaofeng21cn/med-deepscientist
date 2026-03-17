@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import socket
+import subprocess
 import sys
 import tempfile
+from shutil import which
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -105,6 +107,47 @@ def _check_home_writable(home: Path) -> dict[str, Any]:
         ok=True,
         summary="DeepScientist home exists and is writable.",
         details={"home": str(home)},
+    )
+
+
+def _check_uv() -> dict[str, Any]:
+    resolved = which("uv")
+    if not resolved:
+        guidance = [
+            "Install uv, then rerun `ds doctor`.",
+        ]
+        if sys.platform == "win32":
+            guidance.append('PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`')
+        else:
+            guidance.append("macOS/Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`")
+        return _make_check(
+            check_id="uv",
+            label="uv runtime manager",
+            ok=False,
+            summary="uv is not available on PATH.",
+            errors=["DeepScientist cannot provision or repair its local Python runtime without `uv`."],
+            guidance=guidance,
+        )
+
+    version = ""
+    try:
+        result = subprocess.run(
+            [resolved, "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            version = (result.stdout or result.stderr or "").strip()
+    except OSError:
+        version = ""
+
+    return _make_check(
+        check_id="uv",
+        label="uv runtime manager",
+        ok=True,
+        summary="uv is available for locked Python runtime management.",
+        details={"resolved_binary": resolved, "version": version or None},
     )
 
 
@@ -370,6 +413,7 @@ def run_doctor(home: Path, *, repo_root: Path) -> dict[str, Any]:
     checks = [
         _check_python_runtime(),
         _check_home_writable(home),
+        _check_uv(),
         _check_git(config_manager),
         _check_config_validation(config_manager),
         _check_runner_support(config_manager),

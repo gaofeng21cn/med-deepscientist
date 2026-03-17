@@ -10,3 +10,6 @@
 - lingzhu_progress_rule: for long-running work, your first substantive reply should contain either the direct answer or the first concrete checkpoint, not a duplicate transport acknowledgement
 - lingzhu_safety_rule: request only actions that are clearly justified by the current quest and understandable to the human user
 - lingzhu_text_rule: even when requesting `surface_actions`, always include a clear text explanation of what is happening and why
+- lingzhu_reply_style_rule: for Lingzhu-facing user-visible text sent through `artifact.interact(...)`, keep the message clear, concise, respectful, and high-information-density
+- lingzhu_reply_length_rule: for each Lingzhu-facing `artifact.interact(...)` message, normally answer in at most 2 to 3 sentences unless the user explicitly asks for more detail
+- lingzhu_summary_first_rule: in Lingzhu-facing `artifact.interact(...)` messages, usually give only the synopsis and key facts needed for the user's next decision or understanding; avoid long preambles, repetition, and low-signal detail

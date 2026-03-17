@@ -9,10 +9,10 @@ Implementation sources:
 
 ## What the dialog does
 
-`Start Research` is not only a “new quest” form. It does four things together:
+`Start Research` is not only a “new project” form. It does four things together:
 
 1. collects structured kickoff context
-2. compiles that context into the first quest prompt
+2. compiles that context into the first project prompt
 3. binds an optional reusable baseline
 4. persists a structured `startup_contract` for later prompt building
 
@@ -105,17 +105,17 @@ The dialog submits:
 
 ## Field reference
 
-### Core quest identity
+### Core project identity
 
 **`title`**
 
-- Human-readable quest title.
+- Human-readable project title.
 - Used in cards and workspace headers.
 - Does not need to equal `quest_id`.
 
 **`quest_id`**
 
-- Stable quest identifier and directory name.
+- Stable project identifier stored in `quest_id` and used as the directory name.
 - By default the runtime suggests the next sequential id.
 - Manual override is allowed.
 
@@ -166,7 +166,7 @@ The dialog submits:
 
 **`need_research_paper`**
 
-- `true`: the quest should keep going through analysis and writing readiness.
+- `true`: the project should keep going through analysis and writing readiness.
 - `false`: optimize for the strongest justified algorithmic result and avoid default paper routing.
 
 ### High-level control knobs
@@ -203,7 +203,7 @@ This is the main public knob for round depth.
 Only meaningful when `launch_mode = custom`.
 
 - `continue_existing_state`
-  - start by auditing existing baselines, results, drafts, or mixed quest assets
+  - start by auditing existing baselines, results, drafts, or mixed project assets
   - prompt builder should steer the agent toward `intake-audit`
 - `revision_rebuttal`
   - start from reviewer comments, revision packets, or a rebuttal task
@@ -247,7 +247,7 @@ Override rule:
 
 `compileStartResearchPrompt(...)` writes a human-readable kickoff prompt containing:
 
-- quest bootstrap
+- project bootstrap
 - primary research request
 - research goals
 - baseline context
@@ -318,8 +318,8 @@ Custom launch behavior is explicit:
 
 ```json
 {
-  "title": "Continue retrieval quest",
-  "goal": "Continue the existing retrieval quest and decide whether a fresh main run is still needed.",
+  "title": "Continue retrieval project",
+  "goal": "Continue the existing retrieval project and decide whether a fresh main run is still needed.",
   "quest_id": "013",
   "requested_baseline_ref": null,
   "startup_contract": {
@@ -387,7 +387,7 @@ Custom launch behavior is explicit:
 
 ## Operational implications
 
-- The startup contract is durable quest state, not only UI state.
+- The startup contract is durable project state, not only UI state.
 - Prompt building later reads `launch_mode`, `custom_profile`, and related summaries again.
 - This means `Start Research` shapes not just the first turn, but later routing decisions too.
 

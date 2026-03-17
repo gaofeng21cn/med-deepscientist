@@ -246,6 +246,9 @@ export function QuestCopilotDockPanel({
           stopping={stopping}
           showStopButton={showStopButton}
           slashCommands={workspace.slashCommands}
+          hasOlderHistory={workspace.hasOlderHistory}
+          loadingOlderHistory={workspace.loadingOlderHistory}
+          onLoadOlderHistory={workspace.loadOlderHistory}
           onSubmit={workspace.submit}
           onStopRun={handleStopRun}
         />
@@ -263,6 +266,9 @@ export function QuestCopilotDockPanel({
           stopping={stopping}
           showStopButton={showStopButton}
           slashCommands={workspace.slashCommands}
+          hasOlderHistory={workspace.hasOlderHistory}
+          loadingOlderHistory={workspace.loadingOlderHistory}
+          onLoadOlderHistory={workspace.loadOlderHistory}
           onSubmit={workspace.submit}
           onStopRun={handleStopRun}
         />

@@ -233,10 +233,8 @@ copy_source_tree() {
       --exclude='./node_modules' \
       --exclude='./ui' \
       --exclude='./src/ui/node_modules' \
-      --exclude='./src/ui/dist' \
       --exclude='./src/ui/lib/node_modules' \
       --exclude='./src/tui/node_modules' \
-      --exclude='./src/tui/dist' \
       --exclude='./src/deepscientist.egg-info' \
       . | tar -C "$target" -xf -
   else
@@ -252,16 +250,18 @@ prune_tree() {
     "$target/node_modules" \
     "$target/ui" \
     "$target/src/ui/node_modules" \
-    "$target/src/ui/dist" \
     "$target/src/ui/lib/node_modules" \
     "$target/src/tui/node_modules" \
-    "$target/src/tui/dist" \
     "$target/src/deepscientist.egg-info"
   find "$target" -type d -name '__pycache__' -prune -exec rm -rf {} +
   find "$target" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 }
 
 build_ui() {
+  if [ -f "$1/src/ui/dist/index.html" ]; then
+    print_step "Using prebuilt web UI bundle from source tree"
+    return
+  fi
   print_step "Building web UI in install tree"
   npm --prefix "$1/src/ui" install --include=dev --no-audit --no-fund
   npm --prefix "$1/src/ui" run build
@@ -274,6 +274,10 @@ install_root_runtime() {
 }
 
 build_tui() {
+  if [ -f "$1/src/tui/dist/index.js" ] || [ -f "$1/src/tui/dist/index.cjs" ] || [ -d "$1/src/tui/dist/components" ]; then
+    print_step "Using prebuilt TUI bundle from source tree"
+    return
+  fi
   print_step "Building TUI in install tree"
   npm --prefix "$1/src/tui" install --include=dev --no-audit --no-fund
   npm --prefix "$1/src/tui" run build
@@ -311,10 +315,6 @@ EOF
 
 require_command node
 require_command npm
-if ! command -v python3 >/dev/null 2>&1 && ! command -v python >/dev/null 2>&1; then
-  echo "Python 3 is required to run DeepScientist." >&2
-  exit 1
-fi
 
 SOURCE_ROOT_RESOLVED="$(resolve_path "$SOURCE_ROOT")"
 INSTALL_DIR_RESOLVED="$(resolve_path "$INSTALL_DIR")"
@@ -356,6 +356,9 @@ printf 'Run: %s\n' "$BIN_DIR/ds"
 printf 'Start web workspace: %s\n' "$BIN_DIR/ds --web"
 printf 'Default start: %s\n' "$BIN_DIR/ds"
 printf 'When `ds` starts, it prints the local Web URL and opens it automatically when supported.\n'
+if ! command -v uv >/dev/null 2>&1; then
+  printf 'Note: DeepScientist now uses `uv` to manage its local Python runtime. Install uv before the first `ds` start if needed.\n'
+fi
 if [ "$WITH_TINYTEX" -eq 1 ]; then
   print_step "Installing TinyTeX pdflatex runtime"
   "$INSTALL_DIR/bin/ds" latex install-runtime

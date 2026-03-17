@@ -530,6 +530,7 @@ class CodexRunner:
 
         env = dict(**os.environ)
         env["CODEX_HOME"] = str(codex_home)
+        env["DEEPSCIENTIST_HOME"] = str(self.home)
         env["DS_HOME"] = str(self.home)
         env["DS_QUEST_ID"] = request.quest_id
         env["DS_QUEST_ROOT"] = str(request.quest_root)
@@ -846,6 +847,7 @@ class CodexRunner:
             tool_timeout_sec = None
 
         shared_env = {
+            "DEEPSCIENTIST_HOME": str(self.home),
             "DS_HOME": str(self.home),
             "DS_QUEST_ID": quest_id,
             "DS_QUEST_ROOT": str(quest_root),

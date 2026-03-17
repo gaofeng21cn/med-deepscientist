@@ -92,9 +92,9 @@ acp:
 - 类型：`string`
 - 默认值：安装时的 DeepScientist 主目录，通常为 `~/DeepScientist`
 - 页面标签：`Home path`
-- 作用：这是配置、quests、memory、plugins、logs、cache 的根路径。
+- 作用：这是配置、项目、memory、plugins、logs、cache 的根路径。
 - 何时修改：仅在你明确使用自定义安装目录时修改。
-- 注意事项：这不是单个 quest 路径，而是整个 DeepScientist 的运行时根目录。
+- 注意事项：这不是单个项目路径，而是整个 DeepScientist 的运行时根目录。
 
 **`default_runner`**
 
@@ -102,7 +102,7 @@ acp:
 - 默认值：`codex`
 - 允许值：当前页面预设为 `codex`、`claude`
 - 页面标签：`Default runner`
-- 作用：当 quest 没有单独覆盖 runner 时，默认走这里指定的 runner。
+- 作用：当项目没有单独覆盖 runner 时，默认走这里指定的 runner。
 - 何时修改：只有在你真的接通并启用了其他 runner 时才需要改。
 - 注意事项：当前仓库的真实主路径仍然是 `codex`；`claude` 仍是预留位。
 
@@ -122,17 +122,17 @@ acp:
 - 类型：`boolean`
 - 默认值：`true`
 - 页面标签：`Restore sessions on start`
-- 作用：daemon 启动时尝试恢复之前的 quest 会话状态。
+- 作用：daemon 启动时尝试恢复之前的项目会话状态。
 - 何时关闭：你希望每次启动都从干净的运行时状态进入。
 
 **`daemon.max_concurrent_quests`**
 
 - 类型：`number`
 - 默认值：`1`
-- 页面标签：`Max concurrent quests`
-- 作用：限制同时活跃的 quest 数量。
+- 页面标签：`Max concurrent projects`
+- 作用：限制同时活跃的项目数量。
 - 推荐值：大多数情况下保持 `1`。
-- 风险：并发 quest 越多，资源竞争、连接器串扰和观察复杂度越高。
+- 风险：并发项目越多，资源竞争、连接器串扰和观察复杂度越高。
 
 **`daemon.ack_timeout_ms`**
 
@@ -212,7 +212,7 @@ acp:
 - 类型：`boolean`
 - 默认值：`true`
 - 页面标签：`Auto-checkpoint`
-- 作用：quest 过程中自动做 Git 检查点。
+- 作用：项目过程中自动做 Git 检查点。
 - 何时关闭：你完全希望手动控制提交节奏。
 
 **`git.auto_push`**
@@ -263,15 +263,15 @@ acp:
 
 - 类型：`boolean`
 - 默认值：`true`
-- 页面标签：`Sync quest skills on create`
-- 作用：创建 quest 时，把技能镜像到 quest 本地 `.codex/skills` / `.claude/agents`。
+- 页面标签：`Sync project skills on create`
+- 作用：创建项目时，把技能镜像到项目本地 `.codex/skills` / `.claude/agents`。
 
 **`skills.sync_quest_on_open`**
 
 - 类型：`boolean`
 - 默认值：`true`
-- 页面标签：`Sync quest skills on open`
-- 作用：打开已有 quest 时刷新本地技能镜像。
+- 页面标签：`Sync project skills on open`
+- 作用：打开已有项目时刷新本地技能镜像。
 
 ### Connector policy
 
@@ -296,7 +296,7 @@ acp:
 - 类型：`boolean`
 - 默认值：`true`
 - 页面标签：`Enable direct chat`
-- 作用：允许 connector 私聊直接驱动 quest。
+- 作用：允许 connector 私聊直接驱动项目。
 
 ### Cloud link
 
@@ -385,7 +385,7 @@ acp:
 
 ### 摘要
 
-`runners.yaml` 定义 quest 实际由哪个 runner 执行，以及 runner 的模型默认值、审批策略、沙箱策略和失败重试策略。在当前开源版本中：
+`runners.yaml` 定义项目实际由哪个 runner 执行，以及 runner 的模型默认值、审批策略、沙箱策略和失败重试策略。在当前开源版本中：
 
 - `codex`：主路径，默认启用。
 - `claude`：TODO / 预留条目，默认禁用，暂时不能运行。
@@ -447,7 +447,7 @@ claude:
 - 类型：`string`
 - 默认值：`codex=gpt-5.4`，`claude=inherit`
 - 页面标签：`Default model`
-- 作用：quest 和单次请求没有覆盖时的默认模型。
+- 作用：项目和单次请求没有覆盖时的默认模型。
 
 **`model_reasoning_effort`**
 
@@ -539,7 +539,7 @@ claude:
 - 第一版部署一般保持 `codex.enabled: true`、`claude.enabled: false`。
 - 当前版本不要把 `default_runner` 从 `codex` 改走。
 - 如果你不希望任何自动审批，才把 `approval_policy` 调成更严格模式。
-- 如果 quest 经常需要长时间工具调用，不要随意把 `mcp_tool_timeout_sec` 改小。
+- 如果项目经常需要长时间工具调用，不要随意把 `mcp_tool_timeout_sec` 改小。
 
 ## `connectors.yaml`
 
@@ -549,7 +549,7 @@ claude:
 
 - 优先使用无需公网回调的原生传输路径。
 - legacy webhook / relay 字段只作为兼容或兜底。
-- 所有连接器最终都属于同一个 quest 交互系统，而不是各自独立的一套消息逻辑。
+- 所有连接器最终都属于同一个项目交互系统，而不是各自独立的一套消息逻辑。
 
 ### 顶层路由字段
 
@@ -602,7 +602,7 @@ claude:
 
 - 类型：`boolean`
 - 默认值：大多数 connector 为 `true`
-- 作用：私聊默认自动跟随当前活跃 quest。
+- 作用：私聊默认自动跟随当前活跃项目。
 
 ### `telegram`
 
@@ -902,7 +902,7 @@ legacy Meta Cloud 字段：
 
 - 类型：`boolean`
 - 默认值：`true`
-- 作用：QQ 私聊默认跟随最新活跃 quest。
+- 作用：QQ 私聊默认跟随最新活跃项目。
 
 ### QQ 里程碑媒体策略
 
@@ -1000,7 +1000,7 @@ allow_unsigned: false
 
 ### 摘要
 
-这个文件管理外部 MCP 服务。它不控制内置 `memory`、`artifact`、`bash_exec`，也不保存 quest 内部工具调用历史。
+这个文件管理外部 MCP 服务。它不控制内置 `memory`、`artifact`、`bash_exec`，也不保存项目内部工具调用历史。
 
 ### 结构
 
@@ -1023,7 +1023,7 @@ servers:
 
 - 类型：`boolean`
 - 默认值：新卡片默认为 `false`
-- 作用：只有启用的外部 MCP 才会暴露给 quest 或 runner。
+- 作用：只有启用的外部 MCP 才会暴露给项目或 runner。
 
 **`servers.<server_id>.transport`**
 

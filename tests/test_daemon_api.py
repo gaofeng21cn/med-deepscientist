@@ -9,6 +9,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -104,6 +105,86 @@ def test_runtime_state_updates_do_not_revert_status_on_concurrent_writes(temp_ho
     assert state["display_status"] == "running"
     assert state["active_run_id"] == "run-123"
     assert state["active_interaction_id"] == "milestone-1"
+
+
+def test_daemon_update_status_uses_launcher_json_contract(
+    temp_home: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    monkeypatch.setenv("DEEPSCIENTIST_NODE_BINARY", "node")
+    monkeypatch.setenv("DEEPSCIENTIST_LAUNCHER_PATH", str(project_root / "bin" / "ds.js"))
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "current_version": "1.5.2",
+                    "latest_version": "1.5.3",
+                    "update_available": True,
+                    "can_self_update": True,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("deepscientist.daemon.app.subprocess.run", _fake_run)
+
+    app = DaemonApp(temp_home)
+    payload = app.system_update_status()
+
+    assert payload["latest_version"] == "1.5.3"
+    assert "--check" in captured["command"]
+    assert "--json" in captured["command"]
+
+
+def test_daemon_update_request_starts_background_worker_with_restart(
+    temp_home: Path,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    monkeypatch.setenv("DEEPSCIENTIST_NODE_BINARY", "node")
+    monkeypatch.setenv("DEEPSCIENTIST_LAUNCHER_PATH", str(project_root / "bin" / "ds.js"))
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "started": True,
+                    "message": "DeepScientist update worker started.",
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("deepscientist.daemon.app.subprocess.run", _fake_run)
+
+    app = DaemonApp(temp_home)
+    app._serve_host = "0.0.0.0"
+    app._serve_port = 20999
+    payload = app.request_system_update(action="install_latest")
+
+    assert payload["started"] is True
+    assert "--background" in captured["command"]
+    assert "--restart-daemon" in captured["command"]
+    assert "0.0.0.0" in captured["command"]
+    assert "20999" in captured["command"]
 
 
 def test_daemon_serves_health_and_ui(temp_home: Path, project_root: Path, pythonpath_env) -> None:

@@ -9,10 +9,10 @@
 
 ## 这个弹窗实际做什么
 
-`Start Research` 不只是“新建 quest 表单”，它同时完成四件事：
+`Start Research` 不只是“新建项目表单”，它同时完成四件事：
 
 1. 收集结构化启动上下文
-2. 把这些上下文编译成 quest 的第一条 kickoff prompt
+2. 把这些上下文编译成项目的第一条 kickoff prompt
 3. 绑定一个可选的可复用 baseline
 4. 持久化 `startup_contract`，供后续 prompt builder 持续读取
 
@@ -113,17 +113,17 @@ type StartResearchContractFields = {
 
 ## 字段说明
 
-### Quest 基本身份
+### 项目基本身份
 
 **`title`**
 
-- Quest 的人类可读标题。
+- 项目的人类可读标题。
 - 用于卡片和工作区标题。
 - 不要求与 `quest_id` 一致。
 
 **`quest_id`**
 
-- Quest 的稳定标识，也是目录名。
+- 项目的稳定标识，保存在 `quest_id` 中，同时也是目录名。
 - 默认由 runtime 提供下一个顺序编号。
 - 允许用户手动覆盖。
 
@@ -256,17 +256,17 @@ type StartResearchContractFields = {
 
 `compileStartResearchPrompt(...)` 会生成一段可读 kickoff prompt，包含：
 
-- quest bootstrap
-- primary research request
-- research goals
-- baseline context
-- reference papers / repositories
-- operational constraints
-- research delivery mode
-- decision handling mode
-- launch mode
-- research contract
-- mandatory working rules
+- 项目启动上下文
+- 核心研究请求
+- 研究目标
+- baseline 上下文
+- 参考论文 / 仓库
+- 运行约束
+- 研究交付模式
+- 决策处理模式
+- 启动模式
+- 研究合同
+- 必须遵守的工作规则
 
 其中自定义启动会被明确写出来：
 
@@ -327,8 +327,8 @@ type StartResearchContractFields = {
 
 ```json
 {
-  "title": "Continue retrieval quest",
-  "goal": "Continue the existing retrieval quest and decide whether a fresh main run is still needed.",
+  "title": "Continue retrieval project",
+  "goal": "Continue the existing retrieval project and decide whether a fresh main run is still needed.",
   "quest_id": "013",
   "requested_baseline_ref": null,
   "startup_contract": {
@@ -396,7 +396,7 @@ type StartResearchContractFields = {
 
 ## 运行时意义
 
-- `startup_contract` 是 quest 的持久状态，不只是 UI 临时字段。
+- `startup_contract` 是项目的持久状态，不只是 UI 临时字段。
 - 后续 prompt builder 还会继续读取 `launch_mode`、`custom_profile`、`entry_state_summary`、`review_summary`、`custom_brief`。
 - 所以 `Start Research` 不只影响第一轮，还会影响后续路由判断。
 

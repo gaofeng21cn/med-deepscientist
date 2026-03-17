@@ -30,6 +30,10 @@ function basePathFromDocumentId(documentId?: string | null): { path: string; rev
     const relative = raw.slice('path::'.length).replace(/^\/+/, '')
     return relative ? { path: relative } : null
   }
+  if (raw.startsWith('questpath::')) {
+    const relative = raw.slice('questpath::'.length).replace(/^\/+/, '')
+    return relative ? { path: relative } : null
+  }
   if (raw.startsWith('memory::')) {
     const relative = raw.slice('memory::'.length).replace(/^\/+/, '')
     return relative ? { path: `memory/${relative}` } : null
@@ -187,7 +191,9 @@ export function resolveQuestMarkdownAssetUrl(
   const resolvedPath = resolveRelativePosixPath(context.baseRelativePath, trimmed)
   const targetDocumentId = context.baseRevision
     ? `git::${context.baseRevision}::${resolvedPath}`
-    : `path::${resolvedPath}`
+    : context.baseDocumentId.startsWith('questpath::')
+      ? `questpath::${resolvedPath}`
+      : `path::${resolvedPath}`
   return buildQuestDocumentAssetUrl(context.questId, targetDocumentId)
 }
 

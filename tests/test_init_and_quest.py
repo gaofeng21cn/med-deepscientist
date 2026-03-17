@@ -7,6 +7,7 @@ from pathlib import Path
 from deepscientist.config import ConfigManager
 from deepscientist.cli import _local_ui_url, init_command, pause_command
 from deepscientist.home import ensure_home_layout, repo_root
+from deepscientist.mcp.context import McpContext
 from deepscientist.quest import QuestService
 from deepscientist.shared import ensure_dir, write_json, write_text
 from deepscientist.skills import SkillInstaller
@@ -17,6 +18,9 @@ def test_init_creates_required_files(temp_home: Path) -> None:
     manager = ConfigManager(temp_home)
     created = manager.ensure_files()
     assert created
+    assert (temp_home / "runtime" / "python").exists()
+    assert (temp_home / "runtime" / "uv-cache").exists()
+    assert not (temp_home / "runtime" / "venv").exists()
     assert (temp_home / "config" / "config.yaml").exists()
     assert (temp_home / "config" / "runners.yaml").exists()
     assert (temp_home / "config" / "connectors.yaml").exists()
@@ -172,3 +176,24 @@ def test_pause_command_prefers_daemon_control_when_available(temp_home: Path, mo
 def test_local_ui_url_keeps_default_host_visible() -> None:
     assert _local_ui_url("0.0.0.0", 20999) == "http://0.0.0.0:20999"
     assert _local_ui_url("", 20999) == "http://0.0.0.0:20999"
+
+
+def test_mcp_context_prefers_deepscientist_home_env(monkeypatch, tmp_path: Path) -> None:
+    primary_home = tmp_path / "primary-home"
+    fallback_home = tmp_path / "fallback-home"
+    monkeypatch.setenv("DEEPSCIENTIST_HOME", str(primary_home))
+    monkeypatch.setenv("DS_HOME", str(fallback_home))
+
+    context = McpContext.from_env()
+
+    assert context.home == primary_home
+
+
+def test_repo_root_prefers_explicit_env(monkeypatch, tmp_path: Path) -> None:
+    install_root = tmp_path / "install-root"
+    ensure_dir(install_root / "src" / "deepscientist")
+    ensure_dir(install_root / "src" / "skills")
+    write_text(install_root / "pyproject.toml", "[project]\nname='deepscientist'\n")
+    monkeypatch.setenv("DEEPSCIENTIST_REPO_ROOT", str(install_root))
+
+    assert repo_root() == install_root.resolve()

@@ -53,7 +53,7 @@ Do not invent a separate experiment system for those cases.
 - If the runtime starts an auto-continue turn with no new user message, resume from the current campaign state and active requirements instead of replaying the previous user turn.
 - Progress message templates are references only. Adapt to the actual context and vary wording so messages feel human, respectful, and non-robotic.
 - Use `reply_mode='blocking'` only for real user decisions that cannot be resolved from local evidence.
-- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, wait up to 1 day when feasible, then choose the best option yourself and notify the user of the chosen option if the timeout expires.
+- For any blocking decision request, provide 1 to 3 concrete options, put the recommended option first, explain each option's actual content plus pros and cons, and wait up to 1 day when feasible. If the blocker is a missing external credential or secret that only the user can provide, keep the quest waiting, ask the user to supply it or choose an alternative, and do not self-resolve; if resumed without that credential and no other work is possible, a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700)` is acceptable. Otherwise choose the best option yourself and notify the user of the chosen option if the timeout expires.
 - If a threaded user reply arrives, interpret it relative to the latest campaign progress update before assuming the task changed completely.
 
 ## Stage purpose
@@ -129,6 +129,8 @@ A campaign should usually leave behind:
 - a campaign identifier
 - a selected outline reference when the campaign is writing-facing
 - one directory per analysis run
+- any supplementary baseline reproduced for analysis under `baselines/local/<baseline_id>/` or attached under `baselines/imported/<baseline_id>/`
+- one quest-level supplementary baseline inventory at `artifacts/baselines/analysis_inventory.json`
 - one run artifact per analysis slice
 - one outline-bound todo manifest when the campaign is writing-facing
 - an aggregated campaign report
@@ -252,12 +254,21 @@ For each slice, define at minimum:
 - metric or observable
 - stop condition
 - evidence path expectations
+- `required_baselines` when the slice depends on an extra comparator that is not yet available in the quest
 
 Recommended extra per-slice fields:
 
 - `slice_id`
 - `run_kind`
 - `slice_class`, such as `auxiliary`, `claim-carrying`, or `supporting`
+- `required_baselines`, where each item records at least `baseline_id` plus the reason, benchmark, and split when known
+
+If a slice needs an extra comparator baseline:
+
+- reproduce it under `baselines/local/<baseline_id>/` unless it is attached under `baselines/imported/<baseline_id>/`
+- keep the usual durable baseline notes there, including `analysis_plan.md`, `setup.md`, `execution.md`, and `verification.md`
+- do not overwrite the canonical quest baseline gate just because an analysis slice needed a supplementary baseline
+- after the comparator is ready, record it back through `record_analysis_slice(..., comparison_baselines=[...])` with its `baseline_id`, path, benchmark/split, and metrics summary
 - `parent_run_id`
 - whether a code diff is required
 - whether an isolated branch/worktree is required
@@ -284,6 +295,17 @@ Treat `campaign_id` as system-owned, and treat `slice_id` / `todo_id` as agent-a
 Do not replace the normal campaign flow with repeated manual `artifact.prepare_branch(...)` calls.
 After each slice finishes, call `artifact.record_analysis_slice(...)` immediately so the result is mirrored back to the parent branch and the next slice can be activated.
 For slice recording, `deviations` and `evidence_paths` are optional context fields, not mandatory ceremony; include them only when they materially help explanation or auditability.
+Each `artifact.record_analysis_slice(...)` call should also include an `evaluation_summary` with exactly these six fields:
+
+- `takeaway`
+- `claim_update`
+- `baseline_relation`
+- `comparability`
+- `failure_mode`
+- `next_action`
+
+Use those six fields to keep each slice readable at a glance from Canvas, stage tabs, review, and rebuttal.
+The longer prose still matters, but the six-field summary is the stable routing summary.
 
 For writing-facing campaigns, prefer running `claim-carrying` slices before `supporting` slices unless an auxiliary check is required to make the main slice interpretable.
 
@@ -473,6 +495,7 @@ Stage-end requirement:
 - if the campaign produced a durable cross-slice lesson, failure pattern, or comparability caveat, write at least one `memory.write(...)` before leaving the stage
 
 The campaign’s main record belongs in run artifacts and the aggregated report.
+When synthesizing the campaign, read the per-slice `evaluation_summary` fields first, then expand into longer evidence only where the short summaries are still ambiguous.
 
 ## Artifact rules
 

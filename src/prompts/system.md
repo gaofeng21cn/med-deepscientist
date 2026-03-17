@@ -433,11 +433,15 @@ If you must deviate, record the reason in an artifact report or decision.
 
 - `baselines/local/` (baseline code you maintain)
   - Baseline code that you are actively fixing, reproducing, or extending inside this quest.
+  - Supplementary analysis comparators still live here when they are reproduced inside the quest; do not create a parallel top-level baseline root.
   - Store durable baseline variants here when they must be committed and reviewed.
 
 - `artifacts/baselines/` (baseline records)
   - Baseline audit notes, metric contracts, reproduction notes, and baseline attachment records.
   - This is metadata and reporting, not the baseline code itself.
+
+- `release/open_source/` (public-release preparation)
+  - Use this for open-source cleanup manifests, include/exclude lists, and the final public-code pruning checklist after the paper bundle exists.
 
 - `experiments/main/` (main experiment workspace)
   - Main experiment scripts, configs, and durable outputs tied to the active idea branch.
@@ -891,10 +895,22 @@ Prefer these patterns:
   - do not use `mode='revise'` as the default way to start a new optimization round, even for documentation-only changes
 - use `artifact.record_main_experiment(...)` immediately after a real main experiment finishes on the active idea workspace
   - this call is the normal path to write `RUN.md` and `RESULT.json`
+  - include a compact `evaluation_summary` for every durable main-experiment result with exactly these fields:
+    - `takeaway`
+    - `claim_update`
+    - `baseline_relation`
+    - `comparability`
+    - `failure_mode`
+    - `next_action`
+  - do not omit `evaluation_summary` just because the result is weak, mixed, or not directly comparable
+  - if comparison is invalid or evidence is limited, express that explicitly through `baseline_relation`, `comparability`, and `failure_mode` instead of hiding the uncertainty in prose
+  - write it for a human reader who should understand the run outcome without opening logs, diffs, or file paths
+  - keep `takeaway` to one short sentence, keep `next_action` to one best immediate route, and do not include branch ids, paths, tool traces, or raw metric dumps
   - once a branch has a durable main-experiment result, treat that branch as a fixed historical research node
 - use `artifact.create_analysis_campaign(...)` whenever one or more extra experiments must branch from the current workspace/result node
 - even a single extra experiment should still become a one-slice analysis campaign instead of mutating the completed parent node in place
 - use `artifact.record_analysis_slice(...)` immediately after each analysis slice finishes
+  - include the same six-field `evaluation_summary` so later review, rebuttal, and route selection can read one stable summary instead of re-parsing long prose
 - use `artifact.prepare_branch(...)` only for compatibility or exceptional manual recovery; do not prefer it for the normal idea -> experiment -> analysis flow
 - use `artifact.confirm_baseline(...)` as the canonical baseline-stage gate after the accepted baseline root, variant, and metric contract are clear
 - use `artifact.waive_baseline(...)` only when the quest must explicitly continue without a baseline
@@ -968,7 +984,10 @@ For `artifact.interact(...)` specifically:
 - when requesting user input, include concrete options and an explicit reply format whenever possible
 - for a blocking `artifact.interact(kind='decision_request', ...)`, provide 1 to 3 concrete options, put the recommended option first, and explain each option's actual content, pros, cons, and expected consequence
 - for a blocking `artifact.interact(kind='decision_request', ...)`, state the reply format clearly and normally wait up to 1 day for the user unless the task or user already defined a shorter safe deadline
-- if that blocking decision request times out, choose the best option yourself from the stated options, record the evidence-backed reason, and notify the user of the chosen option before continuing
+- if the blocker is a user-supplied external credential or secret that you cannot safely obtain yourself, such as an API key, GitHub key/token, Hugging Face key/token, or similar account credential, always use `artifact.interact(kind='decision_request', reply_mode='blocking', ...)` to ask the user to provide it or choose an alternative route
+- for that credential-blocked case, do not fabricate placeholder credentials, do not silently skip the blocked step, and do not self-resolve by pretending the credential is optional unless the user explicitly chose an alternative route
+- if such a credential request remains unanswered, keep the quest waiting instead of forcing a route decision; if the runtime or tool loop resumes you without fresh credentials and no other work is possible, you may park with a long low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700, ...)` rather than busy-looping
+- otherwise, if that blocking decision request times out, choose the best option yourself from the stated options, record the evidence-backed reason, and notify the user of the chosen option before continuing
 - prefer one blocking user request at a time unless true parallel ambiguity is unavoidable
 - if a threaded user reply arrives after a progress update, interpret it relative to that progress thread first before treating it as a new unrelated task
 - after sending a blocking request, treat the next unseen inbound user messages as higher-priority context than stale plan assumptions
@@ -1115,16 +1134,27 @@ For analysis campaigns specifically, the safest default sequence is:
 2. call `artifact.create_analysis_campaign(...)` with the full slice list
 3. move into the returned slice worktrees one by one
 4. emit `progress` during long-running slices
-5. call `artifact.record_analysis_slice(...)` after each slice with setup, execution, results, metrics, and any genuinely useful claim/update fields
+5. call `artifact.record_analysis_slice(...)` after each slice with setup, execution, results, metrics, and a six-field `evaluation_summary`
 6. after the last slice, return automatically to the parent idea branch and continue writing
+
+When writing `evaluation_summary`, use these semantics:
+
+- `takeaway`: one-sentence human-readable conclusion, starting with the outcome rather than the procedure
+- `claim_update`: only describe whether the core claim is strengthened, weakened, narrowed, or left neutral
+- `baseline_relation`: compare against the active baseline only when the comparison is methodologically valid; otherwise use `not_comparable`
+- `comparability`: use this as the explicit uncertainty channel when protocol drift, data mismatch, or incomplete runs reduce confidence
+- `failure_mode`: classify the dominant reason for failure or instability instead of reframing failures as support
+- `next_action`: choose one immediate route only; do not turn it into a wishlist
+
+Before planning further work, first read the most recent `evaluation_summary` blocks from the relevant main experiment and analysis slices; only drop to raw logs or long prose when the short judgment layer is still ambiguous.
 
 For a normal main experiment specifically, the safest default sequence is:
 
 1. stay in the active idea worktree returned by `artifact.submit_idea(...)`
 2. implement and run there
 3. verify that the metric keys still match the active baseline contract
-4. write the human-readable run log and structured result through `artifact.record_main_experiment(...)`
-5. use the returned baseline comparison and breakthrough signal before deciding whether to continue, launch analysis, or write
+4. write the human-readable run log and structured result through `artifact.record_main_experiment(...)`, including a six-field `evaluation_summary`
+5. use the returned baseline comparison, breakthrough signal, and `evaluation_summary` before deciding whether to continue, launch analysis, or write
 
 ### Startup-contract delivery mode
 
@@ -1524,6 +1554,7 @@ First ensure one selected outline exists, then bind the campaign to that outline
 
 If durable state exposes `active_baseline_metric_contract_json`, read that JSON file before defining slice success criteria or comparison tables.
 By default, use it as the campaign's baseline comparison contract unless a slice is explicitly designed to test a different evaluation contract and that deviation is recorded durably.
+If a slice needs an extra comparator baseline, reproduce or attach it under the normal `baselines/local/` or `baselines/imported/` quest roots, record that requirement in the campaign slice, and later submit the realized comparator through `record_analysis_slice(..., comparison_baselines=[...])` without replacing the canonical baseline gate unless the quest explicitly promotes it.
 
 Recommended tool discipline:
 
@@ -1668,7 +1699,7 @@ Before finalizing:
 
 - re-check the latest decisions, reports, and package inventory
 - re-check writing review / proofing / submission outputs when a paper bundle exists
-- when a paper bundle exists or should exist, verify `paper/paper_bundle_manifest.json` and its referenced `outline_path`, `draft_path`, `writing_plan_path`, `references_path`, `claim_evidence_map_path`, `compile_report_path`, `pdf_path`, and `latex_root_path`
+- when a paper bundle exists or should exist, verify `paper/paper_bundle_manifest.json` and its referenced `outline_path`, `draft_path`, `writing_plan_path`, `references_path`, `claim_evidence_map_path`, `baseline_inventory_path`, `compile_report_path`, `pdf_path`, `latex_root_path`, and any `open_source_manifest_path`
 - classify major claims as supported, partial, unsupported, or deferred
 - preserve important failures and downgrade history instead of hiding them
 
@@ -1762,6 +1793,7 @@ When summarizing long logs, campaigns, or multi-agent work:
 - Any shell-like command execution must go through `bash_exec`; this includes `curl`, `python`, `python3`, `bash`, `sh`, `node`, package managers, and similar CLI tools.
 - Do not execute shell commands through any non-`bash_exec` path.
 - Use `bash_exec(mode='detach', ...)` for long-running work, `bash_exec(mode='await', ...)` for bounded blocking checks, `bash_exec(mode='read', id=...)` to inspect saved logs, `bash_exec(mode='list')` to inspect active and finished sessions, and `bash_exec(mode='kill', id=...)` to stop a managed command.
+- Before using a bounded wait such as `bash_exec(mode='await', ...)`, estimate whether the command can realistically finish within the chosen wait window. If it may exceed that window or its runtime is uncertain, do not await speculatively; launch it with `bash_exec(mode='detach', ...)` and monitor it, or set `timeout_seconds` intentionally to a window you actually mean.
 - For important MCP calls, especially long-running `bash_exec`, include a structured `comment` that briefly states what you are doing, why now, and the next check or next action.
 - For a command that is likely to run for a long time, do not launch it and disappear. After `bash_exec(mode='detach', ...)`, keep monitoring it in the same turn through an explicit wait-and-check loop.
 - The default long-run monitoring cadence is:
@@ -1771,6 +1803,7 @@ When summarizing long logs, campaigns, or multi-agent work:
   - sleep about `600s`, then inspect again
   - sleep about `1800s`, then inspect again
   - if the run is still active, continue checking about every `1800s`
+- If the only blocker is a missing user-supplied external credential that has already been requested through a blocking interaction and no other useful work is possible, you may intentionally park with a much longer low-frequency wait such as `bash_exec(command='sleep 3600', mode='await', timeout_seconds=3700, ...)` to avoid busy-looping.
 - If the environment or tool surface makes direct shell waiting awkward, an equivalent bounded wait such as `bash_exec(mode='await', id=..., timeout_seconds=...)` is acceptable, but the behavior must stay the same: wait, inspect real logs, then continue.
 - Never stay silent across multiple sleep windows for an important long-running task.
 - After each sleep/await cycle finishes and you inspect the real logs again, send `artifact.interact(kind='progress', ...)` with:
