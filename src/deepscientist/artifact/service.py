@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..arxiv_library import ArxivLibraryService
@@ -693,6 +693,29 @@ class ArtifactService:
         except ValueError:
             return str(path)
 
+    def _paper_bundle_relative_path(
+        self,
+        quest_root: Path,
+        path: Path | None,
+        *,
+        workspace_root: Path | None = None,
+    ) -> str | None:
+        if path is None:
+            return None
+        resolved = path.resolve()
+        roots = [self._workspace_root_for(quest_root, workspace_root), quest_root]
+        seen: set[str] = set()
+        for root in roots:
+            key = str(root.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                return resolved.relative_to(root.resolve()).as_posix()
+            except ValueError:
+                continue
+        return str(path)
+
     @staticmethod
     def _branch_kind_from_name(branch_name: str | None) -> str:
         normalized = str(branch_name or "").strip()
@@ -1288,6 +1311,100 @@ class ArtifactService:
 
     def _paper_baseline_inventory_path(self, quest_root: Path, *, workspace_root: Path | None = None) -> Path:
         return self._paper_root(quest_root, workspace_root=workspace_root, create=True) / "baseline_inventory.json"
+
+    def _paper_bundle_path_candidates(
+        self,
+        quest_root: Path,
+        raw_path: object,
+        *,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
+        text = str(raw_path or "").strip()
+        if not text:
+            return []
+        candidate = Path(text).expanduser()
+        roots = [self._workspace_root_for(quest_root, workspace_root), quest_root]
+        resolved: list[Path] = []
+        if candidate.is_absolute():
+            try:
+                resolved.append(candidate.resolve())
+            except OSError:
+                return []
+        else:
+            for root in roots:
+                try:
+                    resolved.append((root / candidate).resolve())
+                except OSError:
+                    continue
+        deduped: list[Path] = []
+        seen: set[str] = set()
+        for item in resolved:
+            key = str(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _paper_bundle_compile_report(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+        compile_report_path: object = None,
+    ) -> dict[str, Any]:
+        for candidate in self._paper_bundle_path_candidates(
+            quest_root,
+            compile_report_path,
+            workspace_root=workspace_root,
+        ):
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            payload = read_json(candidate, {})
+            if isinstance(payload, dict):
+                return payload
+        return {}
+
+    def _normalize_paper_bundle_latex_root_path(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+        latex_root_path: object = None,
+        compile_report_path: object = None,
+    ) -> str | None:
+        compile_report = self._paper_bundle_compile_report(
+            quest_root,
+            workspace_root=workspace_root,
+            compile_report_path=compile_report_path,
+        )
+        for raw in (
+            latex_root_path,
+            compile_report.get("latex_root_path"),
+            compile_report.get("main_file_path"),
+        ):
+            text = str(raw or "").strip()
+            if not text:
+                continue
+            for candidate in self._paper_bundle_path_candidates(
+                quest_root,
+                text,
+                workspace_root=workspace_root,
+            ):
+                if candidate.exists() and candidate.is_dir():
+                    return self._paper_bundle_relative_path(quest_root, candidate, workspace_root=workspace_root) or text
+                if candidate.suffix.lower() == ".tex":
+                    return self._paper_bundle_relative_path(
+                        quest_root,
+                        candidate.parent,
+                        workspace_root=workspace_root,
+                    ) or PurePosixPath(text).parent.as_posix()
+            if Path(text).suffix.lower() == ".tex":
+                parent = PurePosixPath(text).parent.as_posix()
+                if parent not in {"", "."}:
+                    return parent
+            return text
+        return None
 
     def _open_source_root(
         self,
@@ -5696,6 +5813,12 @@ class ArtifactService:
         default_compile_report_path = (
             self._workspace_relative(quest_root, paper_root / "build" / "compile_report.json") or "paper/build/compile_report.json"
         )
+        normalized_latex_root_path = self._normalize_paper_bundle_latex_root_path(
+            quest_root,
+            workspace_root=workspace_root,
+            latex_root_path=latex_root_path,
+            compile_report_path=compile_report_path or default_compile_report_path,
+        )
         manifest = {
             "schema_version": 1,
             "title": str(
@@ -5717,7 +5840,7 @@ class ArtifactService:
             "claim_evidence_map_path": str(claim_evidence_map_path or default_claim_map_path).strip() or None,
             "compile_report_path": str(compile_report_path or default_compile_report_path).strip() or None,
             "pdf_path": str(pdf_path or "").strip() or None,
-            "latex_root_path": str(latex_root_path or "").strip() or None,
+            "latex_root_path": normalized_latex_root_path,
             "baseline_inventory_path": paper_inventory_rel,
             "open_source_manifest_path": self._workspace_relative(
                 quest_root,

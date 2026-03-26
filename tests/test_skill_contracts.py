@@ -17,16 +17,16 @@ def test_system_prompt_prioritizes_user_constraints_and_safe_efficiency() -> Non
     assert "primary planning boundary" in text
     assert "best evidence-per-time-and-compute ratio" in text
     assert "larger safe batch size" in text
-    assert "do not weaken comparability, trust, or the meaning of the final result" in text
+    assert "Do not weaken comparability, trust, or the meaning of the final result" in text
     assert "safe efficiency levers that preserve those constraints and the comparability contract" in text
 
 
 def test_system_prompt_defines_metric_contract_rules_and_optional_metric_md() -> None:
     text = _system_prompt_text()
 
-    assert "make the canonical `metrics_summary` flat at the top level" in text
-    assert "every canonical baseline metric entry should explain where it came from" in text
-    assert "every main experiment submission must cover all required baseline metric ids" in text
+    assert "Keep the canonical `metrics_summary` flat at the top level" in text
+    assert "Every canonical baseline metric entry should explain where it came from" in text
+    assert "Every main experiment submission must cover all required baseline metric ids" in text
     assert "`Result/metric.md` may be used as temporary scratch memory" in text
 
 
@@ -49,36 +49,51 @@ def test_idea_skill_requires_survey_delta_and_memory_reuse_contract() -> None:
     assert "The selected idea draft must cite the survey papers" in text
 
 
-def test_system_prompt_hardens_idea_literature_floor_and_reference_requirement() -> None:
+def test_system_prompt_stays_compact_and_delegates_stage_sop() -> None:
     text = _system_prompt_text()
 
-    assert "before writing or submitting the final selected idea, durably map at least 5 and usually 5 to 10 related and usable papers" in text
-    assert "do not treat the literature floor as optional" in text
-    assert "that final idea draft must use one consistent standard citation format" in text
-    assert "a final idea draft that uses standard-format citations and a `References` or `Bibliography` section" in text
+    assert "Stage-specific SOP belongs in the requested skill." in text
+    assert "Do not restate large stage-specific playbooks" in text
+    assert len(text.splitlines()) < 400
+    assert len(text) < 20000
+
+
+def test_system_prompt_keeps_compact_reference_wording_templates() -> None:
+    text = _system_prompt_text()
+
+    assert "### 3.1 Reference wording" in text
+    assert "These templates are references only." in text
+    assert "Quick update:" in text
+    assert "There's one fork I want to confirm before I continue" in text
+    assert "我这边刚完成了" in text
+    assert "这里有个分叉需要你确认" in text
 
 
 def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     text = _skill_text("baseline")
 
     assert "## Quick workflow" in text
+    assert "## Fast-path first" in text
     assert "## Required plan and checklist" in text
     assert "source paper and source repo first" in text
     assert "`PLAN.md` and `CHECKLIST.md`" in text
+    assert "short-form `PLAN.md` and `CHECKLIST.md`" in text
     assert "references/baseline-plan-template.md" in text
     assert "references/baseline-checklist-template.md" in text
     assert "ModelScope" in text
     assert "compatibility alias" in text
     assert "concise `1-2` sentence summary" in text
-    assert "user's explicit requirements and non-negotiable constraints" in text
     assert "equivalence-preserving efficiency gains" in text
     assert "larger safe batch size" in text
-    assert "accepted baseline meaning, effective evaluation contract, or trust judgment" in text
     assert "one clean implementation pass, one smoke test, and then one normal baseline run" in text
     assert "original paper's evaluation protocol as the canonical baseline contract" in text
     assert "multiple metrics, datasets, subtasks, or splits" in text
     assert "flat top-level dictionary keyed by the paper-facing metric ids" in text
     assert "`Result/metric.md` is optional temporary scratch memory only" in text
+    assert "same failure class" in text
+    assert "## Baseline id and variant rules" in text
+    assert "## Multi-baseline policy" in text
+    assert "references/artifact-payload-examples.md" in text
 
 
 def test_experiment_skill_requires_incremental_seven_field_recording() -> None:
@@ -332,7 +347,6 @@ def test_review_skill_requires_independent_audit_outputs_and_followup_routing() 
 def test_stage_skill_progress_contracts_match_tool_call_keepalive_policy() -> None:
     aligned_skills = (
         "intake-audit",
-        "baseline",
         "idea",
         "experiment",
         "analysis-campaign",
@@ -355,7 +369,7 @@ def test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitorin
     analysis_text = _skill_text("analysis-campaign")
     baseline_text = _skill_text("baseline")
 
-    for text in (baseline_text, experiment_text, analysis_text):
+    for text in (experiment_text, analysis_text):
         assert "smoke test" in text
         assert "bash_exec(mode='detach', ...)" in text
         assert "2000 lines or fewer" in text
@@ -371,7 +385,8 @@ def test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitorin
         assert "do not set `timeout_seconds` exactly equal to `N`" in text
         assert "prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command" in text
 
-    assert "tqdm" in baseline_text
+    assert "smoke test" in baseline_text
+    assert "bash_exec(mode='detach', ...)" in baseline_text
     assert "tqdm" in experiment_text
     assert "tqdm" in analysis_text
 
@@ -380,9 +395,31 @@ def test_baseline_skill_prefers_fast_path_over_upfront_ceremony() -> None:
     text = _skill_text("baseline")
 
     assert "Default to the lightest baseline path" in text
-    assert "run a bounded smoke test as soon as that contract is concrete enough" in text
-    assert "Do not delay an early smoke test just because a fuller write-up is not done yet" in text
-    assert "do not stall just to precreate every one of these files" in text
-    assert "do not require every optional checklist or template before the first smoke test" in text
-    assert "Do not build a new wrapper, registry, or result-export scaffold unless" in text
-    assert "The templates below are references, not prerequisites for the first smoke test" in text
+    assert "Default to a fast path when it can establish trust with less work" in text
+    assert "do not restart broad baseline discovery by default" in text
+    assert "do not front-load a full codebase audit" in text
+    assert "one bounded smoke test" in text
+    assert "do not rerun the same unchanged smoke command" in text
+    assert "watchdog_overdue" in text
+    assert "supplementary analysis baseline" in text
+    assert "references/comparability-contract.md" in text
+    assert len(text.splitlines()) < 700
+    assert len(text) < 30000
+
+
+def test_baseline_artifact_payload_reference_exists_and_stays_compact() -> None:
+    path = repo_root() / "src" / "skills" / "baseline" / "references" / "artifact-payload-examples.md"
+    text = path.read_text(encoding="utf-8")
+
+    assert path.exists()
+    assert "Route or blocked decision" in text
+    assert "Accepted baseline" in text
+    assert "`metrics_summary`" in text or "metrics_summary" in text
+    assert len(text.splitlines()) < 80
+
+
+def test_system_prompt_keeps_the_global_kernel_small() -> None:
+    text = _system_prompt_text()
+
+    assert "This system prompt is the compact global kernel" in text
+    assert "The runtime tells you the `requested_skill`; open that skill before substantive stage work." in text

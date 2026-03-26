@@ -138,6 +138,13 @@ const splitTrailingPartialAny = (data: string, tokens: string[]) => {
   return best
 }
 
+const hasPasteTokenFragment = (data: string) => {
+  if (!data) {
+    return false
+  }
+  return splitTrailingPartialAny(data, [...PASTE_START_TOKENS, ...PASTE_END_TOKENS]).tail.length > 0
+}
+
 const findToken = (data: string, tokens: string[]) => {
   let bestIndex = -1
   let bestToken: string | null = null
@@ -270,8 +277,8 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
 
   const outerHeight = contentLines.length + 2
   const borderColor = glowActive ? theme.text.accent : theme.border.default
-  const cursorBackground = '#7fbfff'
-  const cursorTextColor = 'black'
+  const cursorBackground = theme.ui.cursor.background
+  const cursorTextColor = theme.ui.cursor.text
 
   const topBorder = useMemo(() => {
     const middle = '─'.repeat(Math.max(0, outerWidth - 2))
@@ -386,7 +393,10 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
           insertValue(head)
           handled = true
         }
-        if (tail) pastePendingRef.current = tail
+        if (tail) {
+          pastePendingRef.current = tail
+          return true
+        }
         return handled
       }
 
@@ -409,18 +419,47 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       if (key.ctrl && (input === 'c' || input === '\u0003')) {
         return
       }
-      if ((key.ctrl || key.meta) && !(key.ctrl && input === 'j')) {
-        return
-      }
       const hasPasteMarkers =
         pasteActiveRef.current ||
         pastePendingRef.current.length > 0 ||
         PASTE_START_TOKENS.some((token) => input.includes(token)) ||
-        PASTE_END_TOKENS.some((token) => input.includes(token))
+        PASTE_END_TOKENS.some((token) => input.includes(token)) ||
+        hasPasteTokenFragment(input)
 
       if (hasPasteMarkers) {
         const handled = handlePasteChunk(input)
         if (handled) return
+      }
+
+      const backspaceMatches = input.match(/[\x7f\b]/g)
+      if (key.backspace || backspaceMatches) {
+        const removalCount = Math.max(backspaceMatches?.length || 0, key.backspace ? 1 : 0)
+        if (removalCount > 0) {
+          if (mentionsEnabled) {
+            const range = getLeadingMentionDeleteRange(valueRef.current)
+            const currentCursorIndex = cursorIndexRef.current
+            if (range && currentCursorIndex > 0 && currentCursorIndex <= range.end) {
+              const nextValue = valueRef.current.slice(range.end)
+              setValue(nextValue, 0)
+              return
+            }
+          }
+          deleteBeforeCursor(removalCount)
+          const cleanedInput = input.replace(/[\x7f\b]/g, '')
+          if (cleanedInput) {
+            insertValue(cleanedInput)
+          }
+          return
+        }
+      }
+
+      if (key.delete) {
+        deleteAtCursor(1)
+        return
+      }
+
+      if ((key.ctrl || key.meta) && !(key.ctrl && input === 'j')) {
+        return
       }
 
       if (suggestionsVisible) {
@@ -518,33 +557,6 @@ export const InputPrompt: React.FC<InputPromptProps> = ({
       }
       if (key.ctrl && input === 'j') {
         insertValue('\n')
-        return
-      }
-
-      const backspaceMatches = input.match(/[\x7f\b]/g)
-      if (key.backspace || backspaceMatches) {
-        const removalCount = Math.max(backspaceMatches?.length || 0, key.backspace ? 1 : 0)
-        if (removalCount > 0) {
-          if (mentionsEnabled) {
-            const range = getLeadingMentionDeleteRange(valueRef.current)
-            const currentCursorIndex = cursorIndexRef.current
-            if (range && currentCursorIndex > 0 && currentCursorIndex <= range.end) {
-              const nextValue = valueRef.current.slice(range.end)
-              setValue(nextValue, 0)
-              return
-            }
-          }
-          deleteBeforeCursor(removalCount)
-          const cleanedInput = input.replace(/[\x7f\b]/g, '')
-          if (cleanedInput) {
-            insertValue(cleanedInput)
-          }
-          return
-        }
-      }
-
-      if (key.delete) {
-        deleteAtCursor(1)
         return
       }
 

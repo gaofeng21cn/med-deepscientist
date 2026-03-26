@@ -3,11 +3,14 @@ import type {
   BashProgress,
   BashSession,
   ConfigFileEntry,
+  ConnectorAvailabilitySnapshot,
   ConnectorSnapshot,
   FeedEnvelope,
   OpenDocumentPayload,
   QuestSummary,
   SessionPayload,
+  WeixinQrLoginStartPayload,
+  WeixinQrLoginWaitPayload,
 } from '../types.js'
 
 async function parseResponse<T>(response: Response): Promise<T> {
@@ -82,6 +85,18 @@ export const client = {
       body: JSON.stringify({ source: 'tui-ink' }),
     }),
   connectors: (baseUrl: string) => api<ConnectorSnapshot[]>(baseUrl, '/api/connectors'),
+  connectorsAvailability: (baseUrl: string) =>
+    api<ConnectorAvailabilitySnapshot>(baseUrl, '/api/connectors/availability'),
+  startWeixinQrLogin: (baseUrl: string, force = false) =>
+    api<WeixinQrLoginStartPayload>(baseUrl, '/api/connectors/weixin/login/qr/start', {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+  waitWeixinQrLogin: (baseUrl: string, sessionKey: string, timeoutMs = 1500) =>
+    api<WeixinQrLoginWaitPayload>(baseUrl, '/api/connectors/weixin/login/qr/wait', {
+      method: 'POST',
+      body: JSON.stringify({ session_key: sessionKey, timeout_ms: timeoutMs }),
+    }),
   session: (baseUrl: string, questId: string) => api<SessionPayload>(baseUrl, `/api/quests/${questId}/session`),
   openDocument: (baseUrl: string, questId: string, documentId: string) =>
     api<OpenDocumentPayload>(baseUrl, `/api/quests/${questId}/documents/open`, {
@@ -279,5 +294,34 @@ export const client = {
     }>(baseUrl, `/api/config/${name}`, {
       method: 'PUT',
       body: JSON.stringify({ content, revision }),
+    }),
+  saveStructuredConfig: (baseUrl: string, name: string, structured: Record<string, unknown>, revision?: string) =>
+    api<{
+      ok: boolean
+      conflict?: boolean
+      message?: string
+      revision?: string
+      warnings?: string[]
+      errors?: string[]
+    }>(baseUrl, `/api/config/${name}`, {
+      method: 'PUT',
+      body: JSON.stringify({ structured, revision }),
+    }),
+  updateQuestBindings: (
+    baseUrl: string,
+    questId: string,
+    payload: {
+      connector?: string | null
+      conversation_id?: string | null
+      bindings?: Array<{
+        connector: string
+        conversation_id?: string | null
+      }>
+      force?: boolean
+    }
+  ) =>
+    api<Record<string, unknown>>(baseUrl, `/api/quests/${questId}/bindings`, {
+      method: Array.isArray(payload.bindings) ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
     }),
 }

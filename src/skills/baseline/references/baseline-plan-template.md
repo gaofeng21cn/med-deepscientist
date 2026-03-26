@@ -1,9 +1,10 @@
 # Baseline Plan Template
 
 Use this when the `baseline` stage becomes concrete enough to act.
-Keep it short when the route is simple, but do not skip the sections that affect reproducibility, code touchpoints, or fallback handling.
+Keep it short when the route is simple. For fast-path attach/import/prebound validation, a one-screen plan is enough if it preserves the route, command path, outputs, acceptance condition, and fallback.
+Expand the optional sections only when the route is ambiguous, code-touching, broken, multi-variant, or intended for reuse beyond the current quest.
 
-## 1. Objective
+## 1. Core Contract
 
 - quest goal:
 - user's core requirements:
@@ -12,80 +13,63 @@ Keep it short when the route is simple, but do not skip the sections that affect
   - attach / import / reproduce / repair
 - baseline id:
 - variant id:
-
-## 2. Source Package
-
 - source paper:
 - source repo:
-- fallback repo or mirror:
 - source commit / version / tag:
 - task:
 - dataset / split:
 - metric contract:
+- expected command path:
+- expected outputs:
+- acceptance condition:
+- cheapest fallback:
 
-## 3. Paper And Repo Reading Notes
+## 2. Execution Path
 
+- working directory:
+- environment plan:
+- required downloads:
+- hardware assumptions:
+- smoke test needed:
+  - yes / no
+- smoke command:
+- main validation or run command:
+- expected runtime / budget:
+- durable log path:
+- verification targets:
+- fastest failure signal:
+
+## 3. Risks And Revision
+
+- main risks:
+- when to escalate from fast path to full audit:
+- revision note:
+
+## 4. Optional Expansion
+
+Fill this only when the route is no longer simple.
+
+- fallback repo or mirror:
+- checkpoints / models:
+- likely external blockers:
+- safe efficiency levers to try first:
+- health signals that justify continued monitoring rather than intervention:
+- conditions that require plan revision or kill-and-relaunch:
 - paper summary in `1-3` bullets:
 - repo summary in `1-3` bullets:
 - what the baseline actually does:
 - what the likely bottlenecks or brittle points are:
 - what still needs verification:
 
-## 4. Code Touchpoints
+## 5. Optional Code Touchpoints
 
-List the main files or modules that matter before you change anything substantial.
+List the main files or modules only when you expect real inspection or edits.
 
 | Path | Role | Why it matters now | Expected action | Notes |
 |---|---|---|---|---|
 | | | | inspect / modify / leave alone | |
 
-## 5. Environment And Asset Plan
-
-- working directory:
-- environment plan:
-- required downloads:
-- checkpoints / models:
-- hardware assumptions:
-- likely external blockers:
-
-Fallbacks and contingency options:
-
-- if Hugging Face is slow, blocked, or rate-limited:
-  - try ModelScope, official mirrors, quest-local caches, or manually staged files
-- if the official repo is unavailable:
-  - use a verified mirror and record the exact provenance
-- if the full run is too expensive:
-  - define the smoke-test path and the cheapest comparable reduced pilot
-
-## 6. Execution Strategy
-
-### Smoke Test
-
-- command:
-- purpose:
-- expected outputs:
-- fastest failure signal:
-
-### Main Run
-
-- command:
-- expected outputs:
-- expected runtime / budget:
-- durable log path:
-- safe efficiency levers to try first:
-
-### Monitoring And Sleep Rules
-
-- first checks:
-  - `60s`
-  - `120s`
-  - `300s`
-  - `600s`
-  - `1800s`
-- health signals that justify continued monitoring rather than intervention:
-- conditions that require plan revision or kill-and-relaunch:
-
-## 7. Verification Plan
+## 6. Optional Verification Plan
 
 - required result files:
 - required metric keys:
@@ -93,12 +77,12 @@ Fallbacks and contingency options:
 - acceptance condition:
 - downgrade / blocked condition:
 
-## 8. Checklist Link
+## 7. Checklist Link
 
 - checklist path:
 - which item should move next:
 
-## 9. Revision Log
+## 8. Revision Log
 
 | Time | What changed | Why it changed | Impact on execution |
 |---|---|---|---|

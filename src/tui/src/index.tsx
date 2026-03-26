@@ -5,6 +5,8 @@ import { AppContainer } from './app/AppContainer.js'
 import { isAlternateBufferEnabled, isIncrementalRenderingEnabled } from './utils/terminal.js'
 
 const CLEAR_TO_END = '\x1b[0K'
+const BRACKETED_PASTE_ENABLE = '\x1b[?2004h'
+const BRACKETED_PASTE_DISABLE = '\x1b[?2004l'
 
 const withLineClearing = (stdout: NodeJS.WriteStream): NodeJS.WriteStream => {
   const transform = (chunk: unknown) => {
@@ -39,7 +41,30 @@ const questId = parseArg('--quest-id')
 const useAlternateBuffer = isAlternateBufferEnabled()
 const useIncrementalRendering = isIncrementalRenderingEnabled()
 
-render(<AppContainer baseUrl={baseUrl} initialQuestId={questId} />, {
+const setBracketedPasteMode = (enabled: boolean) => {
+  if (!process.stdout.isTTY) {
+    return
+  }
+  try {
+    process.stdout.write(enabled ? BRACKETED_PASTE_ENABLE : BRACKETED_PASTE_DISABLE)
+  } catch {
+    // Ignore terminal write failures during startup or shutdown.
+  }
+}
+
+let bracketedPasteClosed = false
+const closeBracketedPasteMode = () => {
+  if (bracketedPasteClosed) {
+    return
+  }
+  bracketedPasteClosed = true
+  setBracketedPasteMode(false)
+}
+
+setBracketedPasteMode(true)
+process.once('exit', closeBracketedPasteMode)
+
+const instance = render(<AppContainer baseUrl={baseUrl} initialQuestId={questId} />, {
   stdout: withLineClearing(process.stdout),
   stderr: process.stderr,
   stdin: process.stdin,
@@ -47,4 +72,9 @@ render(<AppContainer baseUrl={baseUrl} initialQuestId={questId} />, {
   patchConsole: false,
   alternateBuffer: useAlternateBuffer,
   incrementalRendering: useIncrementalRendering,
+})
+
+void instance.waitUntilExit().finally(() => {
+  closeBracketedPasteMode()
+  process.off('exit', closeBracketedPasteMode)
 })

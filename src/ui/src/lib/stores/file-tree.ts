@@ -89,7 +89,7 @@ export interface FileTreeState {
  */
 export interface FileTreeActions {
   /** Load files for a project */
-  loadFiles: (projectId: string) => Promise<void>;
+  loadFiles: (projectId: string, options?: { force?: boolean }) => Promise<void>;
 
   /** Refresh file tree */
   refresh: () => Promise<void>;
@@ -457,10 +457,10 @@ export const useFileTreeStore = create<FileTreeState & FileTreeActions>(
     renamedFileIds: new Set(),
 
     // Load files for a project
-    loadFiles: async (projectId: string) => {
+    loadFiles: async (projectId: string, options = {}) => {
       set({ isLoading: true, error: null, projectId });
       try {
-        const response = await fileApi.getFileTree(projectId);
+        const response = await fileApi.getFileTree(projectId, options);
         // Defensive: handle cases where response might not have files array
         const files = response?.files;
         const nodes = buildFileTree(files);
@@ -479,7 +479,7 @@ export const useFileTreeStore = create<FileTreeState & FileTreeActions>(
     refresh: async () => {
       const { projectId } = get();
       if (projectId) {
-        await get().loadFiles(projectId);
+        await get().loadFiles(projectId, { force: true });
       }
     },
 

@@ -864,6 +864,7 @@ class QuestService:
         from ..bash_exec import BashExecService
 
         bash_summary = BashExecService(self.home).summary(quest_root)
+        interaction_watchdog = self.artifact_interaction_watchdog_status(quest_root)
         payload = {
             "quest_id": quest_yaml.get("quest_id", quest_id),
             "title": quest_yaml.get("title", quest_id),
@@ -887,6 +888,10 @@ class QuestService:
             "stop_reason": runtime_state.get("stop_reason"),
             "active_interaction_id": runtime_state.get("active_interaction_id"),
             "last_artifact_interact_at": runtime_state.get("last_artifact_interact_at"),
+            "last_tool_activity_at": runtime_state.get("last_tool_activity_at"),
+            "last_tool_activity_name": runtime_state.get("last_tool_activity_name"),
+            "tool_calls_since_last_artifact_interact": int(runtime_state.get("tool_calls_since_last_artifact_interact") or 0),
+            "seconds_since_last_artifact_interact": interaction_watchdog.get("seconds_since_last_artifact_interact"),
             "last_delivered_batch_id": runtime_state.get("last_delivered_batch_id"),
             "last_delivered_at": runtime_state.get("last_delivered_at"),
             "bound_conversations": self._binding_sources_payload(quest_root).get("sources") or ["local:default"],
@@ -907,6 +912,7 @@ class QuestService:
                 "bash_session_count": int(bash_summary.get("session_count") or 0),
                 "bash_running_count": int(bash_summary.get("running_count") or 0),
             },
+            "interaction_watchdog": interaction_watchdog,
             "recent_artifacts": [],
             "recent_runs": [],
         }
@@ -1228,6 +1234,7 @@ class QuestService:
             "bash_session_count": int(bash_summary.get("session_count") or 0),
             "bash_running_count": int(bash_summary.get("running_count") or 0),
         }
+        interaction_watchdog = self.artifact_interaction_watchdog_status(quest_root)
         guidance = None
         try:
             from ..artifact.guidance import build_guidance_for_snapshot
@@ -1287,6 +1294,10 @@ class QuestService:
             "retry_state": runtime_state.get("retry_state"),
             "last_transition_at": runtime_state.get("last_transition_at"),
             "last_artifact_interact_at": runtime_state.get("last_artifact_interact_at"),
+            "last_tool_activity_at": runtime_state.get("last_tool_activity_at"),
+            "last_tool_activity_name": runtime_state.get("last_tool_activity_name"),
+            "tool_calls_since_last_artifact_interact": int(runtime_state.get("tool_calls_since_last_artifact_interact") or 0),
+            "seconds_since_last_artifact_interact": interaction_watchdog.get("seconds_since_last_artifact_interact"),
             "last_delivered_batch_id": runtime_state.get("last_delivered_batch_id"),
             "last_delivered_at": runtime_state.get("last_delivered_at"),
             "bound_conversations": self._binding_sources_payload(quest_root).get("sources") or ["local:default"],
@@ -1302,6 +1313,7 @@ class QuestService:
             },
             "paths": paths,
             "counts": counts,
+            "interaction_watchdog": interaction_watchdog,
             "team": {"mode": "single", "active_workers": []},
             "cloud": {"linked": False, "base_url": "https://deepscientist.cc"},
             "history_count": len(history),
@@ -2674,6 +2686,9 @@ class QuestService:
             "stop_reason": None,
             "last_transition_at": timestamp,
             "last_artifact_interact_at": None,
+            "last_tool_activity_at": None,
+            "last_tool_activity_name": None,
+            "tool_calls_since_last_artifact_interact": 0,
             "pending_user_message_count": pending_count,
             "last_delivered_batch_id": None,
             "last_delivered_at": None,
@@ -2738,6 +2753,7 @@ class QuestService:
             payload = defaults
         merged = {**defaults, **payload}
         merged["pending_user_message_count"] = int(merged.get("pending_user_message_count") or 0)
+        merged["tool_calls_since_last_artifact_interact"] = int(merged.get("tool_calls_since_last_artifact_interact") or 0)
         merged["retry_state"] = dict(merged.get("retry_state") or {}) if isinstance(merged.get("retry_state"), dict) else None
         return merged
 
@@ -2754,6 +2770,9 @@ class QuestService:
         active_interaction_id: str | None | object = _UNSET,
         last_transition_at: str | None | object = _UNSET,
         last_artifact_interact_at: str | None | object = _UNSET,
+        last_tool_activity_at: str | None | object = _UNSET,
+        last_tool_activity_name: str | None | object = _UNSET,
+        tool_calls_since_last_artifact_interact: int | object = _UNSET,
         pending_user_message_count: int | object = _UNSET,
         last_delivered_batch_id: str | None | object = _UNSET,
         last_delivered_at: str | None | object = _UNSET,
@@ -2785,6 +2804,12 @@ class QuestService:
                 state["active_interaction_id"] = str(active_interaction_id).strip() if active_interaction_id else None
             if last_artifact_interact_at is not _UNSET:
                 state["last_artifact_interact_at"] = last_artifact_interact_at
+            if last_tool_activity_at is not _UNSET:
+                state["last_tool_activity_at"] = last_tool_activity_at
+            if last_tool_activity_name is not _UNSET:
+                state["last_tool_activity_name"] = str(last_tool_activity_name).strip() if last_tool_activity_name else None
+            if tool_calls_since_last_artifact_interact is not _UNSET:
+                state["tool_calls_since_last_artifact_interact"] = max(0, int(tool_calls_since_last_artifact_interact))
             if pending_user_message_count is not _UNSET:
                 state["pending_user_message_count"] = max(0, int(pending_user_message_count))
             if last_delivered_batch_id is not _UNSET:
@@ -3056,9 +3081,66 @@ class QuestService:
             quest_root=quest_root,
             active_interaction_id=interaction_id or artifact_id,
             last_artifact_interact_at=timestamp,
+            last_tool_activity_at=timestamp,
+            last_tool_activity_name="artifact.interact",
+            tool_calls_since_last_artifact_interact=0,
             pending_user_message_count=len((self._read_message_queue(quest_root).get("pending") or [])),
         )
         return payload
+
+    def record_tool_activity(
+        self,
+        quest_root: Path,
+        *,
+        tool_name: str,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        timestamp = created_at or utc_now()
+        current_state = self._read_runtime_state(quest_root)
+        next_count = int(current_state.get("tool_calls_since_last_artifact_interact") or 0) + 1
+        payload = {
+            "event_id": generate_id("evt"),
+            "type": "tool_activity",
+            "quest_id": quest_root.name,
+            "tool_name": str(tool_name or "").strip() or "tool",
+            "tool_calls_since_last_artifact_interact": next_count,
+            "created_at": timestamp,
+        }
+        append_jsonl(self._interaction_journal_path(quest_root), payload)
+        self.update_runtime_state(
+            quest_root=quest_root,
+            last_tool_activity_at=timestamp,
+            last_tool_activity_name=payload["tool_name"],
+            tool_calls_since_last_artifact_interact=next_count,
+        )
+        return payload
+
+    @staticmethod
+    def _seconds_since_iso_timestamp(value: str | None) -> int | None:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return None
+        candidate = normalized.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return max(int((datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()), 0)
+
+    def artifact_interaction_watchdog_status(self, quest_root: Path) -> dict[str, Any]:
+        runtime_state = self._read_runtime_state(quest_root)
+        last_artifact_interact_at = str(runtime_state.get("last_artifact_interact_at") or "").strip() or None
+        last_tool_activity_at = str(runtime_state.get("last_tool_activity_at") or "").strip() or None
+        return {
+            "last_artifact_interact_at": last_artifact_interact_at,
+            "seconds_since_last_artifact_interact": self._seconds_since_iso_timestamp(last_artifact_interact_at),
+            "tool_calls_since_last_artifact_interact": int(runtime_state.get("tool_calls_since_last_artifact_interact") or 0),
+            "last_tool_activity_at": last_tool_activity_at,
+            "seconds_since_last_tool_activity": self._seconds_since_iso_timestamp(last_tool_activity_at),
+            "last_tool_activity_name": str(runtime_state.get("last_tool_activity_name") or "").strip() or None,
+        }
 
     def latest_artifact_interaction_records(self, quest_root: Path, limit: int = 10) -> list[dict[str, Any]]:
         items = [
@@ -3320,6 +3402,7 @@ class QuestService:
                     "path": relative,
                     "kind": "directory",
                     "scope": self._classify_relative_scope(relative)[0],
+                    "folder_kind": self._snapshot_folder_kind(child, relative),
                     "children": self._snapshot_tree_nodes(child, revision=revision, prefix=relative),
                     "git_status": None,
                     "recently_changed": False,
@@ -3360,6 +3443,22 @@ class QuestService:
                 cursor = next_cursor
             cursor[parts[-1]] = None
         return tree
+
+    @staticmethod
+    def _snapshot_folder_kind(tree: dict[str, dict | None], relative: str) -> str | None:
+        normalized = str(relative or "").strip().replace("\\", "/")
+        if not normalized or normalized.startswith(".ds/"):
+            return None
+        if not isinstance(tree, dict):
+            return None
+        if tree.get("main.tex") is None and "main.tex" in tree:
+            return "latex"
+        for name, child in tree.items():
+            if child is not None:
+                continue
+            if Path(name).suffix.lower() == ".tex":
+                return "latex"
+        return None
 
     def _git_snapshot_paths(self, quest_root: Path, revision: str) -> list[str]:
         result = run_command(

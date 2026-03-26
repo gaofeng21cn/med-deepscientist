@@ -6,112 +6,82 @@ description: Use when a quest needs to attach, import, reproduce, repair, verify
 # Baseline
 
 This skill establishes the reference system the quest will compare against.
-It absorbs the essential old DeepScientist reproducer discipline into one stage skill.
+The target is one trustworthy baseline line, not an endless reproduction diary.
 
 ## Interaction discipline
 
 - Follow the shared interaction contract injected by the system prompt.
-- For ordinary active work, prefer a concise progress update once work has crossed roughly 6 tool calls with a human-meaningful delta, and do not drift beyond roughly 12 tool calls or about 8 minutes without a user-visible update.
-- Keep ordinary setup and debugging updates concise. Reserve richer milestone reports for accepted / waived / blocked baseline outcomes or other route-changing checkpoints instead of narrating every small setup step.
-- Message templates are references only. Adapt to the actual context and vary wording so updates feel natural and non-robotic.
-- If a threaded user reply arrives, interpret it relative to the latest baseline progress update before assuming the task changed completely.
-- Prefer `bash_exec` for setup, reproduction, and verification commands so each baseline action keeps a durable quest-local session id and log trail.
-- When the baseline route is durably chosen, confirmed, waived, or blocked with a clear next action, send one richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says whether the baseline is trusted, blocked, or waived, why that matters, and what the next stage is.
+- Keep ordinary setup and debugging updates concise.
+- Use richer milestone updates only when the baseline becomes trusted, caveated, blocked, waived, or route-changing.
+- Prefer `bash_exec` for setup, reproduction, monitoring, and verification commands so the baseline line stays durable and auditable.
 
 ## Non-negotiable rules
 
-- no fabrication of metrics, logs, run status, or success claims
-- do not skip baseline steps or silently simplify the reproduction path without explicit approval
+- no fabricated metrics, logs, run status, or success claims
+- do not skip baseline steps or silently simplify the route when that would change trust or comparability
 - do not claim a baseline is ready before verification is complete
-- do not infer missing commands, scripts, or parameters when the uncertainty would change the result
+- do not infer missing commands, scripts, or parameters when the uncertainty could change the result
 - any unavoidable guess must be written down explicitly with expected impact
-- for Python baselines, standardize environment setup with `uv`; do not default to ad-hoc `pip install ...`, a fresh `conda create ...`, or global package mutation when `uv` can provide the same environment reproducibly
 - use web search for discovering papers or repos, but use `artifact.arxiv(paper_id=..., full_text=False)` for actually reading a source arXiv paper when it exists
-- set `full_text=True` only when the summary/abstract view is insufficient for the needed detail; do not default to the raw PDF
-
-## Language and interaction rules
-
-- match the user's language in all visible outputs
-- keep updates concise but concrete
-- if a structured user decision is required, ask only for decisions that the system cannot safely derive locally
-- do not ask speculative or premature questions when local analysis can narrow the choices first
+- set `full_text=True` only when the short form is insufficient
+- for Python baselines, environment setup should be standardized around `uv`
 
 ## Stage purpose
 
 The baseline stage should produce a usable reference point through one of four routes:
 
-- attach an existing reusable baseline
-- import a reusable baseline package
-- reproduce a baseline from source
-- repair a broken or stale baseline
+1. attach an existing reusable baseline
+2. import a reusable baseline package
+3. reproduce a baseline from source
+4. repair a broken or stale baseline
 
-The stage must preserve the classic four-part reproducer flow:
+Keep the classic control flow:
 
 1. analysis
 2. setup
 3. execution
 4. verification
 
-Do not casually skip these gates.
+These are control gates, not paperwork walls.
 
 ## Quick workflow
 
-Treat this as the compressed map of the detailed sections below, not as a second independent SOP.
-
-1. Read the source paper and source repo first, or explicitly record what is missing and why.
+1. Read the source paper and source repo first, or record exactly what is missing and why.
 2. Choose the lightest trustworthy route: attach, import, reproduce, or repair.
-3. Before substantial setup, code changes, or a real run, create `PLAN.md` and `CHECKLIST.md`, and keep them updated when the route, assets, commands, or trust judgment changes materially.
-4. Keep one dominant phase visible: analysis -> setup -> execution -> verification, with a bounded smoke test before any real long run.
-5. Once the route is concrete, prefer one clean implementation pass, one smoke test, and then one normal baseline run; retry only when the smoke test, verification, or runtime evidence shows a concrete failure or incompatibility.
-6. Close the baseline stage by confirming or waiving the gate, then send a concise `1-2` sentence summary that says whether the baseline is trusted, caveated, blocked, or waived, and what happens next.
+3. Start with the fast path whenever the current baseline object, command path, and acceptance target are already clear enough to validate cheaply.
+4. Before substantial baseline setup, code edits, or a real baseline run, create `PLAN.md` and `CHECKLIST.md`; short-form files are enough for simple fast-path work.
+5. Keep one dominant phase visible: analysis -> setup -> execution -> verification.
+6. Prefer one clean implementation pass, one smoke test, and then one normal baseline run.
+7. Retry only when smoke, verification, or runtime evidence shows a concrete failure or incompatibility.
+8. Close the stage by confirming or waiving the gate, then hand off with a concise `1-2` sentence summary of trust status and next anchor.
 
-## Route priority and escalation
-
-This section sets route priority and escalation rules. The authoritative step-by-step execution remains in `Workflow`.
+## Fast-path first
 
 Default to the lightest baseline path that can still establish a trustworthy comparison.
-Do not front-load a full reproduction dossier when a faster truth-finding step would tell you whether the route is even viable.
-User requirements and explicit constraints are the primary boundary for the reproduction plan.
-Within that boundary, prefer equivalence-preserving efficiency gains before more compute: larger safe batch size, cache reuse, checkpoint resume, parallel downloads or workers, and the cheapest comparable smoke path.
+Default to a fast path when it can establish trust with less work.
 
-The ordinary baseline order is:
+Fast path is the default when any of the following is true:
 
-1. confirm quest binding and current baseline state
-2. look for the cheapest trustworthy route in order: attach, import, reproduce, repair
-3. capture the minimum viable contract: task, dataset or split, metric, source identity, expected command path, and main risks
-4. run a bounded smoke test as soon as that contract is concrete enough, then expand setup notes and launch the real run only after the smoke test is credible
-5. verify before accepting, then archive, publish, or attach the result when appropriate
+- `requested_baseline_ref` or `confirmed_baseline_ref` already points to the active baseline object
+- the route is clearly `attach` or `import`
+- the repo entrypoint, dataset or split, and metric contract are already concrete enough to validate cheaply
+- reproduction requires no meaningful code changes and the main uncertainty is only whether the command still runs
 
-Escalate to the heavier baseline path only when the baseline is ambiguous, broken, multi-variant, paper-to-repo mismatched, or likely to be reused beyond the current quest.
+Fast path means:
 
-If the quest is not yet bound to a stable baseline context, do not pretend the stage is ready just because some code exists locally.
+- do not restart broad baseline discovery by default
+- do not front-load a full codebase audit when the entrypoint is already concrete
+- use a minimal `PLAN.md`, a minimal `CHECKLIST.md`, one bounded smoke test when needed, and then one real validation or run
+- default to reuse-and-verify when runtime already attached a concrete baseline
 
-## Required plan and checklist
+Escalate from fast path to fuller audit only when:
 
-Before substantial baseline setup, code edits, or a real baseline run, create a quest-visible `PLAN.md` and `CHECKLIST.md`.
-
-- Use `references/baseline-plan-template.md` as the canonical structure for `PLAN.md`.
-- Use `references/baseline-checklist-template.md` as the canonical structure for `CHECKLIST.md`.
-- `PLAN.md` becomes mandatory after you have read the source paper and repo enough to restate the method faithfully, identify the real entrypoints, and explain the likely failure points; if either source is missing, record that gap explicitly before proceeding.
-- `PLAN.md` should put the user's explicit requirements and non-negotiable constraints first, then cover the chosen route, source package and provenance, safe efficiency levers, code touchpoints, environment and asset plan, smoke test, main run, fallback options such as ModelScope or local mirrors when Hugging Face is blocked, monitoring and sleep rules, verification targets, and a revision log.
-- `CHECKLIST.md` is the living companion to `PLAN.md`; update it during reading, setup, smoke testing, real execution, verification, and every material route change.
-- If an older quest already uses `analysis_plan.md` or `REPRO_CHECKLIST.md`, keep those files aligned with the canonical `PLAN.md` / `CHECKLIST.md` or turn them into clear compatibility pointers rather than splitting truth across parallel planning files.
-- Do not treat the plan as static: if the route, commands, source package, fallback path, or trust judgment changes materially, revise `PLAN.md` before continuing.
-- Once `PLAN.md` makes the route concrete, do not keep rewriting code or commands speculatively. The normal default is one bounded smoke test and then one real run, with retries only after a documented failure, invalidity, or compatibility problem.
-
-## Phase routing rule
-
-Treat `analysis`, `setup`, `execution`, and `verification` as logical control gates, not paperwork walls.
-At any moment, the work should have one dominant phase among:
-
-- `analysis`
-- `setup`
-- `execution`
-- `verification`
-
-Keep the dominant phase explicit, but allow small backtracks and lightweight overlap when they reduce wasted work.
-Do not delay an early smoke test just because a fuller write-up is not done yet.
-Before a real long run, make sure the minimum viable contract is explicit and the active phase is still easy to reconstruct.
+- the paper and repo disagree materially
+- the real run or eval entrypoint is unclear
+- code changes are likely required
+- the contract spans multiple metrics, datasets, subtasks, or splits that still need interpretation
+- the same failure class reappears after one documented autonomous fix
+- the quest is trying to publish a reusable global baseline rather than only clear the current gate
 
 ## Use when
 
@@ -119,7 +89,7 @@ Before a real long run, make sure the minimum viable contract is explicit and th
 - the current baseline is unverified or stale
 - the user already has a baseline package that should be attached or imported
 - a reproduction failed earlier and now needs repair
-- the quest was resumed and the baseline trust state is unclear
+- the quest resumed and the baseline trust state is unclear
 
 ## Do not use when
 
@@ -128,97 +98,83 @@ Before a real long run, make sure the minimum viable contract is explicit and th
 
 ## Stage gate
 
-Do not proceed to `idea` or `experiment` unless one of the following is durably true:
+Do not proceed to comparison-heavy downstream work unless one of the following is durably true:
 
 - a baseline has been attached and accepted
 - a baseline has been imported and accepted
 - a baseline reproduction has completed and been verified
 - an explicit waiver decision exists with a clear reason
 
-Operationally, the canonical exit is stricter:
+Operationally:
 
-- after the accepted baseline root is clear, call `artifact.confirm_baseline(...)`
-- if the quest must continue without a baseline, call `artifact.waive_baseline(...)`
+- call `artifact.confirm_baseline(...)` once the accepted baseline root and trusted comparison contract are clear
+- call `artifact.waive_baseline(...)` when the quest must continue without a baseline
+- attach, import, or publish alone do not open the downstream gate
 
-`attach`, `import`, `publish`, or a plain `baseline` artifact alone do not open the downstream gate.
+## Required plan and checklist
 
-## Truth sources
+Before substantial baseline setup, code edits, or a real baseline run, create a quest-visible `PLAN.md` and `CHECKLIST.md`.
 
-Use the following as baseline truth sources:
+- Use `references/baseline-plan-template.md` as the canonical structure for `PLAN.md`.
+- Use `references/baseline-checklist-template.md` as the canonical structure for `CHECKLIST.md`.
+- `analysis_plan.md` and `REPRO_CHECKLIST.md` remain acceptable compatibility alias files when an older quest already depends on them.
+- For fast-path attach/import/prebound validation or a simple reproduce path with no expected code changes, short-form `PLAN.md` and `CHECKLIST.md` are enough.
+- The plan should put the user's explicit requirements and non-negotiable constraints first.
+- Then record the chosen route, source identity, command path, expected outputs, acceptance condition, safe efficiency levers, main risks, and fallback.
+- If the route, commands, source package, fallback path, or trust judgment changes materially, revise `PLAN.md` before continuing.
+- Once the route is concrete, stop reshaping code and commands speculatively.
 
-- user objective and task framing
-- source paper and official repo when available
-- existing baseline registry entries
-- local baseline directories under `quest_root`
-- repo code, configs, and scripts
-- device and environment constraints detected locally
-- logs, metrics, and summaries from actual runs
+Default retry discipline:
 
-Do not treat memory alone as sufficient evidence for baseline readiness.
-
-## Baseline workspace rules
-
-- treat the baseline workspace as a system-managed reproduction surface, not an unrelated sandbox
-- avoid creating nested Git workflows inside the baseline workspace
-- keep the authoritative quest history in the quest repo
-- if papers are converted or notes are generated during baseline work, keep the durable copies under the quest-visible artifacts area unless there is a strong reason to keep a baseline-side copy
-- if runtime environment variables or secrets are provided by the runner, use them as authoritative but never echo or persist secret values
-
-The baseline line should also maintain a durable working-record area outside the execution surface.
-Recommended quest-visible records include:
-
-- `PLAN.md` as the canonical baseline plan; older quests may keep `analysis_plan.md` as a compatibility alias
-- `CHECKLIST.md` as the canonical living checklist; older quests may keep `REPRO_CHECKLIST.md` as a compatibility alias when already wired
-- `setup.md`
-- `execution.md`
-- `verification.md`
-- `STRUCTURE.md` only when the workspace layout is non-obvious or later reuse depends on it
-
-For a simple attach/import flow or a straightforward reproduce flow, do not stall just to precreate every one of these files.
-Start with the smallest durable note that preserves the route, command path, target outputs, and main risks; expand it only after the route proves real.
+- do not rerun the same unchanged smoke command just to reconfirm the same fact
+- treat one autonomous retry for the same failure class as the normal upper bound
+- if the same failure class appears again, switch explicitly into `repair`, record `blocked`, or route through `decision`
 
 ## Required durable outputs
 
 The baseline stage should usually leave behind:
 
 - a baseline directory under `baselines/local/` or `baselines/imported/`
-- a verification note or report under the quest
+- `PLAN.md` and `CHECKLIST.md`
+- a verification note or report
 - command, config, environment, and metrics pointers
 - a baseline artifact
 - a confirmed baseline gate via `artifact.confirm_baseline(...)`, or an explicit waiver via `artifact.waive_baseline(...)`
 - an optional registry publication if the baseline is reusable beyond this quest
 
-## Stable execution contract
+For simple attach/import flows or a straightforward reproduce flow, do not stall just to precreate every optional note file.
 
-To keep baseline work stable across different quests, do not stop at loose prose.
-But also do not confuse stability with ceremony.
-Use the lightest durable structure that keeps the baseline auditable and reusable.
+Useful optional notes:
+
+- `setup.md`
+- `execution.md`
+- `verification.md`
+- `STRUCTURE.md` when the layout is non-obvious
+
+## File-by-file contract
+
+- `PLAN.md` or compatibility alias `analysis_plan.md` is the required route contract before substantial setup, code edits, or a real run; it should state the route, source identity, command path, expected outputs, acceptance condition, main risks, and fallback.
+- `CHECKLIST.md` or compatibility alias `REPRO_CHECKLIST.md` is the required living state tracker; it should show whether the baseline object, smoke decision, real run decision, and final accept / block / waive outcome are explicit.
+- `setup.md` is optional unless environment or layout choices are non-trivial; if used, record the working directory, environment route, important config paths, source revision, and notable setup deviations.
+- `execution.md` is optional unless the run is long, multi-step, or rerun-heavy; if used, record the launched commands, durable log paths, checkpoints, exit state, and any reruns or repairs.
+- `verification.md` is optional as a filename but required in substance before acceptance or blocked closeout; either this file or an equivalent report should record trusted metrics, expected-versus-observed comparison, caveats, canonical output paths, and the next anchor.
+- `STRUCTURE.md` becomes required when the workspace layout, mounts, symlinks, or generated outputs are non-obvious or meant for reuse; it should map the important directories and say which paths are canonical.
+- `attachment.yaml` is required for attached or imported baselines under `baselines/imported/`; preserve source identity, selected variant when relevant, and attachment provenance there.
+- `<baseline_root>/json/metric_contract.json` is the canonical accepted comparison contract; once the baseline is accepted, do not leave the authoritative metric surface only in chat, memory, or prose.
+- `Result/metric.md` is scratch-only; it may help during execution, but it is never the final source of truth.
 
 Minimum stability rules:
 
 - before the first real run, leave one durable note with the chosen route, expected command path, target outputs, and main risks
 - after each smoke test or real run, record what actually happened and whether the route still looks viable
 - before acceptance, leave a clear verification note and baseline gate decision
-- every route selection should leave one explicit reasoned decision record
 - every accepted baseline should leave one accepted baseline artifact
 - every blocked baseline line should leave one blocked report and one next-step decision
-- every handoff should name the active baseline reference and trusted metric set explicitly
-- when the accepted paper-facing contract spans multiple metrics, datasets, subtasks, or splits, preserve that full comparison surface in the durable metric contract rather than collapsing it to one headline number
-- do not require every optional checklist or template before the first smoke test
 - if one rolling note is enough for a simple baseline line, use it
-
-Recommended phase-to-output mapping:
-
-- `analysis` -> a brief `PLAN.md` or compatible `analysis_plan.md`, plus optional route decision artifact
-- `setup` -> `setup.md` when setup choices are non-trivial
-- `execution` -> `execution.md` plus progress artifacts when long-running
-- `verification` -> `verification.md` plus accepted baseline artifact and `artifact.confirm_baseline(...)`, or a blocked report plus `artifact.waive_baseline(...)` when skipping is intentional
-
-If the work skips one of these durable outputs, explain why the baseline remains interpretable without it.
 
 ## Durable path contract
 
-The baseline stage should use the real runtime paths consistently.
+Use the real runtime paths consistently.
 
 Quest-local paths:
 
@@ -235,33 +191,33 @@ Global reusable registry paths:
 - baseline registry index: `~/DeepScientist/config/baselines/index.jsonl`
 - canonical baseline entry: `~/DeepScientist/config/baselines/entries/<baseline_id>.yaml`
 
+## Baseline id and variant rules
+
+- `baseline_id` should be short, stable, and filesystem-safe
+- use letters, digits, `.`, `_`, or `-`
+- do not use spaces, `/`, `\\`, or `..`
+- if one codebase contains multiple comparable baselines, prefer one `baseline_id` with structured variants instead of inventing many near-duplicate entries
+- when variants exist, keep `default_variant_id`, `baseline_variants`, and per-variant metric summaries stable enough that later `experiment` and `write` stages can cite them directly
+
 Do not invent parallel durable locations when these runtime contracts already exist.
 Do not leave the authoritative metric contract only in chat, memory, or prose once the baseline is accepted.
 
 If a baseline is reproduced only because an analysis campaign needs an extra comparator:
 
-- still place it under `<quest_root>/baselines/local/<baseline_id>/` or `<quest_root>/baselines/imported/<baseline_id>/`
+- still place it under the normal baseline roots
 - treat it as a supplementary analysis baseline unless the quest explicitly promotes it into the canonical gate
 - do not call `artifact.confirm_baseline(...)` for that supplementary case unless the quest truly intends to replace the canonical baseline
 
-## Baseline id and variant rules
+## Multi-baseline policy
 
-Baseline identity should be stable and path-safe.
+One quest may legitimately need more than one baseline.
 
-- `baseline_id` should be short, stable, and filesystem-safe
-- use letters, digits, `.`, `_`, or `-`
-- do not use spaces, `/`, `\\`, or `..`
-- if one codebase contains multiple comparable baselines, use one `baseline_id` with structured variants instead of inventing many unrelated entries
+- explicitly mark which baseline is the primary downstream comparator
+- distinguish primary comparison baselines from fallback or infrastructure baselines
+- if several baselines are credible, record why the chosen primary baseline is the fairest paper-facing comparator
+- do not leave later stages guessing which baseline is authoritative
 
-When variants exist, maintain at least:
-
-- `default_variant_id`
-- `baseline_variants`
-- per-variant metric summaries when available
-
-The baseline stage should treat `baseline_id` and `variant_id` as durable references that later `idea`, `experiment`, and `write` stages can cite directly.
-
-## Baseline route order
+## Route order
 
 Prefer this order:
 
@@ -272,25 +228,174 @@ Prefer this order:
 
 Prefer reuse over redundant reproduction.
 
-## Route selection rules
+## Workflow
 
-Choose the route explicitly rather than by habit.
+### Phase 1. Analysis
 
-- choose `attach` when a published baseline already exists in the registry and its metrics or provenance are trustworthy enough for the quest
-- choose `import` when the user or repo provides a reusable baseline package or bundle that is not yet attached to the current quest
-- choose `reproduce` when no trustworthy reusable baseline is available but the source repo, paper, and evaluation path are concrete enough to establish one
-- choose `repair` when a baseline route already exists but failed, drifted, or is only partially complete and the broken point is bounded enough to diagnose directly
+Before running anything substantial, determine:
 
-Do not default to reproduction if attach or import would establish an equally trustworthy reference with less risk and cost.
+- exact task
+- dataset and split contract
+- metric contract
+- source baseline identity
+- source code path
+- expected run command or evaluation path
+- expected paper or repo numbers when they exist
+- local resource constraints
 
-Before locking the route, explicitly answer:
+Default analysis discipline:
 
-- what object is being reused or established
-- what makes it trustworthy enough for downstream comparison
-- what evidence is missing
-- what the cheapest credible next step is
+- read the source paper and source repo first
+- if runtime already exposes a matching `requested_baseline_ref` or `confirmed_baseline_ref`, validate that concrete object before restarting broad discovery
+- identify the real run or evaluation entrypoint
+- identify the dataset or split and metric contract
+- identify likely environment blockers
+- define the cheapest credible smoke test
 
-For a more explicit route-selection rubric, read `references/route-selection.md`.
+Escalate to a fuller audit only when the command path is unclear, the repo is large or confusing, repair mode is active, or custom code changes look likely.
+
+When the fuller audit is necessary, capture only what later stages truly need:
+
+- major entry scripts, configs, and modules
+- end-to-end data flow
+- evaluation path and metric computation path
+- obvious environment assumptions
+- obvious bottlenecks or incompatibilities
+
+If the source paper is available, record:
+
+- the core algorithm in compact, implementation-faithful form
+- the main reported numbers
+- the main weaknesses or bottlenecks likely to matter for this quest
+
+You may inspect local feasibility with shell-based checks for OS, GPU, CPU, RAM, disk, Python version, and whether `uv` is available.
+
+The analysis phase should leave behind a concrete plan rather than only conversational intent.
+
+## Phase 2. Setup
+
+Prepare the selected route:
+
+- attach: validate the selected baseline id and variant
+- import: place the imported baseline metadata under the quest and confirm the package is readable
+- reproduce: prepare the baseline work directory, commands, config pointers, and environment notes
+- repair: identify the precise broken point before rerunning blindly
+
+For Python baselines, standardize environment setup around `uv`.
+
+### Python environment rule: use `uv`
+
+- if the repo already contains `uv.lock` or a solid `pyproject.toml`, use `uv sync`
+- otherwise create a local virtual environment with `uv venv`
+- install dependencies with `uv pip install ...`
+- run setup, smoke tests, and real commands through `uv run ...`
+
+Practical rules:
+
+- prefer a quest-local or baseline-local `.venv`
+- prefer `uv run python ...` or `uv run bash ...` over relying on shell activation state
+- if a specific interpreter is required, make it explicit with `uv venv --python 3.11` or `uv run --python 3.11 ...`
+- if CUDA, PyTorch, JAX, or custom wheels require a special index URL, keep that install under `uv pip`
+- only accept a non-`uv` route when there is a concrete blocker that cannot be resolved locally
+
+Common `uv` patterns:
+
+- `uv sync`
+- `uv venv --python 3.11`
+- `uv pip install -r requirements.txt`
+- `uv run python scripts/smoke_test.py`
+- `uv run python train.py --config ...`
+
+Setup should record:
+
+- baseline id and source identity
+- working directory
+- config files
+- command template
+- expected outputs
+- known deviations from paper or source
+- the chosen `uv` route and Python version
+
+Fallbacks:
+
+- if Hugging Face access is blocked, record and try an approved local mirror such as ModelScope when that does not change the comparison meaning
+- if a quest already depends on `analysis_plan.md` or `REPRO_CHECKLIST.md`, keep the compatibility alias explicit rather than splitting truth across two active plans
+
+## Phase 3. Execution
+
+Run only the work required to establish the baseline credibly.
+
+Execution rules:
+
+- keep commands auditable
+- keep logs durable
+- avoid uncontrolled side experiments during baseline establishment
+- checkpoint only explainable, minimal code changes
+- prefer equivalence-preserving efficiency gains such as larger safe batch size, cache reuse, checkpoint resume, and parallel downloads or workers
+- do not use an efficiency lever if it changes accepted baseline meaning, effective evaluation contract, or trust judgment
+
+Long-running execution discipline:
+
+- run one bounded smoke test before a substantial baseline reproduction
+- once the smoke test passes, launch the real baseline reproduction with `bash_exec(mode='detach', ...)`
+- monitor by forward progress instead of by short-window completion anxiety
+- do not report final success until the command actually finished and the expected result files exist
+- if you need to recover ids or inspect session state, use `bash_exec(mode='history')` or `bash_exec(mode='list')`
+- `bash_exec(mode='read', id=...)` returns the full saved log when it is `2000 lines or fewer`; for longer logs, inspect omitted middle windows with `start` and `tail`
+- during monitoring, prefer `bash_exec(mode='read', id=..., tail_limit=..., order='desc')`, and after the first read prefer incremental checks with `after_seq=last_seen_seq`
+- use `silent_seconds`, `progress_age_seconds`, `signal_age_seconds`, and `watchdog_overdue` as the default staleness clues
+- if a run is clearly invalid, wedged, or superseded, stop it with `bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)`, document why, and relaunch cleanly
+- do not let more than the `30-minute visibility bound` pass without a real inspection and a `next expected update time`
+- when the baseline code is under your control, prefer a throttled `tqdm` progress reporter and periodic `__DS_PROGRESS__` markers when feasible
+
+Keep retries bounded:
+
+- one smoke test is the default
+- one autonomous fix-and-retry for the same failure class is the normal upper bound
+- if the same failure class returns, stop looping
+
+## Phase 4. Verification
+
+Verification is mandatory before baseline acceptance.
+
+Verify:
+
+- the run actually finished
+- the reported metrics came from the intended dataset and split
+- the metric definitions match the quest contract
+- the result is comparable to the paper, source repo, or selected target
+- any deviations are explicitly stated
+
+Classify the outcome as one of:
+
+- `verified_match`
+- `verified_close`
+- `verified_diverged`
+- `broken`
+
+Verification must explicitly separate:
+
+- likely implementation mismatch
+- environment mismatch
+- data or split mismatch
+- expected stochastic variance
+- unexplained divergence
+
+Verification should answer:
+
+- whether the baseline is trustworthy enough for downstream comparison
+- whether the result is reusable beyond this quest
+- whether another repair or rerun is justified
+- whether the line should stop here and hand off
+
+A verification report should be self-contained enough that a later stage can answer:
+
+- what was used
+- how it was obtained: attach, import, reproduce, or repair
+- what commands and configs were used
+- what metrics are trusted
+- what caveats remain
+- whether the result is reusable beyond this quest
 
 ## Baseline comparability contract
 
@@ -310,13 +415,13 @@ Before declaring a baseline usable, make the comparability contract explicit:
 - source commit or source package identity
 - known deviations from the source reference
 
-If any of these are still materially unknown, do not pretend the baseline is a clean downstream reference.
+Unless the user explicitly specifies otherwise, treat the original paper's evaluation protocol as the canonical baseline contract.
+If any of these fields are still materially unknown, do not pretend the baseline is a clean downstream reference.
+For the fuller checklist and verdict meanings, read `references/comparability-contract.md`.
 
-Use `references/comparability-contract.md` for the full checklist.
+## Feasibility and trust classes
 
-## Feasibility and acceptance classes
-
-Before accepting a baseline, classify feasibility as one of:
+Before acceptance, classify feasibility as one of:
 
 - `full_reproducible`
 - `degraded_but_acceptable`
@@ -329,454 +434,11 @@ And classify downstream trust as one of:
 - `operational_but_incomparable`
 - `failed`
 
-Rules:
-
-- `full_reproducible` means the baseline can be reproduced within the agreed contract
-- `degraded_but_acceptable` means the quest explicitly allows a bounded degraded gate
-- `blocked` means insufficient assets, compute, or environment to produce an acceptable baseline
-- `verified` means trusted for downstream comparison
-- `partially_verified` means useful but still caveated
-- `operational_but_incomparable` means it runs, but the comparison contract is not stable enough yet
-- `failed` means it should not be used downstream
-
-Do not silently upgrade a degraded or only operational result into a normal trusted baseline.
-
-## Multi-baseline policy
-
-One quest may legitimately need more than one baseline reference.
-
-Common roles include:
-
-- primary comparison baseline
-- strongest literature baseline
-- cheapest operational fallback baseline
-
-If more than one baseline exists, explicitly record:
-
-- which one is the primary downstream comparison
-- which one is only a fallback or infrastructure reference
-- why the primary choice is the fairest or strongest comparison
-
-Do not leave later stages guessing which baseline is authoritative.
-
-When useful, record the route choice as a decision artifact with action such as:
-
-- `attach_baseline`
-- `reuse_baseline`
-- `publish_baseline`
-- `continue`
-- `request_user_decision`
-
-## Workflow
-
-### Phase 1. Analysis
-
-Before running anything substantial, determine:
-
-- exact task
-- dataset and split contract
-- metric contract
-- source baseline identity
-- source code path
-- expected run command or evaluation path
-- expected paper or repo numbers, if any
-- local resource constraints
-
-For straightforward baseline work, start with a quick viability pass:
-
-- find the real run or evaluation entrypoint
-- identify the dataset/split and metric contract
-- identify likely environment blockers
-- define the cheapest credible smoke test
-
-Escalate from that quick pass to a fuller baseline codebase audit when the command path is unclear, the repo is large or confusing, the paper and code diverge materially, repair mode is active, or custom code changes look likely.
-
-When the fuller audit is necessary, capture at least:
-
-- major modules and files
-- end-to-end data flow
-- key classes, functions, or scripts
-- external dependencies and environment assumptions
-- computational hotspots or obvious bottlenecks
-- current evaluation pipeline and metric computation path
-- coupling, maintainability, or scalability issues that may slow later iterations
-
-When the source paper is available, also record:
-
-- read it through `artifact.arxiv(paper_id=..., full_text=False)` first, and only switch to `full_text=True` when the shorter view is insufficient
-- the core algorithm in compact, implementation-faithful form
-- the main reported numbers
-- the main weaknesses or bottlenecks likely to matter on the current quest task or dataset
-
-If helpful, restate the core algorithm using two of the following:
-
-- short pseudocode
-- a compact equation or objective
-- a code-level sketch tied to real files
-
-The goal is not academic polish.
-The goal is that later `idea`, `experiment`, and `write` stages can understand what the baseline actually does without reopening the whole repo from scratch.
-
-You should inspect local feasibility with shell-based checks when needed, including:
-
-- OS
-- GPU availability
-- CPU and RAM
-- free disk
-- Python or conda environment availability
-- whether `uv` is available and which Python version `uv` should target
-
-Use the collected constraints to choose a realistic baseline route and runtime plan.
-
-The analysis phase should leave behind a concrete baseline plan rather than only conversational intent.
-At minimum, the plan should capture:
-
-- chosen route
-- source identity
-- expected commands
-- expected outputs
-- feasibility notes
-- key risks
-- verification targets
-
-Prefer `PLAN.md` for new work and use `references/baseline-plan-template.md` when you need a concrete starting structure.
-When the analysis note becomes substantial, structure `PLAN.md` or a legacy-compatible `analysis_plan.md` with headings close to:
-
-- executive summary
-- codebase analysis
-- limitations or bottlenecks
-- KPI and metric contract
-- route choice
-- risks and mitigations
-
-Analysis-phase questioning rules:
-
-- ask the user only after the analysis is concrete enough to expose real choices
-- the early exception is when code access, paper access, source identity, or execution permission is missing and that absence blocks even baseline analysis
-- do not ask generic “how should I set up the environment” questions before you inspect the device and code requirements
-- do not repeat already confirmed decisions unless the plan materially changed
-
-If a user decision is required, make it structured and compact:
-
-- usually `1-6` questions total
-- each question should contain concrete options
-- options should reflect actual hardware/code feasibility
-- options should include tradeoffs
-- the recommended option should be explicit
-- free-form input should be requested only where a preset choice is genuinely insufficient
-
-If parallel execution is proposed, it must be explicitly confirmed rather than silently enabled.
-
-Avoid asking the user to design the environment for you.
-Instead, analyze the environment first, then present the recommended path and tradeoffs only if a user decision is actually required.
-
-If the code, paper, or baseline source is missing and the missing piece changes the route materially, stop and ask for a structured decision rather than guessing.
-
-For a denser audit checklist, read `references/codebase-audit-checklist.md`.
-
-### Phase 2. Setup
-
-Prepare the selected route:
-
-- attach: validate the selected baseline id and variant
-- import: place the imported baseline metadata under the quest
-- reproduce: prepare the baseline work directory, commands, config pointers, and environment notes
-- repair: identify the precise broken point before rerunning blindly
-
-For Python baselines, environment setup should be standardized around `uv`.
-Treat `uv` as the default environment and package manager for baseline setup, smoke tests, and real runs.
-Do not casually switch to a new conda environment or a manual `pip install` flow just because the repo is old.
-If the baseline already ships a `pyproject.toml` / `uv.lock`, use that path first.
-If it only ships `requirements.txt`, still create the environment with `uv` and install through `uv pip`.
-Only accept a non-`uv` environment route when there is a concrete blocker that cannot be resolved locally, and record that blocker explicitly in `setup.md` and the progress update.
-
-For a fast-path reproduction, setup can stay lightweight.
-Confirm the working directory, environment, config, output paths, smoke command, and long-run command, then move forward.
-Do not manufacture a fresh workspace tree or copy the repo just to satisfy a template if the existing layout is already workable and auditable.
-
-Capture:
-
-- baseline identifier
-- source and provenance
-- working directory
-- config files
-- command template
-- expected outputs
-- risks and known deviations from the paper or source
-
-Setup should also confirm:
-
-- the intended working directory is correct
-- the output paths are durable and quest-visible
-- required dependencies or environments are known
-- the execution plan is realistic for the detected hardware
-
-### Python environment rule: use `uv`
-
-When the baseline is Python-based, prefer the following order:
-
-1. if the repo already contains `uv.lock` or a solid `pyproject.toml`, use `uv sync`
-2. otherwise create a local virtual environment with `uv venv`
-3. install dependencies with `uv pip install ...`
-4. run setup, smoke tests, and real commands through `uv run ...`
-
-Practical rules:
-
-- prefer a quest-local or baseline-local `.venv` under the actual working tree
-- prefer `uv run python ...` / `uv run bash ...` over relying on shell activation state
-- if a specific interpreter is required, make it explicit with `uv venv --python 3.11` or `uv run --python 3.11 ...`
-- if CUDA, PyTorch, JAX, or custom wheels require a special index URL, still keep the installation command under `uv pip`
-- if the repo insists on conda-only tooling, first check whether the same packages can be installed with `uv`; only keep the conda route if you can explain why `uv` is not viable
-
-Examples:
-
-```bash
-# modern repo with pyproject.toml / uv.lock
-cd <baseline_root>
-uv sync
-uv run python -m pytest tests/test_smoke.py -q
-uv run python train.py --config configs/baseline.yaml
-```
-
-```bash
-# legacy repo with requirements.txt
-cd <baseline_root>
-uv venv --python 3.11
-uv pip install -r requirements.txt
-uv run python scripts/smoke_test.py
-uv run python main.py --dataset cifar10 --config configs/resnet18.yaml
-```
-
-```bash
-# one-off package additions without leaving the uv-managed flow
-cd <baseline_root>
-uv venv --python 3.11
-uv pip install -r requirements.txt
-uv pip install "torch==2.4.1" "torchvision==0.19.1"
-uv run python evaluate.py --checkpoint outputs/best.pt
-```
-
-When you record the setup, explicitly note:
-
-- the chosen `uv` route: `uv sync` vs `uv venv` + `uv pip`
-- the Python version
-- the dependency source files used
-- the exact `uv run ...` command used for the smoke test
-- any blocker that prevented a pure `uv` flow
-
-If a dedicated baseline workspace is needed, establish a clear layout.
-One workable structure is:
-
-```text
-<baseline_root>/
-  src/
-  scripts/
-  logs/
-    cache/
-  results/
-  exports/
-    latest/
-    <run_id>/
-```
-
-If the baseline becomes long-lived, shared, or non-obvious, the quest-visible audit area may contain:
-
-```text
-<quest_root>/
-  baselines/
-    local/
-      <baseline_id>/
-        analysis_plan.md
-        setup.md
-        execution.md
-        verification.md
-        STRUCTURE.md
-        REPRO_CHECKLIST.md
-```
-
-Setup should record:
-
-- how the source was obtained: attach/import/copy/clone
-- upstream URL when known
-- upstream commit hash when known
-- `uv` environment route and Python version
-- key environment variables by name only, with sensitive values redacted
-- the directory tree and key files expected to matter later
-
-If a local source repo was copied into the workspace, preserve provenance but do not keep a nested authoritative Git lifecycle inside the baseline execution root.
-
-If setup reveals that the chosen route is infeasible on the current device, do not brute-force ahead.
-Either downgrade scope explicitly, switch route, or request a structured decision.
-
-### Phase 3. Execution
-
-Run only the work required to establish the baseline credibly.
-
-Execution rules:
-
-- keep commands auditable
-- keep logs durable
-- avoid uncontrolled side experiments during baseline establishment
-- if a run is long, emit progress artifacts at meaningful checkpoints
-- if setup required code changes, checkpoint only explainable, minimal changes
-
-Execution should rely on existing explicit scripts or command paths where possible.
-Prefer the smallest runnable command that proves the baseline route.
-Do not build a new wrapper, registry, or result-export scaffold unless existing commands are missing, repeated reruns justify it, or later automation clearly needs it.
-If a wrapper or entry script is truly needed, it should support most of the following:
-
-- run mode for missing combinations
-- print-only mode that summarizes existing results without rerunning everything
-- result registry or skip logic so old baseline results are not re-executed unnecessarily
-- export of per-run results and a `latest/` snapshot
-- final Markdown and/or JSON summary output
-- cache and debug logs
-- environment checks when relevant
-- throttled structured progress markers for long loops
-- `--new-only` or equivalent incremental mode
-- `--rerun` or equivalent force-rerun mode when needed
-- scope flags such as minimal/full/custom when the analysis plan distinguishes them
-- speed flags such as parallelism, batch size, epochs, or steps when relevant
-- optional evaluation and postprocess steps when the repo separates them
-
-Prefer those efficiency levers only when they do not change the accepted baseline meaning, effective evaluation contract, or trust judgment.
-
-If adding this scaffolding would require large assumptions about missing scripts, stop and return to analysis rather than creating a misleading opaque wrapper.
-
-Recommended result structures to maintain:
-
-- per-combination result records
-- an aggregated `result.json`
-- a registry or JSONL index mapping each combination to its stored result
-- exported snapshots in both run-specific and `latest/` locations
-- run metadata capturing the environment and command context
-
-Recommended run metadata includes:
-
-- config snapshot
-- relevant Git or source snapshot identifiers
-- package/environment summary
-- machine summary such as GPU visibility when relevant
-
-If a result backup is useful for audit or recovery, create it explicitly rather than assuming the latest export is enough.
-
-Long-running execution rules:
-
-- before a substantial baseline reproduction, run a bounded smoke test first so command paths, output locations, and metric plumbing are validated cheaply
-- once the smoke test passes, launch the real baseline reproduction with `bash_exec(mode='detach', ...)` and normally leave `timeout_seconds` unset for the long run itself
-- `bash_exec(mode='read', id=...)` returns the full rendered log when it is 2000 lines or fewer; for longer logs it returns the first 500 lines plus the last 1500 lines and a hint to inspect omitted sections with `start` and `tail`
-- if a long saved log omits the middle section you need, use `bash_exec(mode='read', id=..., start=..., tail=...)` to inspect that forward rendered-line window
-- when monitoring that detached run, prefer `bash_exec(mode='read', id=..., tail_limit=..., order='desc')` so you inspect the newest log evidence first
-- after the first read, prefer incremental checks with `bash_exec(mode='read', id=..., after_seq=last_seen_seq, tail_limit=..., order='asc')` so you only inspect newly appended evidence
-- if you need to recover ids or confirm the newest session quickly, use `bash_exec(mode='history')` or `bash_exec(mode='list')` rather than guessing
-- include a structured `comment` on long-running bash sessions with fields such as `stage`, `goal`, `action`, `expected_signal`, and `next_check`
-- use `silent_seconds`, `progress_age_seconds`, `signal_age_seconds`, and `watchdog_overdue` from `bash_exec(mode='list'|'read', ...)` as the default staleness checks
-- when the reproduction code is under your control, prefer a throttled `tqdm` progress reporter and, when feasible, pair it with periodic `__DS_PROGRESS__` JSON lines carrying phase and ETA
-- if a command is expected to run for a long time, monitor it as a real background task rather than assuming success
-- do not write final summaries or accepted metrics until the command has actually completed
-- verify that the expected result files exist before treating the run as finished
-- if a task is invalid, wedged, or failed, stop it with `bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)`; if it must die immediately, add `force=true`, then diagnose the reason and either retry with a documented fix or record the failure durably
-- canonical sleep choice:
-  - if you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)`
-  - keep a real buffer on that sleep timeout; do not set `timeout_seconds` exactly equal to `N`
-  - if you are waiting on an already running managed session, prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command
-
-Recommended monitoring cadence for long-running work:
-
-- first check after about 60 seconds
-- second check after about 120 seconds
-- third check after about 300 seconds
-- fourth check after about 600 seconds
-- fifth check after about 1800 seconds
-- after that, keep checking about every 1800 seconds while the run is still active
-
-The exact mechanism should prefer `bash_exec(mode='await' | 'detach' | 'read' | 'list' | 'history' | 'kill', ...)`, with `read` usually using a tailed or incremental window during monitoring, but the behavioral rule stays the same:
-do not report completion until the run is actually done and the outputs are real.
-After each meaningful check, notify the user through `artifact.interact(kind='progress', ...)` with current status, latest evidence, and the next monitoring point.
-Do this after every completed wait cycle for important long-running work; do not skip several sleep windows without reporting.
-When structured progress markers are available, include `eta` and preferably `next_reply_at` or `next_check_at` so the UI can show the next expected update time.
-
-Do not silently widen scope from “baseline reproduction” into “new method exploration”.
-
-### Phase 4. Verification
-
-Verification is mandatory before baseline acceptance.
-
-Verify:
-
-- the run actually finished
-- the reported metrics came from the intended dataset and split
-- the metric definitions match the quest contract
-- the result is comparable to the paper, source repo, or selected baseline target
-- any deviations are explicitly stated
-
-Classify the outcome:
-
-- `verified_match`
-- `verified_close`
-- `verified_diverged`
-- `broken`
-
-Verification must be evidence-first.
-Do not accept any of the following without explanation:
-
-- missing result files
-- metrics that cannot be traced to an actual run
-- metric definitions that do not match the quest contract
-- unexplained mismatch versus the intended paper or source repo setup
-
-Verification-phase interaction rules:
-
-- do not ask new questions during verification unless the stage has genuinely fallen back to analysis
-- if requirements, scope, or permissions changed materially, stop verification and return to the analysis phase explicitly
-- verification should summarize real progress milestones rather than quoting raw internal progress markers
-- structured progress markers are for runtime monitoring, not for final verification prose
-
-If the reproduced result differs materially from the source reference, verification should explicitly separate:
-
-- likely implementation mismatch
-- environment mismatch
-- data or split mismatch
-- expected stochastic variance
-- unexplained divergence
-
-Verification should also answer:
-
-- whether the baseline is trustworthy enough for downstream comparison
-- whether the result is reusable beyond this quest
-- whether another repair or rerun is justified
-- whether the baseline line should stop here and hand off to another stage
-
-Verification checklist before accepting results:
-
-- logs show command completion rather than only task start
-- final result files exist
-- exported latest snapshot exists when the workflow expects it
-- metrics are non-empty, non-placeholder, and non-NaN
-- execution notes document the actual commands and outcomes
-- the baseline phase state is ready to hand off
-- the infrastructure needed for reproduction is actually present and usable
-- any closed-loop or key-metric steps expected by the plan were completed or their omission was explicitly documented
-
-If the workflow uses both result files and export files, they should agree or the mismatch must be explained.
-
-Verification should also test the reporting surface itself when the baseline workflow includes one.
-For example, if the baseline uses a main driver script with a print-only mode, verify that:
-
-- summary mode runs successfully
-- exported Markdown and/or JSON summaries are actually generated
-- incremental flags such as `--new-only` behave as documented when they are part of the workflow
-
-Then record:
-
-- trusted metrics
-- important caveats
-- exact paths for logs, configs, and outputs
-- whether the baseline is reusable and should be published
+Do not silently upgrade a degraded or merely operational result into a normal trusted baseline.
 
 ## Minimum baseline artifact content
 
-The baseline artifact should clearly include at least:
+The accepted baseline artifact should include at least:
 
 - `baseline_id`
 - `baseline_kind`
@@ -794,254 +456,31 @@ If variants exist, also include:
 - `default_variant_id`
 - `baseline_variants`
 
-Metric-contract rule:
+Metric-contract rules:
 
-- unless the user explicitly specifies otherwise, treat the original paper's evaluation protocol as the canonical baseline contract
 - if the accepted baseline contract includes multiple metrics, datasets, subtasks, or splits, record all of them in `<baseline_root>/json/metric_contract.json`
-- keep `primary_metric` as the headline metric only; do not let it erase the rest of the accepted paper-facing comparison surface
-- when confirming a baseline, submit the canonical `metrics_summary` as a flat top-level dictionary keyed by the paper-facing metric ids; if the raw evaluator output is nested, use explicit `origin_path` fields in `metric_contract.metrics` to map the required canonical metrics
-- every canonical baseline metric entry should include `description`, either `derivation` or `origin_path`, and `source_ref` so later stages can audit where the number came from
+- keep `primary_metric` as the headline metric only; do not let it erase the rest of the comparison surface
+- when confirming a baseline, submit the canonical `metrics_summary` as a flat top-level dictionary keyed by the paper-facing metric ids
+- every canonical baseline metric entry should include `description`, either `derivation` or `origin_path`, and `source_ref`
 - if the paper reports both aggregate and per-dataset or per-task results, preserve both whenever feasible through `metrics_summary` plus structured rows rather than one cherry-picked scalar
-- `Result/metric.md` is optional temporary scratch memory only; if it exists, reconcile the final baseline submission against it before calling `artifact.confirm_baseline(...)`, but do not treat it as a required file
+- `Result/metric.md` is optional temporary scratch memory only; reconcile against it before calling `artifact.confirm_baseline(...)`, but do not treat it as a required durable file
 
-## Durable note templates
+## Publication and reuse
 
-Use compact but structured notes so later stages do not need to reconstruct baseline state from chat history.
-The templates below are references, not prerequisites for the first smoke test.
-For simple baseline lines, keep them short and fill only the sections that matter.
-
-Canonical naming for new work:
-
-- `PLAN.md` -> use `references/baseline-plan-template.md`
-- `CHECKLIST.md` -> use `references/baseline-checklist-template.md`
-- `analysis_plan.md` and `REPRO_CHECKLIST.md` remain acceptable compatibility aliases when a quest already depends on them
-
-### `PLAN.md` or `analysis_plan.md`
-
-Recommended shape:
-
-```md
-# Baseline Analysis Plan
-
-- quest_id:
-- baseline_id:
-- requested_route: attach | import | reproduce | repair
-- recommended_route:
-- source_identity:
-- task:
-- dataset_and_split:
-- metric_contract:
-- expected_reference:
-- feasibility_summary:
-
-## Existing evidence
-- published registry entries:
-- local baseline roots:
-- relevant repo paths:
-
-## Planned commands
-- inspect:
-- setup:
-- run:
-- verify:
-
-## Expected outputs
-- baseline_root:
-- metrics_path:
-- logs_path:
-- export_paths:
-
-## Risks
-- risk:
-
-## Gate to next phase
-- what must be true before setup starts
-```
-
-### `setup.md`
-
-Recommended shape:
-
-```md
-# Baseline Setup
-
-- baseline_id:
-- route:
-- working_directory:
-- source_origin:
-- source_commit:
-- environment_summary:
-- uv_strategy:
-- python_version:
-- config_paths:
-- command_template:
-
-## Directory contract
-- baseline_root:
-- logs_root:
-- results_root:
-- exports_root:
-
-## Known deviations
-- deviation:
-
-## Ready-for-execution check
-- uv_route_recorded: yes/no
-- dependencies_known: yes/no
-- outputs_defined: yes/no
-- feasible_on_current_machine: yes/no
-```
-
-### `execution.md`
-
-Recommended shape:
-
-```md
-# Baseline Execution
-
-- baseline_id:
-- route:
-- run_scope:
-- command_started:
-- started_at:
-- monitoring_plan:
-
-## Runtime log pointers
-- stdout_or_main_log:
-- stderr_or_error_log:
-- result_index:
-
-## Checkpoints
-- checkpoint:
-
-## Final execution state
-- completed_at:
-- exit_status:
-- produced_outputs:
-- reruns_or_repairs:
-```
-
-### `verification.md`
-
-Recommended shape:
-
-```md
-# Baseline Verification
-
-- baseline_id:
-- route:
-- verification_outcome: verified_match | verified_close | verified_diverged | broken
-- trusted_for_downstream: yes/no
-- reusable_beyond_quest: yes/no
-- publish_recommended: yes/no
-
-## Trusted metrics
-- metric:
-
-## Reference comparison
-- expected_reference:
-- observed_result:
-- delta_or_gap:
-
-## Evidence paths
-- final_metrics:
-- logs:
-- exports:
-- config_snapshot:
-
-## Caveats
-- caveat:
-
-## Next recommendation
-- next_anchor:
-- next_action:
-```
-
-These notes do not need to be verbose.
-They do need to be complete enough that another stage can read them without replaying the full baseline process.
-
-## Artifact payload templates
-
-When writing artifacts, prefer a stable field shape.
-
-### Route or blocked decision artifact template
-
-```json
-{
-  "kind": "decision",
-  "verdict": "neutral",
-  "action": "attach_baseline",
-  "reason": "A published baseline already matches the quest task and metric contract.",
-  "baseline_id": "baseline-demo",
-  "baseline_variant_id": "main",
-  "evidence_paths": [
-    "<quest_root>/artifacts/reports/report-....json"
-  ],
-  "next_direction": "Attach the baseline and move to verification or idea selection."
-}
-```
-
-If blocked, keep the same structure but use a blocked-appropriate action and reason.
-
-### Accepted baseline artifact template
-
-```json
-{
-  "kind": "baseline",
-  "publish_global": true,
-  "baseline_id": "baseline-demo",
-  "name": "Demo baseline",
-  "baseline_kind": "reproduced",
-  "task": "image-classification",
-  "dataset": "CIFAR-10/test",
-  "primary_metric": {
-    "name": "accuracy",
-    "value": 0.943
-  },
-  "metrics_summary": {
-    "accuracy": 0.943
-  },
-  "default_variant_id": "main",
-  "baseline_variants": [
-    {
-      "variant_id": "main",
-      "label": "Main",
-      "metrics_summary": {
-        "accuracy": 0.943
-      }
-    }
-  ],
-  "environment": {
-    "python": "3.11"
-  },
-  "summary": "Verified reproduced baseline accepted for downstream comparison.",
-  "path": "<quest_root>/baselines/local/baseline-demo",
-  "source": {
-    "kind": "artifact_publish",
-    "quest_id": "<quest_id>",
-    "quest_root": "<quest_root>"
-  }
-}
-```
-
-Only set `publish_global: true` when verification is complete and reuse is justified.
-
-## Registry publication and attachment contract
-
-The baseline skill should use the durable registry deliberately, not as an afterthought.
+Use the registry deliberately, not as an afterthought.
 
 If the result is reusable beyond the current quest:
 
 - publish it through `artifact.publish_baseline(...)`
-- ensure the payload includes the baseline identity, provenance, trusted metrics, and any variant structure
-- prefer `publish_global: true` only when the baseline is actually reusable and verification is complete
+- ensure the payload includes identity, provenance, trusted metrics, and any variant structure
+- set `publish_global: true` only when verification is complete and reuse is justified
 
 If the current quest should reuse an existing baseline:
 
 - attach it through `artifact.attach_baseline(...)`
 - preserve the selected `baseline_id`
 - preserve the selected `variant_id` when one is used
-- ensure the resulting attachment record is durable under `baselines/imported/`
+- keep the attachment durable under `baselines/imported/`
 
 If runtime state already includes `requested_baseline_ref` or a matching `confirmed_baseline_ref`:
 
@@ -1049,221 +488,55 @@ If runtime state already includes `requested_baseline_ref` or a matching `confir
 - treat a creation-time pre-bound baseline as the active starting point unless you find a concrete incompatibility
 - do not rerun broad baseline scouting or full reproduction just because the stage name is `baseline`
 
-Do not publish a baseline that is still blocked, speculative, or verification-incomplete.
-Do not attach a baseline without explaining why it is the right reference for the quest.
+For a clearer attach/import/reproduce/repair rubric, read `references/route-selection.md`.
+For reusable-package expectations, read `references/publishable-baseline-package.md`.
 
-## Verification report expectations
+## Workspace and branch rules
 
-A baseline verification report should answer:
-
-- what baseline was used
-- how it was obtained: attach, import, reproduce, or repair
-- what commands and configs were used
-- what metrics are trusted
-- how the result compares with the expected reference
-- what caveats remain
-
-The report should also include:
-
-- whether the run should be trusted for downstream comparison
-- whether the baseline is reusable beyond this quest
-- whether another repair or rerun is justified
-
-The verification report should be strong enough that later `idea`, `experiment`, and `write` stages can cite the baseline setup without reconstructing it from scratch.
-
-It should ideally also function as a self-contained reproduction note describing:
-
-- baseline identity
-- source provenance
-- key commands
-- environment assumptions
-- result locations
-- trusted interpretation of the outcome
-
-If the baseline line is meant to be reused later, the final report should be self-contained enough that another stage can answer:
-
-- what to run
-- where to run it
-- what outputs should appear
-- how to interpret those outputs
-
-without reopening the whole reproduction process from scratch.
-
-When useful, generate a single merged reproduction report that includes:
-
-- structure overview
-- modification summary
-- testing commands
-- device and environment summary
-- baseline status and blockers
-- redacted configuration inventory
-- key implementation measures
-- core method equations or mathematical notes when they matter for later understanding
-- results table
-- export paths
-
-For a reusable baseline package checklist, read `references/publishable-baseline-package.md`.
-
-## Branch and worktree rules
-
-- Use the quest branch unless isolation is genuinely needed.
-- If baseline setup is risky or intrusive, prepare an isolated branch or worktree first.
-- Do not proliferate branches without a reason.
-- If a branch was used, record why the baseline needed isolation.
-
-The baseline stage should not build a parallel Git lifecycle of its own.
-Branching and promotion remain quest-level concerns.
-
-However, if baseline setup materially changed code or scripts, preserve at least:
-
-- an initial snapshot of the baseline workspace state
-- a final snapshot after setup/execution changes
-
-so the quest can later audit what changed during reproduction.
-
-If the workflow uses a baseline-local Git snapshot for audit, treat it as an execution snapshot only.
-The quest repo remains the durable authority for promotion and narrative state.
+- treat the baseline workspace as a system-managed reproduction surface, not an unrelated sandbox
+- avoid creating a nested authoritative Git lifecycle inside the baseline workspace
+- use the quest branch unless isolation is genuinely needed
+- if baseline setup is risky or intrusive, prepare an isolated branch or worktree first and record why
+- do not proliferate branches without a reason
 
 ## Memory rules
 
 Stage-start requirement:
 
-- begin every baseline pass with `memory.list_recent(scope='quest', limit=5)`
+- by default, begin every baseline pass with `memory.list_recent(scope='quest', limit=5)`
 - then run at least one baseline-relevant `memory.search(...)` before new baseline analysis, repair, or rerun work
-- if several baseline or idea lines exist, narrow retrieval to the active baseline route instead of mixing notes from unrelated lines
+- fast-path exception: if the quest already exposes a clear `requested_baseline_ref` or `confirmed_baseline_ref` and the immediate task is only to validate or reattach that concrete baseline, you may skip broad retrieval
 
-Write to memory only when the lesson is reusable, such as:
+Write memory only for reusable lessons such as:
 
-- baseline pitfalls
-- environment gotchas
-- dataset quirks
 - paper-to-code mismatch notes
-
-Do not use memory as a substitute for the baseline artifact itself.
-
-Preferred memory usage:
-
-- quest `papers`:
-  - paper-to-code mismatch notes
-  - baseline paper caveats
-- quest `decisions`:
-  - attach / import / reproduce / repair rationale
-  - accepted-versus-rejected baseline route choices
-- quest `episodes`:
-  - setup failures
-  - execution failures
-  - environment incidents
-  - suspicious or divergent baseline runs
-- quest `knowledge`:
-  - verified metric contract
-  - stable setup rules
-  - data and evaluation caveats
-  - reproducibility lessons that matter later in this quest
-- global `knowledge`:
-  - reusable reproduction heuristics
-  - stable verification heuristics
-  - cross-quest baseline debugging lessons
-- global `templates`:
-  - setup checklist templates
-  - verification checklist templates
-  - publishable baseline package templates
-
-Useful tags include:
-
-- `stage:baseline`
-- `baseline:<baseline_id>`
-- `type:repro-lesson`
-- `type:verification-caveat`
-- `type:environment-incident`
-- `topic:<dataset-or-method>`
+- environment incidents
+- dataset quirks
+- verification caveats
+- attach vs import vs reproduce vs repair rationale
 
 When calling `memory.write(...)`, pass `tags` as an array like `["stage:baseline", "baseline:<baseline_id>", "type:repro-lesson"]`, not as one comma-joined string.
-
-Recommended read timing:
-
-- before route selection:
-  - consult quest `decisions`, `knowledge`, and relevant `papers`
-- before reruns or repairs:
-  - search quest `episodes` first
-- before acceptance:
-  - re-check quest `knowledge` and `decisions`
-- before publishing globally:
-  - confirm the lesson is truly reusable and not only quest-local
 
 Stage-end requirement:
 
 - if baseline work produced a durable reproduction lesson, verification caveat, environment incident, or route rationale, write at least one `memory.write(...)` before leaving the stage
 
-For a fuller memory strategy, read `references/memory-playbook.md`.
-
 ## Artifact rules
 
 Typical artifact sequence:
 
-- progress artifact for long-running setup or execution
-- report artifact for analysis or verification notes
-- baseline artifact for the accepted result
-- decision artifact when choosing attach/import/reproduce/repair or when deciding the next anchor
+- `progress` for long-running setup or execution checkpoints
+- `report` for analysis notes or verification notes
+- `decision` for route choice, blocked routing, or accept/reject/rerun/repair calls
+- `baseline` only for an accepted baseline record
 
-If a reusable baseline was established, prefer recording it in a form that later stages can attach or reuse directly instead of forcing redundant reproduction.
+For stable field shapes, read `references/artifact-payload-examples.md`.
 
-Use `artifact.attach_baseline(...)` or `artifact.publish_baseline(...)` when appropriate.
-
-Preferred artifact choices:
-
-- use `decision` for:
-  - route selection
-  - blocked-state routing
-  - accept / reject / rerun / repair choices
-- use `report` for:
-  - analysis notes
-  - verification reports
-  - merged reproduction reports
-  - comparability-contract summaries
-- use `progress` during long-running setup or execution
-- use `baseline` only for an accepted baseline record
-- use `approval` only if an explicit user approval was needed for a costly or degraded baseline gate
-
-## Handoff contract
-
-Before handing the quest to `idea`, `experiment`, or `write`, the baseline stage should make the next stage's life easy.
-
-At minimum, downstream stages should be able to answer all of the following without reopening the full reproduction investigation:
-
-- which baseline is active
-- which route produced it: attach, import, reproduce, or repair
-- which metrics are trusted
-- where the baseline outputs and logs live
-- what caveats or deviations still matter
-- whether the baseline is quest-local only or globally reusable
-
-## Publication and reuse rules
-
-Publish or attach baselines deliberately.
-
-- attach when a trusted reusable baseline already exists and is the right reference for this quest
-- publish when this quest produced a verified reusable baseline that later quests should be able to reuse
-- do not publish a blocked, speculative, or verification-incomplete baseline
-- do not attach a baseline without explaining why it is the correct downstream reference
-
-If a baseline is accepted but not globally reusable, say that explicitly instead of leaving the reuse status ambiguous.
-
-The baseline stage should normally hand off with:
-
-- one accepted baseline artifact
-- one verification-oriented report artifact
-- one active baseline reference through attachment or accepted local baseline state
-- one concise next-step guidance statement or decision artifact when the next anchor is not obvious
-
-## Final handoff packet
-
-Before leaving the baseline stage, make sure the next stage can read a compact handoff packet from durable state.
-
-The handoff packet should make these items obvious:
+The baseline handoff should make these items obvious:
 
 - `baseline_id`
 - `baseline_variant_id` when relevant
-- route used: attach/import/reproduce/repair
+- route used: attach, import, reproduce, or repair
 - trusted metrics
 - canonical metric contract JSON path
 - verification outcome
@@ -1272,38 +545,36 @@ The handoff packet should make these items obvious:
 - main caveats
 - recommended next anchor
 
-If this packet is not obvious from the artifact plus verification note, the baseline stage is not yet stable enough.
+If this packet is not obvious from the accepted artifact plus verification note, the baseline line is not stable enough yet.
 
 ## Failure and blocked handling
 
-Do not hide baseline failures.
+Do not hide failures.
 
-If blocked, record exactly which class applies:
+If blocked, record the class explicitly:
 
-- missing_source
-- missing_code
-- missing_metric_contract
-- environment_infeasible
-- command_unknown
-- run_failed
-- verification_failed
+- `missing_source`
+- `missing_code`
+- `missing_metric_contract`
+- `environment_infeasible`
+- `command_unknown`
+- `run_failed`
+- `verification_failed`
 
-A blocked baseline result must state:
+A blocked result must state:
 
 - what failed
 - what was tried
-- which paths/logs show the issue
-- whether the next best move is attach/import/retry/reset/ask user
+- which paths or logs show the issue
+- whether the next best move is attach, import, retry, repair, reset, or ask the user
 
-If the failure happened after a long-running task, include the monitored command/log path rather than only a prose description.
-
-Common autonomous fixes before falling back:
+Reasonable autonomous fixes before escalation:
 
 - missing module or dependency
 - wrong dataset path
 - permission errors on scripts
 - reasonable batch-size reductions for OOM
-- obvious environment activation issues
+- obvious environment activation mistakes
 
 If a fix would change confirmed scope, metrics, permissions, or resource assumptions, stop and return to analysis rather than applying it silently.
 

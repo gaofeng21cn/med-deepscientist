@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -1446,5 +1447,145 @@ def test_bash_exec_mcp_server_read_supports_start_and_tail_windows(temp_home: Pa
         assert latest["line_start"] == 38
         assert latest["line_end"] == 40
         assert latest["log"] == "line-38\nline-39\nline-40"
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_watchdog_warns_after_many_calls_without_artifact_interact(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("bash watchdog quest")
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-watchdog",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="baseline",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        artifact_server = build_artifact_server(context)
+        interact_result = _unwrap_tool_result(
+            await artifact_server.call_tool(
+                "interact",
+                {"kind": "progress", "message": "watchdog reset", "deliver_to_bound_conversations": False},
+            )
+        )
+        assert interact_result["interaction_watchdog"]["tool_calls_since_last_artifact_interact"] == 0
+
+        bash_server = build_bash_exec_server(context)
+        result = None
+        for _ in range(25):
+            result = _unwrap_tool_result(await bash_server.call_tool("bash_exec", {"mode": "list"}))
+
+        assert result is not None
+        assert result["interaction_watchdog"]["tool_calls_since_last_artifact_interact"] >= 25
+        assert "progress_watchdog_note" in result
+        assert "artifact.interact" in str(result["progress_watchdog_note"])
+        assert "watchdog_notes" in result
+        assert any(item["kind"] == "progress" for item in result["watchdog_notes"])
+        assert result["history_lines"] == []
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_watchdog_warns_after_visibility_gap_without_mutating_log_fields(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+        quest = quest_service.create("bash visibility watchdog quest")
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-visibility-watchdog",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="baseline",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+
+        stale_at = (datetime.now(UTC) - timedelta(minutes=31)).isoformat()
+        quest_service.update_runtime_state(
+            quest_root=quest_root,
+            last_artifact_interact_at=stale_at,
+            last_tool_activity_at=stale_at,
+            last_tool_activity_name="artifact.interact",
+            tool_calls_since_last_artifact_interact=0,
+        )
+
+        bash_server = build_bash_exec_server(context)
+        result = _unwrap_tool_result(await bash_server.call_tool("bash_exec", {"mode": "list"}))
+
+        assert result["interaction_watchdog"]["tool_calls_since_last_artifact_interact"] == 1
+        assert "visibility_watchdog_note" in result
+        assert "artifact.interact" in str(result["visibility_watchdog_note"])
+        assert any(item["kind"] == "visibility" for item in result["watchdog_notes"])
+        assert result["history_lines"] == []
+
+    asyncio.run(scenario())
+
+
+def test_artifact_confirm_baseline_state_change_watchdog_requires_follow_up_update(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "artifact state change watchdog quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-artifact-state-watchdog",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="baseline",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        baseline_root = quest_root / "baselines" / "local" / "watchdog-baseline"
+        baseline_root.mkdir(parents=True, exist_ok=True)
+        (baseline_root / "README.md").write_text("# Watchdog Baseline\n", encoding="utf-8")
+
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "confirm_baseline",
+                {
+                    "baseline_path": "baselines/local/watchdog-baseline",
+                    "baseline_id": "watchdog-baseline",
+                    "summary": "Confirm baseline and require a visible follow-up summary.",
+                    "metrics_summary": {"acc": 0.91},
+                    "primary_metric": {"metric_id": "acc", "value": 0.91},
+                    "metric_contract": _detailed_metric_contract(
+                        ["acc"],
+                        primary_metric_id="acc",
+                        evaluation_protocol={
+                            "scope_id": "full",
+                            "code_paths": ["eval.py"],
+                        },
+                    ),
+                },
+            )
+        )
+
+        assert result["ok"] is True
+        assert result["interaction_watchdog"]["tool_calls_since_last_artifact_interact"] == 1
+        assert "state_change_watchdog_note" in result
+        assert "artifact.interact" in str(result["state_change_watchdog_note"])
+        assert any(item["kind"] == "state_change" for item in result["watchdog_notes"])
 
     asyncio.run(scenario())

@@ -1563,6 +1563,88 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     assert any(item["label"] == "Bundle Manifest" for item in stage_view["sections"]["key_files"])
 
 
+def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper bundle latex root quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Bundle Outline",
+        note="Candidate for latex bundle normalization.",
+        detailed_outline={
+            "title": "Bundle Outline",
+            "research_questions": ["RQ-latex"],
+            "experimental_designs": ["Exp-latex"],
+            "contributions": ["C-latex"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use this for latex root normalization.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    latex_root = paper_root / "latex"
+    latex_root.mkdir(parents=True, exist_ok=True)
+    main_tex = latex_root / "main.tex"
+    main_tex.write_text(
+        "\n".join(
+            [
+                r"\documentclass{article}",
+                r"\begin{document}",
+                "Bundle",
+                r"\end{document}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    (paper_root / "references.bib").write_text("@article{demo, title={Demo}}\n", encoding="utf-8")
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "build" / "compile_report.json",
+        {
+            "ok": True,
+            "main_file_path": "paper/latex/main.tex",
+        },
+    )
+
+    result = artifact.submit_paper_bundle(
+        quest_root,
+        title="Bundle Paper",
+        summary="Paper bundle keeps latex roots normalized.",
+        latex_root_path="paper/latex/main.tex",
+    )
+    manifest = read_json(Path(result["manifest_path"]), {})
+    assert manifest["latex_root_path"] == "paper/latex"
+
+    stage_view = quest_service.stage_view(
+        quest["quest_id"],
+        {
+            "selection_ref": "stage:main:write",
+            "selection_type": "stage_node",
+            "branch_name": "main",
+            "stage_key": "write",
+        },
+    )
+    assert stage_view["details"]["paper"]["build"]["latex_root_path"] == "paper/latex"
+    assert stage_view["details"]["paper"]["build"]["main_tex_path"] == "paper/latex/main.tex"
+    latex_sources = next(
+        item for item in stage_view["sections"]["key_files"] if item["label"] == "LaTeX Sources"
+    )
+    assert latex_sources["kind"] == "directory"
+    assert latex_sources["path"] == "paper/latex"
+
+
 def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -2926,6 +3008,47 @@ def test_explorer_marks_paper_latex_folder_for_workspace_opening(temp_home: Path
     )
 
     explorer = quest_service.explorer(quest["quest_id"])
+    research = next(section for section in explorer["sections"] if section["id"] == "research")
+
+    def flatten(nodes: list[dict]) -> list[dict]:
+        items: list[dict] = []
+        for node in nodes:
+            items.append(node)
+            items.extend(flatten(node.get("children") or []))
+        return items
+
+    research_nodes = flatten(research["nodes"])
+    latex_node = next(node for node in research_nodes if node.get("path") == "paper/latex")
+    assert latex_node["kind"] == "directory"
+    assert latex_node["folder_kind"] == "latex"
+
+
+def test_explorer_marks_paper_latex_folder_for_snapshot_opening(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper latex snapshot explorer quest")
+    quest_root = Path(quest["quest_root"])
+
+    latex_root = quest_root / "paper" / "latex"
+    latex_root.mkdir(parents=True, exist_ok=True)
+    (latex_root / "main.tex").write_text(
+        "\n".join(
+            [
+                r"\documentclass{article}",
+                r"\begin{document}",
+                "Snapshot",
+                r"\end{document}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    from deepscientist.gitops import checkpoint_repo
+
+    checkpoint_repo(quest_root, "Add latex sources", allow_empty=False)
+    explorer = quest_service.explorer(quest["quest_id"], revision="HEAD", mode="ref")
     research = next(section for section in explorer["sections"] if section["id"] == "research")
 
     def flatten(nodes: list[dict]) -> list[dict]:

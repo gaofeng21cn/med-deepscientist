@@ -690,10 +690,11 @@ export function QuestStageSurface({
       await openFileInTab(node, {
         customData: {
           projectId: questId,
+          quest_stage_selection: stageSelection || null,
         },
       })
     },
-    [openFileInTab, questId]
+    [openFileInTab, questId, stageSelection]
   )
 
   const downloadDocument = React.useCallback(
@@ -749,11 +750,12 @@ export function QuestStageSurface({
           projectId: questId,
           latexFolderId: folderId,
           mainFileId: null,
+          quest_stage_selection: stageSelection || null,
         },
       },
       title: folderName,
     })
-  }, [latexRootPath, openTab, questId])
+  }, [latexRootPath, openTab, questId, stageSelection])
 
   const downloadLatexArchive = React.useCallback(async () => {
     if (!latexRootPath) return

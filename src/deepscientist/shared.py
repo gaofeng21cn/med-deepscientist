@@ -225,6 +225,11 @@ def resolve_runner_binary(binary: str, *, runner_name: str | None = None) -> str
             if resolved_override:
                 return resolved_override
 
+    # Match the Codex installation the user already runs successfully in shell
+    # before falling back to the npm-bundled helper copy.
+    if resolved_reference:
+        return resolved_reference
+
     names = ["codex.cmd", "codex.exe", "codex"] if sys.platform.startswith("win") else ["codex"]
     for root in _codex_repo_roots():
         node_bin_root = root / "node_modules" / ".bin"
@@ -232,4 +237,4 @@ def resolve_runner_binary(binary: str, *, runner_name: str | None = None) -> str
             package_local = node_bin_root / name
             if package_local.exists():
                 return str(package_local)
-    return resolved_reference
+    return None

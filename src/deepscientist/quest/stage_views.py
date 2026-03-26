@@ -344,37 +344,83 @@ class QuestStageViewBuilder:
             return True
         return False
 
-    def _path_in_quest(self, raw_path: object) -> tuple[Path, str] | None:
+    def _path_in_quest(self, raw_path: object) -> tuple[Path, str, str] | None:
         text = str(raw_path or "").strip()
         if not text:
             return None
         path = Path(text)
+        candidates: list[Path] = []
         if not path.is_absolute():
-            path = (self.quest_root / text).resolve()
+            for base in (self.workspace_root, self.quest_root):
+                try:
+                    candidates.append((base / text).resolve())
+                except OSError:
+                    continue
         else:
             try:
-                path = path.resolve()
+                candidates.append(path.resolve())
             except OSError:
                 return None
-        try:
-            relative = path.relative_to(self.quest_root.resolve()).as_posix()
-        except ValueError:
+
+        if not candidates:
             return None
-        return path, relative
+
+        seen: set[str] = set()
+        unique_candidates: list[Path] = []
+        for candidate in candidates:
+            key = str(candidate)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_candidates.append(candidate)
+
+        existing_candidates: list[Path] = []
+        missing_candidates: list[Path] = []
+        for candidate in unique_candidates:
+            try:
+                if candidate.exists():
+                    existing_candidates.append(candidate)
+                else:
+                    missing_candidates.append(candidate)
+            except OSError:
+                missing_candidates.append(candidate)
+
+        ordered = [*existing_candidates, *missing_candidates]
+
+        workspace_root = self.workspace_root.resolve()
+        quest_root = self.quest_root.resolve()
+        for candidate in ordered:
+            if candidate.exists():
+                try:
+                    relative = candidate.relative_to(workspace_root).as_posix()
+                    return candidate, relative, "path"
+                except ValueError:
+                    pass
+            try:
+                relative = candidate.relative_to(quest_root).as_posix()
+                return candidate, relative, "questpath"
+            except ValueError:
+                pass
+            try:
+                relative = candidate.relative_to(workspace_root).as_posix()
+                return candidate, relative, "path"
+            except ValueError:
+                continue
+        return None
 
     def _document_id_for_path(self, raw_path: object) -> str | None:
         resolved = self._path_in_quest(raw_path)
         if resolved is None:
             return None
-        path, relative = resolved
+        path, relative, document_scope = resolved
         if path.exists() and path.is_file():
-            return f"questpath::{relative}"
+            return f"{document_scope}::{relative}"
         return None
 
     def _relative_path_or_raw(self, raw_path: object) -> str | None:
         resolved = self._path_in_quest(raw_path)
         if resolved is not None:
-            _path, relative = resolved
+            _path, relative, _document_scope = resolved
             return relative
         text = str(raw_path or "").strip()
         return text or None
@@ -383,7 +429,7 @@ class QuestStageViewBuilder:
         resolved = self._path_in_quest(raw_path)
         if resolved is None:
             return None
-        path, _relative = resolved
+        path, _relative, _document_scope = resolved
         if not path.exists() or not path.is_file():
             return None
         try:
@@ -464,7 +510,7 @@ class QuestStageViewBuilder:
                 "exists": path.exists(),
                 "scope": "external",
             }
-        path, relative = resolved
+        path, relative, document_scope = resolved
         exists = path.exists()
         kind = "directory" if (exists and path.is_dir()) or expected_kind == "directory" else "file"
         scope = self.quest_service._classify_relative_scope(relative)[0]
@@ -474,7 +520,7 @@ class QuestStageViewBuilder:
             "description": description,
             "path": relative,
             "absolute_path": str(path),
-            "document_id": f"questpath::{relative}" if exists and path.is_file() else None,
+            "document_id": f"{document_scope}::{relative}" if exists and path.is_file() else None,
             "kind": kind,
             "exists": exists,
             "scope": scope,
@@ -508,30 +554,88 @@ class QuestStageViewBuilder:
         resolved = self._path_in_quest(raw_path)
         if resolved is None:
             return None
-        _path, relative = resolved
+        _path, relative, _document_scope = resolved
         return relative
 
-    def _paper_latex_root(self, bundle_manifest: dict[str, Any]) -> str | None:
-        preferred = self._paper_relative_path(bundle_manifest.get("latex_root_path"))
-        if preferred:
-            return preferred
+    def _paper_latex_root(
+        self,
+        bundle_manifest: dict[str, Any],
+        *,
+        compile_report: dict[str, Any] | None = None,
+    ) -> str | None:
+        for candidate in (
+            bundle_manifest.get("latex_root_path"),
+            (compile_report or {}).get("latex_root_path"),
+            (compile_report or {}).get("main_file_path"),
+        ):
+            resolved = self._path_in_quest(candidate)
+            if resolved is None:
+                continue
+            path, relative, _document_scope = resolved
+            if path.is_dir():
+                return relative
+            if path.suffix.lower() == ".tex":
+                return PurePosixPath(relative).parent.as_posix()
         paper_root = self._paper_root()
         for candidate in (paper_root / "latex", paper_root / "tex"):
             if candidate.exists():
-                return candidate.relative_to(self.quest_root).as_posix()
+                try:
+                    return candidate.relative_to(self.workspace_root.resolve()).as_posix()
+                except ValueError:
+                    return candidate.relative_to(self.quest_root).as_posix()
         return None
 
-    def _paper_main_tex(self, latex_root_rel: str | None) -> str | None:
+    def _paper_main_tex(
+        self,
+        latex_root_rel: str | None,
+        *,
+        bundle_manifest: dict[str, Any] | None = None,
+        compile_report: dict[str, Any] | None = None,
+    ) -> str | None:
+        for candidate in (
+            (compile_report or {}).get("main_file_path"),
+            bundle_manifest.get("main_tex_path") if isinstance(bundle_manifest, dict) else None,
+            bundle_manifest.get("latex_root_path") if isinstance(bundle_manifest, dict) else None,
+            (compile_report or {}).get("latex_root_path"),
+        ):
+            resolved = self._path_in_quest(candidate)
+            if resolved is None:
+                continue
+            path, relative, _document_scope = resolved
+            if path.suffix.lower() == ".tex":
+                return relative
+            if path.is_dir():
+                preferred = path / "main.tex"
+                if preferred.exists():
+                    nested = self._path_in_quest(preferred)
+                    if nested is not None:
+                        _resolved_path, nested_relative, _nested_scope = nested
+                        return nested_relative
         if not latex_root_rel:
             return None
-        latex_root = self.quest_root / latex_root_rel
+        latex_root = (self.workspace_root / latex_root_rel).resolve()
+        if not latex_root.exists():
+            latex_root = (self.quest_root / latex_root_rel).resolve()
+        if latex_root.is_file() and latex_root.suffix.lower() == ".tex":
+            nested = self._path_in_quest(latex_root)
+            if nested is not None:
+                _resolved_path, nested_relative, _nested_scope = nested
+                return nested_relative
+            return None
         preferred = latex_root / "main.tex"
         if preferred.exists():
-            return preferred.relative_to(self.quest_root).as_posix()
+            nested = self._path_in_quest(preferred)
+            if nested is not None:
+                _resolved_path, nested_relative, _nested_scope = nested
+                return nested_relative
         candidates = sorted(latex_root.glob("*.tex"))
         if not candidates:
             return None
-        return candidates[0].relative_to(self.quest_root).as_posix()
+        nested = self._path_in_quest(candidates[0])
+        if nested is None:
+            return None
+        _resolved_path, nested_relative, _nested_scope = nested
+        return nested_relative
 
     def _paper_pdf_candidates(
         self,
@@ -1460,10 +1564,11 @@ class QuestStageViewBuilder:
             },
         )
 
-    def _paper_files(self) -> list[dict[str, Any]]:
+    def _paper_files(self, *, compile_report: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         bundle_manifest = self._paper_bundle_manifest()
-        latex_root_rel = self._paper_latex_root(bundle_manifest)
-        main_tex_rel = self._paper_main_tex(latex_root_rel)
+        compile_report = compile_report if isinstance(compile_report, dict) else {}
+        latex_root_rel = self._paper_latex_root(bundle_manifest, compile_report=compile_report)
+        main_tex_rel = self._paper_main_tex(latex_root_rel, bundle_manifest=bundle_manifest, compile_report=compile_report)
         pdf_candidates = self._paper_pdf_candidates(bundle_manifest, main_tex_rel=main_tex_rel)
         paper_root = self._paper_root()
         open_source_root = self._open_source_root()
@@ -1537,8 +1642,8 @@ class QuestStageViewBuilder:
         if not isinstance(compile_report, dict):
             compile_report = {}
         bundle_manifest = self._paper_bundle_manifest()
-        latex_root_rel = self._paper_latex_root(bundle_manifest)
-        main_tex_rel = self._paper_main_tex(latex_root_rel)
+        latex_root_rel = self._paper_latex_root(bundle_manifest, compile_report=compile_report)
+        main_tex_rel = self._paper_main_tex(latex_root_rel, bundle_manifest=bundle_manifest, compile_report=compile_report)
         references_bib = read_text(paper_root / "references.bib", "")
         references_count = sum(1 for line in references_bib.splitlines() if line.lstrip().startswith("@"))
         pdf_paths = self._paper_pdf_candidates(bundle_manifest, main_tex_rel=main_tex_rel)
@@ -1577,7 +1682,7 @@ class QuestStageViewBuilder:
                 _field("LaTeX Root", latex_root_rel or "Not recorded"),
                 _field("Main TeX", main_tex_rel or "Not recorded"),
             ],
-            key_files=self._paper_files(),
+            key_files=self._paper_files(compile_report=compile_report),
             history=self._artifact_history(paper_items),
             details={
                 "paper": {

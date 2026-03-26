@@ -29,13 +29,137 @@ export type QuestSummary = {
   last_artifact_interact_at?: string | null
   last_delivered_batch_id?: string | null
   last_delivered_at?: string | null
+  bound_conversations?: string[]
+}
+
+export type ConnectorBindingSnapshot = {
+  conversation_id: string
+  quest_id?: string | null
+  quest_title?: string | null
+  updated_at?: string | null
+  profile_id?: string | null
+  profile_label?: string | null
+}
+
+export type ConnectorRecentConversation = {
+  conversation_id: string
+  connector?: string
+  chat_type: string
+  chat_id: string
+  chat_id_raw?: string | null
+  profile_id?: string | null
+  profile_label?: string | null
+  label?: string | null
+  source?: string | null
+  sender_id?: string | null
+  sender_name?: string | null
+  quest_id?: string | null
+  message_id?: string | null
+  updated_at?: string | null
+}
+
+export type ConnectorRecentEvent = {
+  event_type: 'inbound' | 'outbound' | 'ignored'
+  created_at?: string | null
+  conversation_id?: string | null
+  chat_type?: string | null
+  chat_id?: string | null
+  profile_id?: string | null
+  profile_label?: string | null
+  label?: string | null
+  kind?: string | null
+  message?: string | null
+  reason?: string | null
+  ok?: boolean | null
+  queued?: boolean | null
+  transport?: string | null
+}
+
+export type ConnectorTargetSnapshot = {
+  conversation_id: string
+  connector?: string
+  chat_type: string
+  chat_id: string
+  chat_id_raw?: string | null
+  profile_id?: string | null
+  profile_label?: string | null
+  label?: string | null
+  source?: string | null
+  sources?: string[]
+  quest_id?: string | null
+  updated_at?: string | null
+  is_default?: boolean
+  selectable?: boolean
+  is_bound?: boolean
+  bound_quest_id?: string | null
+  bound_quest_title?: string | null
+  warning?: string | null
+  first_seen_at?: string | null
+}
+
+export type ConnectorProfileSnapshot = {
+  profile_id: string
+  label?: string | null
+  bot_name?: string | null
+  app_id?: string | null
+  transport?: string | null
+  main_chat_id?: string | null
+  default_conversation_id?: string | null
+  last_conversation_id?: string | null
+  connection_state?: string | null
+  auth_state?: string | null
+  last_error?: string | null
+  inbox_count?: number
+  outbox_count?: number
+  ignored_count?: number
+  discovered_targets?: ConnectorTargetSnapshot[]
+  recent_conversations?: ConnectorRecentConversation[]
+  bindings?: ConnectorBindingSnapshot[]
+  target_count?: number
+  binding_count?: number
 }
 
 export type ConnectorSnapshot = {
   name: string
   display_mode?: string
+  mode?: string
+  transport?: string
+  relay_url?: string | null
+  main_chat_id?: string | null
+  last_conversation_id?: string | null
+  enabled?: boolean
+  connection_state?: string
+  auth_state?: string
+  last_error?: string | null
   inbox_count?: number
   outbox_count?: number
+  ignored_count?: number
+  binding_count?: number
+  target_count?: number
+  bindings?: ConnectorBindingSnapshot[]
+  known_targets?: ConnectorTargetSnapshot[]
+  recent_conversations?: ConnectorRecentConversation[]
+  recent_events?: ConnectorRecentEvent[]
+  default_target?: ConnectorTargetSnapshot | null
+  discovered_targets?: ConnectorTargetSnapshot[]
+  profiles?: ConnectorProfileSnapshot[]
+  details?: Record<string, unknown>
+}
+
+export type ConnectorAvailabilitySnapshot = {
+  has_enabled_external_connector: boolean
+  has_bound_external_connector: boolean
+  should_recommend_binding: boolean
+  preferred_connector_name?: string | null
+  preferred_conversation_id?: string | null
+  available_connectors: Array<{
+    name: string
+    enabled: boolean
+    connection_state?: string | null
+    binding_count?: number
+    target_count?: number
+    has_delivery_target?: boolean
+  }>
 }
 
 export type ConfigFileEntry = {
@@ -53,6 +177,34 @@ export type OpenDocumentPayload = {
   content: string
   revision?: string
   updated_at?: string
+  meta?: {
+    help_markdown?: string
+    system_testable?: boolean
+    structured_config?: Record<string, unknown>
+    [key: string]: unknown
+  }
+}
+
+export type WeixinQrLoginStartPayload = {
+  ok: boolean
+  session_key?: string | null
+  qrcode_content?: string | null
+  qrcode_url?: string | null
+  message?: string | null
+}
+
+export type WeixinQrLoginWaitPayload = {
+  ok: boolean
+  connected: boolean
+  status?: string | null
+  session_key?: string | null
+  qrcode_content?: string | null
+  qrcode_url?: string | null
+  account_id?: string | null
+  login_user_id?: string | null
+  base_url?: string | null
+  snapshot?: ConnectorSnapshot | null
+  message?: string | null
 }
 
 export type SessionPayload = {

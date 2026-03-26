@@ -76,6 +76,8 @@ DeepScientist 灵活且易于使用，支持：
 
 - [00 快速开始](./00_QUICK_START.md)
   从安装、启动，到创建第一个项目，先看这一篇。
+- [05 TUI 端到端指南](./05_TUI_GUIDE.md)
+  如果你主要在服务器或终端里工作，这篇会带你从 `ds --tui` 一路走到 quest、connector 和跨端协作跑通。
 - [15 Codex Provider 配置](./15_CODEX_PROVIDER_SETUP.md)
   如果你准备通过 MiniMax、GLM、火山方舟、阿里百炼或其他 Codex profile 来运行 DeepScientist，先看这一篇。
 - [12 引导式工作流教程](./12_GUIDED_WORKFLOW_TOUR.md)

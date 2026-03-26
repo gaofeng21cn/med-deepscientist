@@ -43,7 +43,13 @@ jest.mock('@xyflow/react', () => {
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
-    useReactFlow: () => ({ setCenter: jest.fn(), fitView: jest.fn() }),
+    useNodesInitialized: () => true,
+    useReactFlow: () => ({
+      setCenter: jest.fn(),
+      fitView: jest.fn(),
+      getNodes: jest.fn().mockReturnValue([]),
+      getInternalNode: jest.fn().mockReturnValue(undefined),
+    }),
     useNodesState: (initial: unknown) => {
       const [nodes, setNodes] = ReactRuntime.useState(initial)
       return [nodes, setNodes, jest.fn()]

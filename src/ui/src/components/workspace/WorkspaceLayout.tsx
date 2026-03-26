@@ -50,7 +50,7 @@ import { useOpenFile } from '@/hooks/useOpenFile'
 import { useProject, useUpdateProject } from '@/lib/hooks/useProjects'
 import { useQuestWorkspace } from '@/lib/acp'
 import { client as questClient } from '@/lib/api'
-import { flattenQuestExplorerPayload } from '@/lib/api/quest-files'
+import { flattenQuestExplorerPayload, invalidateQuestFileTree } from '@/lib/api/quest-files'
 import { listLabAgents, listLabQuests, listLabTemplates } from '@/lib/api/lab'
 import { useCliStore } from '@/lib/plugins/cli/stores/cli-store'
 import { supportsArxiv } from '@/lib/runtime/quest-runtime'
@@ -303,6 +303,46 @@ function getQuestWorkspaceStageSelection(
     baseline_gate:
       typeof record.baseline_gate === 'string' ? record.baseline_gate : null,
   }
+}
+
+function normalizeScopedExplorerSelection(
+  selection: QuestStageSelection | null | undefined
+): QuestStageSelection | null {
+  if (!selection) return null
+  const selectionType = String(selection.selection_type || '').trim()
+  const selectionRef =
+    String(selection.selection_ref || selection.stage_key || '').trim() || null
+  if (!selectionRef) return null
+  if (!['branch_node', 'stage_node', 'baseline_node'].includes(selectionType)) {
+    return null
+  }
+  return {
+    ...selection,
+    selection_type: selectionType,
+    selection_ref: selectionRef,
+  }
+}
+
+function sameScopedExplorerSelection(
+  left: QuestStageSelection | null | undefined,
+  right: QuestStageSelection | null | undefined
+) {
+  const a = normalizeScopedExplorerSelection(left)
+  const b = normalizeScopedExplorerSelection(right)
+  if (!a && !b) return true
+  if (!a || !b) return false
+  const scopeA = (a.scope_paths || []).join('||')
+  const scopeB = (b.scope_paths || []).join('||')
+  return (
+    a.selection_ref === b.selection_ref &&
+    a.selection_type === b.selection_type &&
+    (a.branch_name || null) === (b.branch_name || null) &&
+    (a.stage_key || null) === (b.stage_key || null) &&
+    (a.worktree_rel_path || null) === (b.worktree_rel_path || null) &&
+    (a.compare_base || null) === (b.compare_base || null) &&
+    (a.compare_head || null) === (b.compare_head || null) &&
+    scopeA === scopeB
+  )
 }
 
 function getQuestWorkspaceTitle(view: QuestWorkspaceView, stageSelection?: QuestStageSelection | null) {
@@ -1626,6 +1666,8 @@ function LeftPanel({
   onExitHome,
   localQuestMode = false,
   demoMode = false,
+  workspaceTreeSyncKey = null,
+  workspaceScopeContextKey = null,
 }: {
   width: number
   projectId: string
@@ -1636,6 +1678,8 @@ function LeftPanel({
   onExitHome?: () => void
   localQuestMode?: boolean
   demoMode?: boolean
+  workspaceTreeSyncKey?: string | null
+  workspaceScopeContextKey?: string | null
 }) {
   const { t } = useI18n('workspace')
   const { t: tCommon } = useI18n('common')
@@ -1643,18 +1687,20 @@ function LeftPanel({
   const { addToast } = useToast()
   const openTab = useTabsStore((state) => state.openTab)
   const graphSelection = useLabGraphSelectionStore((state) => state.selection)
-  const { createFolder, upload, refresh, isLoading } = useFileTreeStore()
+  const { createFolder, upload, refresh, loadFiles, isLoading } = useFileTreeStore()
   const refreshArxivLibrary = useArxivStore((state) => state.refresh)
   const { openFileInTab, downloadFile, openNotebook } = useOpenFile()
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const explorerBodyRef = React.useRef<HTMLDivElement | null>(null)
   const [activeExplorer, setActiveExplorer] = React.useState<'arxiv' | 'files' | 'scope'>('files')
+  const [explorerModePreference, setExplorerModePreference] = React.useState<'auto' | 'files' | 'arxiv'>('auto')
   const [hideDotfiles, setHideDotfiles] = React.useState(true)
   const [createFileOpen, setCreateFileOpen] = React.useState(false)
   const [isMenuOpen, setIsMenuOpen] = React.useState(true)
   const [scopedExplorerLabel, setScopedExplorerLabel] = React.useState<string | null>(null)
   const [scopedExplorerNodes, setScopedExplorerNodes] = React.useState<FileNode[]>([])
   const [scopedExplorerLoading, setScopedExplorerLoading] = React.useState(false)
+  const [stickyScopedSelection, setStickyScopedSelection] = React.useState<QuestStageSelection | null>(null)
   const [explorerLocation, setExplorerLocation] =
     React.useState<ExplorerLocationState>(DEFAULT_EXPLORER_LOCATION)
   const [diffFiles, setDiffFiles] = React.useState<
@@ -1683,12 +1729,40 @@ function LeftPanel({
     }
     return getQuestWorkspaceStageSelection(activeTab)
   }, [activeTab, projectId])
-  const activeDiffScopedSelection = React.useMemo(() => {
-    if (activeTab?.pluginId !== BUILTIN_PLUGINS.GIT_DIFF_VIEWER || !tabMatchesProject(activeTab, projectId)) {
+  const activeTabStageSelection = React.useMemo(() => {
+    if (!tabMatchesProject(activeTab, projectId)) {
       return null
     }
     return getQuestWorkspaceStageSelection(activeTab)
   }, [activeTab, projectId])
+  const explorerStageSelection = React.useMemo(() => {
+    if (activeQuestWorkspaceView === 'stage' && activeQuestStageSelection) {
+      return activeQuestStageSelection
+    }
+    return activeTabStageSelection || graphSelection || null
+  }, [activeQuestStageSelection, activeQuestWorkspaceView, activeTabStageSelection, graphSelection])
+  const liveScopedExplorerSelection = React.useMemo(
+    () => normalizeScopedExplorerSelection(explorerStageSelection),
+    [explorerStageSelection]
+  )
+
+  React.useEffect(() => {
+    setExplorerModePreference('auto')
+    setStickyScopedSelection(null)
+  }, [projectId])
+
+  React.useEffect(() => {
+    setStickyScopedSelection(null)
+  }, [workspaceScopeContextKey])
+
+  React.useEffect(() => {
+    if (!liveScopedExplorerSelection) return
+    setStickyScopedSelection((current) =>
+      sameScopedExplorerSelection(current, liveScopedExplorerSelection)
+        ? current
+        : liveScopedExplorerSelection
+    )
+  }, [liveScopedExplorerSelection])
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1696,27 +1770,41 @@ function LeftPanel({
       const detail = (event as CustomEvent).detail as ExplorerRefreshDetail | undefined
       if (!detail?.target) return
       if (detail.projectId && detail.projectId !== projectId) return
-      detail.onComplete?.()
+      void (async () => {
+        try {
+          invalidateQuestFileTree(projectId)
+          await loadFiles(projectId, { force: true })
+          if (localQuestMode) {
+            setScopedExplorerReloadKey((value) => value + 1)
+          }
+        } finally {
+          detail.onComplete?.()
+        }
+      })()
     }
     window.addEventListener(EXPLORER_REFRESH_EVENT, handleRefresh)
     return () => {
       window.removeEventListener(EXPLORER_REFRESH_EVENT, handleRefresh)
     }
-  }, [projectId])
+  }, [loadFiles, localQuestMode, projectId])
+
+  React.useEffect(() => {
+    if (!workspaceTreeSyncKey) return
+    invalidateQuestFileTree(projectId)
+    void loadFiles(projectId, { force: true })
+    if (localQuestMode) {
+      setScopedExplorerReloadKey((value) => value + 1)
+    }
+  }, [loadFiles, localQuestMode, projectId, workspaceTreeSyncKey])
 
   React.useEffect(() => {
     const effectiveSelection =
-      activeQuestWorkspaceView === 'stage' && activeQuestStageSelection
-        ? {
-            ...activeQuestStageSelection,
-            selection_type:
-              activeQuestStageSelection.selection_type || 'stage_node',
-            selection_ref:
-              activeQuestStageSelection.selection_ref ||
-              activeQuestStageSelection.stage_key ||
-              'stage',
-          }
-        : graphSelection || activeDiffScopedSelection
+      liveScopedExplorerSelection ||
+      ((activeExplorer === 'scope' || explorerModePreference === 'auto') &&
+      explorerModePreference !== 'files' &&
+      explorerModePreference !== 'arxiv'
+        ? stickyScopedSelection
+        : null)
 
     if (!localQuestMode || !effectiveSelection) {
       setScopedExplorerLabel(null)
@@ -1726,17 +1814,6 @@ function LeftPanel({
       setDiffCompareBase(null)
       setDiffCompareHead(null)
       setScopedExplorerLoading(false)
-      setActiveExplorer((current) => (current === 'scope' ? 'files' : current))
-      return
-    }
-
-    if (!['branch_node', 'stage_node', 'baseline_node'].includes(String(effectiveSelection.selection_type || ''))) {
-      setScopedExplorerLabel(null)
-      setScopedExplorerNodes([])
-      setExplorerLocation(DEFAULT_EXPLORER_LOCATION)
-      setDiffFiles([])
-      setDiffCompareBase(null)
-      setDiffCompareHead(null)
       setActiveExplorer((current) => (current === 'scope' ? 'files' : current))
       return
     }
@@ -1837,7 +1914,13 @@ function LeftPanel({
         setDiffCompareBase(compareBase)
         setDiffCompareHead(compareHead)
         if (nextScopeNodes.length || nextDiffFiles.length) {
-          setActiveExplorer('scope')
+          setActiveExplorer((current) => {
+            if (current === 'scope') return current
+            if (explorerModePreference === 'files' || explorerModePreference === 'arxiv') {
+              return current
+            }
+            return liveScopedExplorerSelection ? 'scope' : current
+          })
         }
       } catch (error) {
         console.error('[WorkspaceLayout] Failed to build scoped explorer:', error)
@@ -1852,13 +1935,13 @@ function LeftPanel({
       cancelled = true
     }
   }, [
-    activeQuestStageSelection,
-    activeDiffScopedSelection,
-    activeQuestWorkspaceView,
-    graphSelection,
+    activeExplorer,
+    explorerModePreference,
+    liveScopedExplorerSelection,
     localQuestMode,
     projectId,
     scopedExplorerReloadKey,
+    stickyScopedSelection,
   ])
 
   const diffFileByPath = React.useMemo(() => {
@@ -1892,14 +1975,14 @@ function LeftPanel({
             oldPath: item.oldPath || null,
             added: item.added ?? null,
             removed: item.removed ?? null,
-            quest_stage_selection: activeQuestStageSelection || graphSelection || null,
+            quest_stage_selection: explorerStageSelection || null,
             scoped_selection_source: 'diff-viewer',
           },
         },
         title: item.path,
       })
     },
-    [activeQuestStageSelection, diffCompareBase, diffCompareHead, graphSelection, onExitHome, openTab, projectId]
+    [diffCompareBase, diffCompareHead, explorerStageSelection, onExitHome, openTab, projectId]
   )
 
   const openPluginTab = React.useCallback(
@@ -1959,7 +2042,7 @@ function LeftPanel({
               removed: diffEntry?.removed ?? null,
               allowSnapshot: true,
               allowDiff: Boolean(diffEntry && diffCompareBase && diffCompareHead),
-              quest_stage_selection: activeQuestStageSelection || graphSelection || null,
+              quest_stage_selection: explorerStageSelection || null,
               scoped_selection_source: 'snapshot-viewer',
             },
           },
@@ -1983,6 +2066,7 @@ function LeftPanel({
               latexFolderId: file.id,
               mainFileId: file.latex?.mainFileId ?? null,
               readOnly: readOnlyMode,
+              quest_stage_selection: explorerStageSelection || null,
             },
           },
           title: file.name,
@@ -1990,12 +2074,18 @@ function LeftPanel({
         return
       }
       if (file.type === 'notebook') {
-        openNotebook(file.id, file.name, projectId, { readonly: readOnlyMode })
+        openNotebook(file.id, file.name, projectId, {
+          readonly: readOnlyMode,
+          customData: {
+            quest_stage_selection: explorerStageSelection || null,
+          },
+        })
         return
       }
       await openFileInTab(file, {
         customData: {
           projectId,
+          quest_stage_selection: explorerStageSelection || null,
           fileMeta: {
             updatedAt: file.updatedAt,
             sizeBytes: file.size,
@@ -2006,13 +2096,12 @@ function LeftPanel({
     },
     [
       activeExplorer,
-      activeQuestStageSelection,
       diffCompareBase,
       diffCompareHead,
       diffFileByPath,
+      explorerStageSelection,
       explorerLocation.revision,
       explorerLocation.sourceMode,
-      graphSelection,
       handleOpenDiffFile,
       onExitHome,
       openFileInTab,
@@ -2125,8 +2214,27 @@ function LeftPanel({
     if (showArxivExplorerPanel || activeExplorer !== 'arxiv') {
       return
     }
+    setExplorerModePreference('auto')
     setActiveExplorer(hasScopedExplorer ? 'scope' : 'files')
   }, [activeExplorer, hasScopedExplorer, showArxivExplorerPanel])
+
+  const handleExplorerTabClick = React.useCallback(
+    (next: 'arxiv' | 'files' | 'scope') => {
+      if (next === 'files') {
+        setExplorerModePreference('files')
+        setActiveExplorer('files')
+        return
+      }
+      if (next === 'arxiv') {
+        setExplorerModePreference('arxiv')
+        setActiveExplorer('arxiv')
+        return
+      }
+      setExplorerModePreference('auto')
+      setActiveExplorer('scope')
+    },
+    []
+  )
 
   const handleExplorerNewFile = React.useCallback(() => {
     if (disableExplorerMutations) return
@@ -2202,7 +2310,7 @@ function LeftPanel({
                     ? 'border-[#d0b08a] text-[var(--text-on-dark)]'
                     : 'text-[var(--text-muted-on-dark)] hover:text-[var(--text-on-dark)]'
                 )}
-                onClick={() => setActiveExplorer('arxiv')}
+                onClick={() => handleExplorerTabClick('arxiv')}
                 role="tab"
                 aria-selected={isArxivView}
                 aria-label={t('explorer_arxiv')}
@@ -2221,7 +2329,7 @@ function LeftPanel({
                   ? 'border-[#d0b08a] text-[var(--text-on-dark)]'
                   : 'text-[var(--text-muted-on-dark)] hover:text-[var(--text-on-dark)]'
               )}
-              onClick={() => setActiveExplorer('files')}
+              onClick={() => handleExplorerTabClick('files')}
               role="tab"
               aria-selected={isFilesView}
               aria-label={t('explorer_files')}
@@ -2240,7 +2348,7 @@ function LeftPanel({
                     ? 'border-[#d0b08a] text-[var(--text-on-dark)]'
                     : 'text-[var(--text-muted-on-dark)] hover:text-[var(--text-on-dark)]'
                 )}
-                onClick={() => setActiveExplorer('scope')}
+                onClick={() => handleExplorerTabClick('scope')}
                 role="tab"
                 aria-selected={isScopeView}
                 aria-label={t('explorer_snapshot')}
@@ -3140,6 +3248,37 @@ export function WorkspaceLayout({
   const demoScenario =
     isDemoProject && demoScenarioId ? tutorialDemoScenarios[demoScenarioId as keyof typeof tutorialDemoScenarios] ?? null : null
   const demoWorkspace = useDemoQuestWorkspace(projectId, demoScenario, demoLocale)
+  const workspaceTreeSyncKey = React.useMemo(() => {
+    if (!isLocalQuestProject) return null
+    const snapshot = questWorkspace.snapshot as Record<string, unknown> | null
+    if (!snapshot) return null
+    const activeWorkspaceRoot =
+      typeof snapshot.active_workspace_root === 'string' ? snapshot.active_workspace_root : ''
+    const currentWorkspaceBranch =
+      typeof snapshot.current_workspace_branch === 'string'
+        ? snapshot.current_workspace_branch
+        : typeof snapshot.branch === 'string'
+          ? snapshot.branch
+          : ''
+    const head = typeof snapshot.head === 'string' ? snapshot.head : ''
+    const key = [activeWorkspaceRoot, currentWorkspaceBranch, head].join('::')
+    return key.trim() ? key : null
+  }, [isLocalQuestProject, questWorkspace.snapshot])
+  const workspaceScopeContextKey = React.useMemo(() => {
+    if (!isLocalQuestProject) return null
+    const snapshot = questWorkspace.snapshot as Record<string, unknown> | null
+    if (!snapshot) return null
+    const activeWorkspaceRoot =
+      typeof snapshot.active_workspace_root === 'string' ? snapshot.active_workspace_root : ''
+    const currentWorkspaceBranch =
+      typeof snapshot.current_workspace_branch === 'string'
+        ? snapshot.current_workspace_branch
+        : typeof snapshot.branch === 'string'
+          ? snapshot.branch
+          : ''
+    const key = [activeWorkspaceRoot, currentWorkspaceBranch].join('::')
+    return key.trim() ? key : null
+  }, [isLocalQuestProject, questWorkspace.snapshot])
   const [isMobileQuestShell, setIsMobileQuestShell] = React.useState(false)
   const workspaceProjectTitle = projectName ?? (projectId ? `Project ${projectId}` : 'Project')
   const { addToast } = useToast()
@@ -4267,6 +4406,8 @@ export function WorkspaceLayout({
               onExitHome={exitHome}
               localQuestMode={isQuestLikeProject}
               demoMode={isDemoProject}
+              workspaceTreeSyncKey={workspaceTreeSyncKey}
+              workspaceScopeContextKey={workspaceScopeContextKey}
             />
             <div className="resizer" onMouseDown={startResize('left')} />
           </>

@@ -19,7 +19,7 @@ export const AssistantMessage: React.FC<AssistantMessageProps> = ({
   width,
 }) => {
   const prefix = '• '
-  const responseColor = 'white'
+  const responseColor = theme.text.response
   const prefixWidth = prefix.length
   const contentWidth = Math.max(1, width - prefixWidth)
   const agentLabel =

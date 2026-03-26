@@ -883,7 +883,7 @@ def test_lingzhu_sse_submits_only_prefixed_task_text(temp_home: Path, monkeypatc
     assert first_handler.status_code == 200
     first_events = _parse_sse_events(first_handler.wfile.getvalue())
     assert first_events
-    assert first_events[-1]["data"]["answer_stream"] == "进行中"
+    assert "进行中" in str(first_events[-1]["data"]["answer_stream"])
 
     history = app.quest_service.history(quest_id)
     assert history
@@ -997,6 +997,80 @@ def test_lingzhu_short_bind_command_binds_target_quest(temp_home: Path) -> None:
     assert channel.resolve_bound_quest(lingzhu_passive_conversation_id(connectors["lingzhu"])) == quest_id
 
 
+def test_lingzhu_short_bind_command_accepts_punctuation_and_chinese_numeric_target(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    connectors = manager.load_named("connectors")
+    auth_ak = generate_lingzhu_auth_ak()
+    connectors["lingzhu"]["enabled"] = True
+    connectors["lingzhu"]["auth_ak"] = auth_ak
+    connectors["lingzhu"]["public_base_url"] = "http://example.com:20999"
+    write_yaml(manager.path_for("connectors"), connectors)
+
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("lingzhu chinese bind target quest", quest_id="025")
+    quest_id = quest["quest_id"]
+
+    handler = _FakeSseHandler()
+    app.stream_lingzhu_sse(
+        handler,
+        raw_body=json.dumps(
+            {
+                "message_id": "lingzhu-bind-cn-001",
+                "agent_id": "DeepScientist",
+                "user_id": "glass-bind-cn",
+                "message": [{"role": "user", "type": "text", "text": "绑定：零二五。"}],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={"Authorization": f"Bearer {auth_ak}"},
+    )
+
+    assert handler.status_code == 200
+    events = _parse_sse_events(handler.wfile.getvalue())
+    assert quest_id in str(events[-1]["data"]["answer_stream"])
+    channel = app._channel_with_bindings("lingzhu")
+    assert channel.resolve_bound_quest(lingzhu_passive_conversation_id(connectors["lingzhu"])) == quest_id
+
+
+def test_lingzhu_short_resume_command_accepts_punctuation(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    connectors = manager.load_named("connectors")
+    auth_ak = generate_lingzhu_auth_ak()
+    connectors["lingzhu"]["enabled"] = True
+    connectors["lingzhu"]["auth_ak"] = auth_ak
+    connectors["lingzhu"]["public_base_url"] = "http://example.com:20999"
+    write_yaml(manager.path_for("connectors"), connectors)
+
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("lingzhu punctuation resume quest", quest_id="025")
+    quest_id = quest["quest_id"]
+    app.update_quest_binding(quest_id, "lingzhu:direct:glass-resume-punc", force=True)
+    app.quest_service.mark_turn_finished(quest_id, status="stopped", stop_reason="test_stop")
+
+    handler = _FakeSseHandler()
+    app.stream_lingzhu_sse(
+        handler,
+        raw_body=json.dumps(
+            {
+                "message_id": "lingzhu-resume-cn-001",
+                "agent_id": "DeepScientist",
+                "user_id": "glass-resume-punc",
+                "message": [{"role": "user", "type": "text", "text": "恢复。"}],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={"Authorization": f"Bearer {auth_ak}"},
+    )
+
+    assert handler.status_code == 200
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert str(snapshot.get("status") or snapshot.get("runtime_status") or "") == "active"
+
+
 def test_lingzhu_unbound_help_mentions_chinese_shortcuts(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
@@ -1031,6 +1105,91 @@ def test_lingzhu_unbound_help_mentions_chinese_shortcuts(temp_home: Path) -> Non
     assert "绑定" in answer_text
     assert "帮助" in answer_text
     assert "新建" in answer_text
+
+
+def test_lingzhu_stopped_poll_reply_includes_action_hint(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    connectors = manager.load_named("connectors")
+    auth_ak = generate_lingzhu_auth_ak()
+    connectors["lingzhu"]["enabled"] = True
+    connectors["lingzhu"]["auth_ak"] = auth_ak
+    connectors["lingzhu"]["public_base_url"] = "http://example.com:20999"
+    write_yaml(manager.path_for("connectors"), connectors)
+
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("lingzhu stopped hint quest", quest_id="026")
+    quest_id = quest["quest_id"]
+    app.update_quest_binding(quest_id, "lingzhu:direct:glass-stop-hint", force=True)
+    app.quest_service.mark_turn_finished(quest_id, status="stopped", stop_reason="test_stop")
+
+    handler = _FakeSseHandler()
+    app.stream_lingzhu_sse(
+        handler,
+        raw_body=json.dumps(
+            {
+                "message_id": "lingzhu-stop-hint-001",
+                "agent_id": "DeepScientist",
+                "user_id": "glass-stop-hint",
+                "message": [{"role": "user", "type": "text", "text": "你好。"}],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={"Authorization": f"Bearer {auth_ak}"},
+    )
+
+    assert handler.status_code == 200
+    events = _parse_sse_events(handler.wfile.getvalue())
+    answer_text = str(events[-1]["data"]["answer_stream"])
+    assert "恢复" in answer_text
+    assert quest_id in answer_text
+
+
+def test_lingzhu_task_prefix_allows_leading_punctuation(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    connectors = manager.load_named("connectors")
+    auth_ak = generate_lingzhu_auth_ak()
+    connectors["lingzhu"]["enabled"] = True
+    connectors["lingzhu"]["auth_ak"] = auth_ak
+    connectors["lingzhu"]["public_base_url"] = "http://example.com:20999"
+    write_yaml(manager.path_for("connectors"), connectors)
+
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("lingzhu task punctuation quest")
+    quest_id = quest["quest_id"]
+    app.update_quest_binding(quest_id, "lingzhu:direct:glass-task-punc", force=True)
+
+    captured: dict[str, str] = {}
+
+    def fake_submit_user_message(target_quest_id: str, *, text: str, source: str, attachments=None, reply_to_interaction_id=None, client_message_id=None):  # noqa: ANN001
+        captured["quest_id"] = target_quest_id
+        captured["text"] = text
+        return {"scheduled": True, "started": True, "queued": False, "reason": "user_message"}
+
+    app.submit_user_message = fake_submit_user_message  # type: ignore[method-assign]
+    app._lingzhu_wait_for_outbox_records = lambda conversation_id, delivered_count, timeout_seconds: ([], delivered_count)  # type: ignore[method-assign]
+
+    handler = _FakeSseHandler()
+    app.stream_lingzhu_sse(
+        handler,
+        raw_body=json.dumps(
+            {
+                "message_id": "lingzhu-task-punc-001",
+                "agent_id": "DeepScientist",
+                "user_id": "glass-task-punc",
+                "message": [{"role": "user", "type": "text", "text": "！我现在的任务是：复现 baseline。"}],
+            },
+            ensure_ascii=False,
+        ).encode("utf-8"),
+        headers={"Authorization": f"Bearer {auth_ak}"},
+    )
+
+    assert handler.status_code == 200
+    assert captured["quest_id"] == quest_id
+    assert captured["text"] == "复现 baseline。"
 
 
 def test_lingzhu_sse_replays_buffered_outbox_messages_only_once(temp_home: Path) -> None:

@@ -78,6 +78,7 @@ def test_stage_plan_and_checklist_templates_exist() -> None:
     root = repo_root() / "src" / "skills"
     assert (root / "baseline" / "references" / "baseline-plan-template.md").exists()
     assert (root / "baseline" / "references" / "baseline-checklist-template.md").exists()
+    assert (root / "baseline" / "references" / "artifact-payload-examples.md").exists()
     assert (root / "experiment" / "references" / "main-experiment-plan-template.md").exists()
     assert (root / "experiment" / "references" / "main-experiment-checklist-template.md").exists()
     assert (root / "analysis-campaign" / "references" / "campaign-plan-template.md").exists()
@@ -219,7 +220,19 @@ def test_baseline_skill_documents_uv_first_python_setup() -> None:
     assert "uv venv" in text
     assert "uv pip install" in text
     assert "uv run python" in text
-    assert "Only accept a non-`uv` environment route" in text
+    assert "only accept a non-`uv` route" in text
+
+
+def test_baseline_skill_has_compact_file_by_file_contract() -> None:
+    text = (repo_root() / "src" / "skills" / "baseline" / "SKILL.md").read_text(encoding="utf-8")
+    assert "## File-by-file contract" in text
+    assert "`PLAN.md` or compatibility alias `analysis_plan.md`" in text
+    assert "`CHECKLIST.md` or compatibility alias `REPRO_CHECKLIST.md`" in text
+    assert "`setup.md` is optional unless environment or layout choices are non-trivial" in text
+    assert "`execution.md` is optional unless the run is long, multi-step, or rerun-heavy" in text
+    assert "`verification.md` is optional as a filename but required in substance" in text
+    assert "`attachment.yaml` is required for attached or imported baselines" in text
+    assert "`<baseline_root>/json/metric_contract.json` is the canonical accepted comparison contract" in text
 
 
 def test_decision_skill_requires_reuse_baseline_to_land_on_attach_and_confirm() -> None:
@@ -288,6 +301,9 @@ def test_all_stage_skills_require_stage_start_memory_retrieval_and_stage_end_mem
         assert "Stage-end requirement:" in text
         assert "memory.write(...)" in text
 
+    baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
+    assert "fast-path exception:" in baseline_text
+
 
 def test_experiment_skill_requires_outcome_status_in_memory_writes() -> None:
     text = (repo_root() / "src" / "skills" / "experiment" / "SKILL.md").read_text(encoding="utf-8")
@@ -298,13 +314,10 @@ def test_experiment_skill_requires_outcome_status_in_memory_writes() -> None:
 def test_long_running_skills_require_next_reply_time_reporting() -> None:
     root = repo_root() / "src" / "skills"
     experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
     campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
 
     assert "estimated next reply time" in experiment_text
     assert "next_reply_at" in experiment_text
-    assert "every completed wait cycle" in baseline_text
-    assert "next expected update time" in baseline_text
     assert "estimated next reply time" in campaign_text
 
 

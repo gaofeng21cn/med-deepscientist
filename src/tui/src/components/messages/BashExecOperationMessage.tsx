@@ -489,13 +489,13 @@ export const BashExecOperationMessage: React.FC<BashExecOperationMessageProps> =
   return (
     <Box flexDirection="row" width={width}>
       <Box width={prefixWidth}>
-        <Text color="white">{BULLET_PREFIX}</Text>
+        <Text color={theme.text.response}>{BULLET_PREFIX}</Text>
       </Box>
       <Box flexGrow={1} flexDirection="column" width={contentWidth}>
         <Text color={theme.text.link} bold>
           {header}
         </Text>
-        <Text color="white">{visibleCommand}</Text>
+        <Text color={theme.text.response}>{visibleCommand}</Text>
         {metaParts.length > 0 ? (
           <Box marginTop={1}>
             <Text color={theme.text.secondary}>{metaParts.join(' · ')}</Text>
@@ -504,7 +504,7 @@ export const BashExecOperationMessage: React.FC<BashExecOperationMessageProps> =
         {renderedLogLines.length > 0 ? (
           <Box marginTop={1} flexDirection="column">
             {renderedLogLines.map((line, index) => (
-              <Text key={`${toolCallId || bashId || 'bash'}:${index}`} color="white">
+              <Text key={`${toolCallId || bashId || 'bash'}:${index}`} color={theme.text.response}>
                 {line}
               </Text>
             ))}

@@ -122,7 +122,7 @@ export const Composer: React.FC<ComposerProps> = ({
           {configMode === 'edit'
             ? 'Config editor · Enter save · Ctrl+J newline · Esc cancel'
             : configMode === 'browse'
-              ? 'Config browser · ↑/↓ select · Enter edit · Esc close'
+              ? 'Config workspace · ↑/↓ select · Enter open · Esc back'
             : selectionMode
             ? 'Quest browser · ↑/↓ select · Enter confirm · Esc cancel'
             : mode === 'home'

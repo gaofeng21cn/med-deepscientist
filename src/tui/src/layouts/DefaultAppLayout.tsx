@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react'
 import { Box, measureElement, type DOMElement } from 'ink'
 import stringWidth from 'string-width'
-import type { ConfigScreenItem } from '../components/ConfigScreen.js'
+import type { ConfigPanel } from '../components/ConfigScreen.js'
 import { MainContent } from '../components/MainContent.js'
 import { Composer } from '../components/Composer.js'
 import { useTerminalSize } from '../hooks/useTerminalSize.js'
@@ -14,12 +14,7 @@ type DefaultAppLayoutProps = {
   activeQuestId: string | null
   browseQuestId: string | null
   configMode: 'browse' | 'edit' | null
-  configItems: ConfigScreenItem[]
-  configIndex: number
-  configEditor?: {
-    item: ConfigScreenItem
-    content: string
-  } | null
+  configPanel: ConfigPanel | null
   questPanelMode: 'projects' | 'pause' | 'stop' | 'resume' | null
   questPanelQuests: QuestSummary[]
   questPanelIndex: number
@@ -55,9 +50,7 @@ export const DefaultAppLayout: React.FC<DefaultAppLayoutProps> = ({
   activeQuestId,
   browseQuestId,
   configMode,
-  configItems,
-  configIndex,
-  configEditor,
+  configPanel,
   questPanelMode,
   questPanelQuests,
   questPanelIndex,
@@ -127,9 +120,7 @@ export const DefaultAppLayout: React.FC<DefaultAppLayoutProps> = ({
           quests={quests}
           browseQuestId={browseQuestId}
           configMode={configMode}
-          configItems={configItems}
-          configIndex={configIndex}
-          configEditor={configEditor}
+          configPanel={configPanel}
           questPanelMode={questPanelMode}
           questPanelQuests={questPanelQuests}
           questPanelIndex={questPanelIndex}
@@ -174,7 +165,7 @@ export const DefaultAppLayout: React.FC<DefaultAppLayoutProps> = ({
             configMode === 'edit'
               ? 'Edit the config content, then press Enter to save'
               : configMode === 'browse'
-                ? 'Use arrows to choose a config file, then press Enter'
+                ? 'Use arrows to choose a config item, then press Enter'
               : questPanelMode
               ? 'Use arrows to choose a quest, then press Enter'
               : activeQuestId

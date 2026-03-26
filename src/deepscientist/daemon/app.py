@@ -54,6 +54,7 @@ from ..network import urlopen_with_proxy as urlopen
 from ..latex_runtime import QuestLatexService
 from ..connector.lingzhu_support import (
     lingzhu_detect_tool_call_from_text,
+    lingzhu_normalize_command_text,
     lingzhu_extract_task_text,
     lingzhu_extract_user_text,
     lingzhu_health_payload,
@@ -102,6 +103,25 @@ LEGACY_CODEX_RETRY_BACKOFF_MULTIPLIER = 2.0
 LEGACY_CODEX_RETRY_MAX_BACKOFF_SEC = 8.0
 _CRASH_AUTO_RESUME_COOLDOWN = timedelta(minutes=10)
 _CRASH_AUTO_RESUME_MAX_RECENT_ATTEMPTS = 2
+_CHINESE_DIGIT_MAP = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+_CHINESE_UNIT_MAP = {
+    "十": 10,
+    "百": 100,
+    "千": 1000,
+}
 _LINGZHU_SHORT_COMMAND_DIRECT_MAP = {
     "帮助": "help",
     "列表": "list",
@@ -117,7 +137,7 @@ _LINGZHU_SHORT_COMMAND_PREFIX_MAP = {
     "暂停": "stop",
     "恢复": "resume",
 }
-_LINGZHU_SHORT_LATEST_ALIASES = {"latest", "newest", "最新"}
+_LINGZHU_SHORT_LATEST_ALIASES = {"latest", "newest", "最新", "最新的"}
 _LINGZHU_DELETE_CONFIRM_ALIASES = {"确认", "强制", "--yes", "-y"}
 
 
@@ -3570,10 +3590,8 @@ class DaemonApp:
                             ),
                         }
                     )
-                target_quest = args[0]
-                if target_quest in {"latest", "newest"}:
-                    quests = self.quest_service.list_quests()
-                    target_quest = str(quests[0]["quest_id"]) if quests else ""
+                requested_quest_ref = str(args[0] or "").strip()
+                target_quest = self._resolve_quest_reference(requested_quest_ref) or requested_quest_ref
                 if not (self.home / "quests" / target_quest / "quest.yaml").exists():
                     available = ", ".join(item["quest_id"] for item in self.quest_service.list_quests()[:6]) or "none"
                     return channel.send(
@@ -3581,8 +3599,8 @@ class DaemonApp:
                             "conversation_id": conversation_id,
                             "kind": "ack",
                             "message": self._polite_copy(
-                                zh=f"老师，目前没有找到 quest `{target_quest}`。可用 quest 包括：{available}。",
-                                en=f"I could not find quest `{target_quest}`. Available quests: {available}.",
+                                zh=f"老师，目前没有找到 quest `{requested_quest_ref}`。可用 quest 包括：{available}。",
+                                en=f"I could not find quest `{requested_quest_ref}`. Available quests: {available}.",
                             ),
                         }
                     )
@@ -3626,10 +3644,8 @@ class DaemonApp:
                             ),
                         }
                     )
-                target_quest = str(args[0] or "").strip()
-                if target_quest in {"latest", "newest"}:
-                    quests = self.quest_service.list_quests()
-                    target_quest = str(quests[0]["quest_id"]) if quests else ""
+                requested_quest_ref = str(args[0] or "").strip()
+                target_quest = self._resolve_quest_reference(requested_quest_ref) or requested_quest_ref
                 confirmed = any(str(item).strip().lower() in {"--yes", "--force", "-y"} for item in args[1:])
                 if not confirmed:
                     return channel.send(
@@ -3660,8 +3676,8 @@ class DaemonApp:
                             "conversation_id": conversation_id,
                             "kind": "ack",
                             "message": self._polite_copy(
-                                zh=f"老师，目前没有找到 quest `{target_quest}`。可用 quest 包括：{available}。",
-                                en=f"I could not find quest `{target_quest}`. Available quests: {available}.",
+                                zh=f"老师，目前没有找到 quest `{requested_quest_ref}`。可用 quest 包括：{available}。",
+                                en=f"I could not find quest `{requested_quest_ref}`. Available quests: {available}.",
                             ),
                         }
                     )
@@ -4345,6 +4361,53 @@ class DaemonApp:
         quest_id = str(quests[0].get("quest_id") or "").strip()
         return quest_id or None
 
+    @staticmethod
+    def _strip_quest_reference_noise(value: str | None) -> str:
+        normalized = lingzhu_normalize_command_text(value)
+        if not normalized:
+            return ""
+        normalized = re.sub(r"^(?:第|quest|Quest|任务|项目)\s*", "", normalized).strip()
+        normalized = re.sub(r"\s*(?:号|个|个任务|任务)\s*$", "", normalized).strip()
+        return normalized
+
+    @staticmethod
+    def _parse_chinese_numeric_reference(value: str) -> str | None:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return None
+        if all(char in _CHINESE_DIGIT_MAP for char in normalized):
+            return "".join(str(_CHINESE_DIGIT_MAP[char]) for char in normalized)
+        if not all(char in _CHINESE_DIGIT_MAP or char in _CHINESE_UNIT_MAP for char in normalized):
+            return None
+        total = 0
+        current = 0
+        for char in normalized:
+            if char in _CHINESE_DIGIT_MAP:
+                current = _CHINESE_DIGIT_MAP[char]
+                continue
+            unit = _CHINESE_UNIT_MAP.get(char)
+            if unit is None:
+                return None
+            total += (current or 1) * unit
+            current = 0
+        total += current
+        return str(total) if total > 0 else None
+
+    def _resolve_numeric_quest_id(self, value: str | None) -> str | None:
+        normalized = str(value or "").strip()
+        if not normalized or not normalized.isdigit():
+            return None
+        if self._quest_exists(normalized):
+            return normalized
+        target_numeric = int(normalized)
+        for item in self.quest_service.list_quests():
+            quest_id = str(item.get("quest_id") or "").strip()
+            if not quest_id.isdigit():
+                continue
+            if int(quest_id) == target_numeric:
+                return quest_id
+        return None
+
     def _quest_exists(self, quest_id: str | None) -> bool:
         normalized = str(quest_id or "").strip()
         if not normalized:
@@ -4352,11 +4415,22 @@ class DaemonApp:
         return (self.home / "quests" / normalized / "quest.yaml").exists()
 
     def _resolve_quest_reference(self, value: str | None) -> str | None:
-        normalized = str(value or "").strip()
+        normalized = self._strip_quest_reference_noise(value)
         if not normalized:
             return None
         if normalized in {"latest", "newest"}:
             return self._latest_quest_id()
+        literal_match = normalized if self._quest_exists(normalized) else None
+        if literal_match:
+            return literal_match
+        numeric_match = self._resolve_numeric_quest_id(normalized)
+        if numeric_match:
+            return numeric_match
+        chinese_numeric = self._parse_chinese_numeric_reference(normalized)
+        if chinese_numeric:
+            numeric_match = self._resolve_numeric_quest_id(chinese_numeric)
+            if numeric_match:
+                return numeric_match
         return normalized
 
     def _connector_control_reply(
@@ -4795,7 +4869,7 @@ class DaemonApp:
 
     @staticmethod
     def _parse_lingzhu_short_command(text: str) -> tuple[str, list[str]] | None:
-        normalized = re.sub(r"\s+", " ", str(text or "").strip())
+        normalized = lingzhu_normalize_command_text(text)
         if not normalized or normalized.startswith("/"):
             return None
         direct = _LINGZHU_SHORT_COMMAND_DIRECT_MAP.get(normalized)
@@ -4821,6 +4895,27 @@ class DaemonApp:
                 return command_name, ["latest" if remainder in _LINGZHU_SHORT_LATEST_ALIASES else remainder]
             return command_name, []
         return None
+
+    def _lingzhu_status_hint_text(self, quest_id: str | None) -> str:
+        if not quest_id:
+            latest = str(self._latest_quest_id() or "").strip()
+            bind_hint = f"绑定{latest}" if latest else "绑定最新"
+            return f"未绑定。可说：{bind_hint}/列表/帮助"
+        snapshot = self.quest_service.snapshot(quest_id)
+        runtime_status = str(snapshot.get("runtime_status") or snapshot.get("status") or "").strip().lower()
+        latest = str(self._latest_quest_id() or "").strip()
+        bind_hint = f"绑定{latest}" if latest and latest != quest_id else "绑定最新"
+        if runtime_status in {"running", "active"}:
+            return f"绑{quest_id}，进行中。可说：状态/总结/{bind_hint}"
+        if runtime_status == "waiting_for_user":
+            return f"绑{quest_id}，等你确认。可说：状态/总结/{bind_hint}"
+        if runtime_status in {"paused", "stopped"}:
+            return f"绑{quest_id}，已暂停。可说：恢复/{bind_hint}/列表"
+        if runtime_status == "completed":
+            return f"绑{quest_id}，已完成。可说：总结/{bind_hint}/列表"
+        if runtime_status == "error":
+            return f"绑{quest_id}，出错了。可说：状态/恢复/{bind_hint}"
+        return f"绑{quest_id}，暂无新进展。可说：状态/总结/{bind_hint}"
 
     def _lingzhu_unbound_help_text(self) -> str:
         latest = str(self._latest_quest_id() or "none")
@@ -5354,21 +5449,7 @@ class DaemonApp:
         return emitted
 
     def _lingzhu_short_status_text(self, quest_id: str | None) -> str:
-        if not quest_id:
-            return self._lingzhu_unbound_help_text()
-        snapshot = self.quest_service.snapshot(quest_id)
-        runtime_status = str(snapshot.get("runtime_status") or snapshot.get("status") or "").strip().lower()
-        if runtime_status in {"running", "active"}:
-            return "进行中"
-        if runtime_status == "waiting_for_user":
-            return "等你确认"
-        if runtime_status in {"paused", "stopped"}:
-            return "已暂停"
-        if runtime_status == "completed":
-            return "已完成"
-        if runtime_status == "error":
-            return "出错了"
-        return "暂无新进展"
+        return self._lingzhu_status_hint_text(quest_id)
 
     @staticmethod
     def _lingzhu_reply_payload(result: dict[str, Any]) -> tuple[str, str | None, str]:

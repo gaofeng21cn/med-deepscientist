@@ -15,6 +15,9 @@ DEFAULT_LINGZHU_AGENT_ID = "main"
 DEFAULT_LINGZHU_SESSION_NAMESPACE = "lingzhu"
 DEFAULT_LINGZHU_TASK_PREFIX = "我现在的任务是"
 DEFAULT_LINGZHU_PASSIVE_CHAT_TYPE = "passive"
+_LINGZHU_COMMAND_PUNCTUATION = "：:，,。.;；!！?？、~～`'\"“”‘’（）()【】[]《》<>"
+_LINGZHU_COMMAND_PUNCT_TRANSLATION = str.maketrans({char: " " for char in _LINGZHU_COMMAND_PUNCTUATION})
+_LINGZHU_PREFIX_SEPARATORS_CLASS = re.escape(_LINGZHU_COMMAND_PUNCTUATION) + r"\s"
 
 _AUTH_AK_SEGMENTS = (8, 4, 4, 4, 12)
 _AUTH_AK_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -237,12 +240,28 @@ def lingzhu_extract_user_text(messages: Any) -> str:
     return "\n".join(parts).strip()
 
 
-def lingzhu_extract_task_text(text: Any) -> str | None:
+def lingzhu_normalize_command_text(text: Any) -> str:
     normalized = str(text or "").strip()
-    if not normalized.startswith(DEFAULT_LINGZHU_TASK_PREFIX):
+    if not normalized:
+        return ""
+    normalized = normalized.translate(_LINGZHU_COMMAND_PUNCT_TRANSLATION)
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip()
+
+
+def lingzhu_extract_task_text(text: Any) -> str | None:
+    raw_text = str(text or "").strip()
+    if not raw_text:
         return None
-    remainder = normalized[len(DEFAULT_LINGZHU_TASK_PREFIX) :].strip()
-    remainder = remainder.lstrip("：:，,。.;；!！?？ ")
+    prefix_pattern = r"^[{separators}]*{prefix}[{separators}]*".format(
+        separators=_LINGZHU_PREFIX_SEPARATORS_CLASS,
+        prefix="".join(f"{re.escape(char)}[{_LINGZHU_PREFIX_SEPARATORS_CLASS}]*" for char in DEFAULT_LINGZHU_TASK_PREFIX),
+    )
+    matched = re.match(prefix_pattern, raw_text)
+    if matched is None:
+        return None
+    remainder = raw_text[matched.end() :].strip()
+    remainder = remainder.lstrip(_LINGZHU_COMMAND_PUNCTUATION + " \t\r\n")
     return remainder or None
 
 

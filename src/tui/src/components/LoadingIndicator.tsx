@@ -20,7 +20,7 @@ export const LoadingIndicator: React.FC<LoadingIndicatorProps> = ({
 
   return (
     <Box marginTop={1} width="100%" justifyContent="space-between">
-      <Text color={theme.text.accent}>{currentLoadingPhrase || 'Running'}</Text>
+      <Text color={theme.text.link}>{currentLoadingPhrase || 'Running'}</Text>
       {rightContent ? <Box>{rightContent}</Box> : null}
     </Box>
   )

@@ -301,16 +301,21 @@ export function useOpenFile() {
       resourceId: string,
       resourceName: string,
       projectId?: string,
-      options: { readonly?: boolean } = {}
+      options: { readonly?: boolean; customData?: Record<string, unknown> } = {}
     ): string => {
+      const mergedCustomData =
+        projectId || options.readonly || options.customData
+          ? {
+              ...(options.customData || {}),
+              ...(projectId ? { projectId } : {}),
+              ...(options.readonly ? { readonly: Boolean(options.readonly) } : {}),
+            }
+          : undefined
       const context: TabContext = {
         type: "notebook",
         resourceId,
         resourceName,
-        customData:
-          projectId || options.readonly
-            ? { projectId, readonly: Boolean(options.readonly) }
-            : undefined,
+        customData: mergedCustomData,
       };
 
       return openTab({

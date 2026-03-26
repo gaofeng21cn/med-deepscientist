@@ -30,6 +30,8 @@ This page is the shortest path to the right document.
 
 - [00 Quick Start](./00_QUICK_START.md)
   Start here if you want to install DeepScientist, launch it locally, and create your first project.
+- [05 TUI Guide](./05_TUI_GUIDE.md)
+  Read this if your main surface is the terminal and you want one end-to-end path through `ds --tui`, quests, connectors, and cross-surface work.
 - [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md)
   Read this when you want to run DeepScientist through MiniMax, GLM, Volcengine Ark, Alibaba Bailian, or another Codex profile.
 - [12 Guided Workflow Tour](./12_GUIDED_WORKFLOW_TOUR.md)

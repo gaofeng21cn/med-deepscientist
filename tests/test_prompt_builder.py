@@ -58,23 +58,17 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
     assert "intake-audit" in prompt
     assert "review" in prompt
     assert "rebuttal" in prompt
-    assert "Stage execution contract" in prompt
-    assert "Artifact notification discipline" in prompt
-    assert "reader-first" in prompt
-    assert "reviewer-first" in prompt
-    assert "5-minute reviewer pass" in prompt
     assert "## Current User Message" in prompt
+    assert "requested_skill_rule:" in prompt
+    assert "stage-specific execution detail lives in the requested skill" in prompt
     assert "#F3EEE8" in prompt
-    assert "fog-blue" in prompt
     assert "plt.rcParams.update" in prompt
-    assert 'fig.savefig("summary_line.png"' in prompt
     assert "AutoFigure-Edit" in prompt
-    assert "https://github.com/ResearAI/AutoFigure-Edit" in prompt
-    assert "https://deepscientist" in prompt
-    assert "information gain is clearly worth the added compute" in prompt
+    assert len(prompt.splitlines()) < 900
+    assert len(prompt) < 50000
 
 
-def test_prompt_builder_includes_stage_plan_first_protocols(temp_home: Path) -> None:
+def test_prompt_builder_stays_compact_and_avoids_redundant_stage_sop(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     prompt = builder.build(
         quest_id=snapshot["quest_id"],
@@ -83,17 +77,16 @@ def test_prompt_builder_includes_stage_plan_first_protocols(temp_home: Path) -> 
         model="gpt-5.4",
     )
 
-    assert "stage_plan_protocol:" in prompt
-    assert "baseline_plan_protocol:" in prompt
-    assert "experiment_plan_protocol:" in prompt
-    assert "analysis_plan_protocol:" in prompt
-    assert "checklist_maintenance_protocol:" in prompt
-    assert "plan_revision_protocol:" in prompt
-    assert "plan_execution_stability_protocol:" in prompt
-    assert "stage_milestone_summary_protocol:" in prompt
-    assert "Before substantial baseline setup, code edits, or a real baseline run:" in prompt
-    assert "Before substantial implementation work or a real main run:" in prompt
-    assert "Before launching real campaign slices:" in prompt
+    assert "shared_interaction_contract_precedence:" in prompt
+    assert "stage_contract_protocol:" in prompt
+    assert "stage_kickoff_protocol:" not in prompt
+    assert "read_plan_keepalive_protocol:" not in prompt
+    assert "tool_call_keepalive_protocol:" not in prompt
+    assert "stage_plan_protocol:" not in prompt
+    assert "experiment_plan_protocol:" not in prompt
+    assert "analysis_plan_protocol:" not in prompt
+    assert "artifact.submit_paper_outline(mode='candidate', ...)" not in prompt
+    assert "problem-first vs solution-first" not in prompt
 
 
 def test_prompt_builder_prefers_synced_quest_prompt_copy(temp_home: Path) -> None:
@@ -433,9 +426,9 @@ def test_prompt_builder_includes_progress_interact_cadence_guidance(temp_home: P
         model="gpt-5.4",
     )
 
-    assert "real human-meaningful checkpoints" in prompt
-    assert "20 to 30 minutes" in prompt
-    assert "do not send empty filler" in prompt
+    assert "response_pattern: say what changed -> say what it means -> say what happens next" in prompt
+    assert "compaction_protocol:" in prompt
+    assert "human_progress_shape_protocol:" in prompt
     assert "do not open or rewrite large binary assets" in prompt
 
 
@@ -451,8 +444,8 @@ def test_prompt_builder_mentions_long_horizon_no_early_stop_rule(temp_home: Path
 
     assert "keep advancing until a paper-like deliverable exists" in prompt
     assert "do not self-stop after one stage or one launched detached run" in prompt
-    assert "any new message or using `/resume` will continue" in prompt
-    assert "[Waiting for decision]" in prompt
+    assert "any new message or `/resume` will continue from the same quest" in prompt
+    assert "standby_prefix_rule:" in prompt
 
 
 def test_prompt_builder_mentions_decision_request_options_and_timeout(temp_home: Path) -> None:
@@ -471,7 +464,7 @@ def test_prompt_builder_mentions_decision_request_options_and_timeout(temp_home:
     assert "notify the user of the chosen option" in prompt
     assert "GitHub key/token" in prompt
     assert "Hugging Face key/token" in prompt
-    assert "do not fabricate placeholder credentials" in prompt
+    assert "do not invent placeholders" in prompt
     assert "sleep 3600" in prompt
 
 
@@ -512,7 +505,7 @@ def test_prompt_builder_documents_lineage_intent_rules(temp_home: Path) -> None:
         model="gpt-5.4",
     )
 
-    assert "lineage_intent" in prompt
+    assert "lineage_rule:" in prompt
     assert "continue_line" in prompt
     assert "branch_alternative" in prompt
     assert "maintenance-only compatibility" in prompt
@@ -544,81 +537,43 @@ def test_prompt_builder_mentions_autonomous_decision_mode(temp_home: Path) -> No
     assert "explicit quest-completion approval is still allowed" in prompt
 
 
-def test_prompt_builder_mentions_record_main_experiment_protocol(temp_home: Path) -> None:
+def test_prompt_builder_delegates_stage_specific_sop_to_skills(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
 
-    prompt = builder.build(
+    experiment_prompt = builder.build(
         quest_id=snapshot["quest_id"],
         skill_id="experiment",
         user_message="Run the main experiment and report the result.",
         model="gpt-5.4",
     )
-
-    assert "artifact.record_main_experiment(...)" in prompt
-    assert "RUN.md" in prompt
-    assert "RESULT.json" in prompt
-    assert "whether primary performance improved / worsened / stayed mixed" in prompt
-    assert "never make the user infer performance improvement only from raw metrics" in prompt
-    assert "one bounded smoke or pilot validation and then one real run" in prompt
-
-
-def test_prompt_builder_mentions_submit_idea_milestone_protocol(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="idea",
-        user_message="Propose a new idea and explain whether it is actually worth pursuing.",
-        model="gpt-5.4",
-    )
-
-    assert "artifact.submit_idea" in prompt
-    assert "immediately after a successful accepted artifact.submit_idea(...)" in prompt
-    assert "whether it currently looks valid, research-worthy, and insight-bearing" in prompt
-    assert "at least 5 and usually 5 to 10 related and usable papers" in prompt
-    assert "the final selected-idea draft should cite the survey-stage papers it actually uses" in prompt
-    assert "`References` or `Bibliography` section" in prompt
-
-
-def test_prompt_builder_mentions_analysis_and_paper_milestone_protocols(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    analysis_prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="analysis-campaign",
-        user_message="Finish the analysis campaign and explain the consequence for the claim.",
-        model="gpt-5.4",
-    )
-    write_prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="write",
-        user_message="Advance the draft and report the milestone clearly.",
-        model="gpt-5.4",
-    )
-
-    assert "analysis_milestone_protocol:" in analysis_prompt
-    assert "claim boundary became stronger / weaker / mixed" in analysis_prompt
-    assert "paper_milestone_protocol:" in write_prompt
-    assert "which claims are now supportable" in write_prompt
-
-
-def test_prompt_builder_mentions_idea_divergence_and_why_now_protocol(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
+    idea_prompt = builder.build(
         quest_id=snapshot["quest_id"],
         skill_id="idea",
         user_message="Brainstorm several different research directions before selecting one.",
         model="gpt-5.4",
     )
+    analysis_prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="analysis-campaign",
+        user_message="Plan the supplementary experiments without guessing ids.",
+        model="gpt-5.4",
+    )
+    write_prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="write",
+        user_message="Prepare the paper draft carefully.",
+        model="gpt-5.4",
+    )
 
-    assert "do not collapse onto the first plausible route" in prompt
-    assert "strong durable evidence already narrows the route" in prompt
-    assert "problem-first vs solution-first" in prompt
-    assert "serious frontier should usually shrink back to 2 to 3 candidates and at most 5" in prompt
-    assert "why now or what changed" in prompt
-    assert "two-sentence pitch" in prompt
-    assert "strongest-objection check" in prompt
+    for prompt in (experiment_prompt, idea_prompt, analysis_prompt, write_prompt):
+        assert "stage_contract_protocol:" in prompt
+        assert len(prompt.splitlines()) < 900
+        assert len(prompt) < 50000
+
+    assert "RUN.md" not in experiment_prompt
+    assert "problem-first vs solution-first" not in idea_prompt
+    assert "### Supplementary experiment protocol" not in analysis_prompt
+    assert "artifact.submit_paper_outline(mode='candidate', ...)" not in write_prompt
 
 
 def test_prompt_builder_mentions_baseline_gate_protocol(temp_home: Path) -> None:
@@ -635,7 +590,7 @@ def test_prompt_builder_mentions_baseline_gate_protocol(temp_home: Path) -> None
     assert "confirmed_baseline_ref: none" in prompt
     assert "artifact.confirm_baseline(...)" in prompt
     assert "artifact.waive_baseline(...)" in prompt
-    assert "Attach, import, or publish alone does not open the downstream workflow." in prompt
+    assert "Attach, import, or publish alone does not open the downstream workflow" in prompt
 
 
 def test_prompt_builder_includes_requested_baseline_and_prebound_runtime_policy(temp_home: Path) -> None:
@@ -997,37 +952,11 @@ def test_prompt_builder_mentions_long_running_bash_exec_monitoring_protocol(temp
         model="gpt-5.4",
     )
 
-    assert "sleep about `60s`" in prompt
-    assert "sleep about `120s`" in prompt
-    assert "sleep about `300s`" in prompt
-    assert "sleep about `600s`" in prompt
-    assert "sleep about `1800s`" in prompt
-    assert "artifact.interact(kind='progress', ...)" in prompt
-    assert "bash_exec(mode='read', id=...)" in prompt
-    assert "2000 lines or fewer" in prompt
-    assert "first 500 lines plus the last 1500 lines" in prompt
-    assert "bash_exec(mode='read', id=..., start=..., tail=...)" in prompt
-    assert "bash_exec(mode='read', id=..., tail_limit=..., order='desc')" in prompt
-    assert "bash_exec(mode='read', id=..., after_seq=last_seen_seq" in prompt
-    assert "include a structured `comment`" in prompt
-    assert "{stage, goal, action, expected_signal, next_check}" in prompt
-    assert "each completed sleep/await cycle" in prompt
-    assert "estimated next reply time" in prompt
-    assert "__DS_PROGRESS__" in prompt
-    assert "estimate whether the command can finish within the selected wait window" in prompt
-    assert "use bash_exec(mode='detach', ...) and monitor" in prompt
-    assert "first run a bounded smoke test or pilot" in prompt
-    assert "stop it with `bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)`" in prompt
-    assert "Use this canonical sleep protocol when you need to wait" in prompt
-    assert "bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)" in prompt
-    assert "do not set `timeout_seconds` exactly equal to `N`" in prompt
-    assert "prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command" in prompt
-    assert "wait=true" in prompt
-    assert "force=true" in prompt
-    assert "bash_exec(mode='history')" in prompt
-    assert "silent_seconds" in prompt
-    assert "watchdog_overdue" in prompt
-    assert "tqdm-style progress reporter" in prompt
+    assert "smoke_then_detach_protocol:" in prompt
+    assert "progress_first_monitoring_protocol:" in prompt
+    assert "long_run_reporting_protocol:" in prompt
+    assert "intervention_threshold_protocol:" in prompt
+    assert "timeout_protocol:" in prompt
     assert "judge health by forward progress" in prompt
     assert "do not kill or restart a run merely because a short watch window passed without final completion" in prompt
 
@@ -1043,7 +972,7 @@ def test_prompt_builder_requires_all_shell_like_commands_to_use_bash_exec(temp_h
     )
 
     assert "Any shell-like command execution must use `bash_exec`" in prompt
-    assert "`curl`, `python`, `python3`, `bash`, `sh`, `node`" in prompt
+    assert "including `curl`, `python`, `python3`, `bash`, `sh`, and `node`" in prompt
     assert "Do not execute shell commands through any non-`bash_exec` path." in prompt
 
 
@@ -1078,9 +1007,10 @@ def test_prompt_builder_mentions_immediate_acknowledgement_after_mailbox_poll(te
     assert "immediately send one substantive artifact.interact(...) follow-up" in prompt
     assert "do not send a redundant receipt-only message" in prompt
     assert "current background subtask is paused" in prompt
+    assert "watchdog_payload_protocol:" in prompt
 
 
-def test_prompt_builder_mentions_memory_call_protocol_and_exploration_efficiency(temp_home: Path) -> None:
+def test_prompt_builder_mentions_memory_contract_without_redundant_stage_playbook(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
 
     prompt = builder.build(
@@ -1090,151 +1020,7 @@ def test_prompt_builder_mentions_memory_call_protocol_and_exploration_efficiency
         model="gpt-5.4",
     )
 
-    assert "### `memory` call protocol" in prompt
-    assert "memory.list_recent(scope='quest', limit=5)" in prompt
-    assert "memory.search(query='<task or dataset or baseline>'" in prompt
-    assert 'pass `tags` as a real JSON array' in prompt
-    assert 'never as one comma-separated string' in prompt
-    assert "first review prior idea and experiment memory as reference material" in prompt
-    assert "review prior quest experiment records, failures, and result summaries" in prompt
-    assert "outcome status such as `success`, `partial`, or `failure`" in prompt
-    assert "### Exploration efficiency protocol" in prompt
-    assert "Preserve the current best verified branch as the elite line." in prompt
-
-
-def test_prompt_builder_mentions_outline_first_paper_flow(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="write",
-        user_message="Prepare the paper draft carefully.",
-        model="gpt-5.4",
-    )
-
-    assert "artifact.submit_paper_outline(mode='candidate', ...)" in prompt
-    assert "if comparison would materially improve quality" in prompt
-    assert "artifact.submit_paper_outline(mode='select'|'revise', ...)" in prompt
-    assert "artifact.submit_paper_bundle(...)" in prompt
-    assert "The selected outline is the authoritative blueprint" in prompt
-    assert "paper/latex/" in prompt
-    assert "templates/iclr2026/" in prompt
-    assert "default to `templates/iclr2026/` for general ML" in prompt
-    assert "motivation" in prompt
-    assert "challenge" in prompt
-    assert "resolution" in prompt
-    assert "validation" in prompt
-    assert "impact" in prompt
-    assert "make research value explicit early" in prompt
-    assert "problem and stakes -> concrete gap/bottleneck -> remedy/core idea -> evidence preview -> contributions" in prompt
-    assert "What / Why / So What" in prompt
-    assert "one cohesive contribution" in prompt
-    assert "five-part abstract formula" in prompt
-    assert "2 to 4 specific contribution bullets" in prompt
-    assert "title -> abstract -> introduction -> figures" in prompt
-    assert "if the first sentence could be pasted into many unrelated ML papers" in prompt
-
-
-def test_prompt_builder_mentions_outline_bound_analysis_campaign_contract(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="analysis-campaign",
-        user_message="Launch the follow-up analysis carefully.",
-        model="gpt-5.4",
-    )
-
-    assert "selected_outline_ref" in prompt
-    assert "research_questions" in prompt
-    assert "experimental_designs" in prompt
-    assert "todo_items" in prompt
-    assert "do not launch it as a free-floating batch" in prompt
-    assert "one-slice analysis campaign" in prompt
-    assert "current workspace/result node" in prompt
-    assert "only launch slices that are actually executable with the current quest assets" in prompt
-    assert "user-provided assets" in prompt
-
-
-def test_prompt_builder_mentions_unified_supplementary_experiment_protocol_and_id_discipline(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="analysis-campaign",
-        user_message="Plan the supplementary experiments without guessing ids.",
-        model="gpt-5.4",
-    )
-
-    assert "### Supplementary experiment protocol" in prompt
-    assert "ordinary analysis" in prompt
-    assert "review-driven evidence gaps" in prompt
-    assert "rebuttal-driven extra runs" in prompt
-    assert "artifact.resolve_runtime_refs(...)" in prompt
-    assert "artifact.get_analysis_campaign(campaign_id='active'|...)" in prompt
-    assert "artifact.list_paper_outlines(...)" in prompt
-    assert "Do not invent opaque ids" in prompt
-    assert "campaign_id + slice_id" in prompt
-    assert "`deviations` and `evidence_paths` are optional slice fields" in prompt
-    assert "record the slice with a non-success status" in prompt
-
-
-def test_prompt_builder_mentions_paperagent_like_outline_selection_rubric(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="write",
-        user_message="Select the best outline and continue.",
-        model="gpt-5.4",
-    )
-
-    assert "method fidelity" in prompt
-    assert "evidence support" in prompt
-    assert "narrative coherence" in prompt
-    assert "experiment ordering quality" in prompt
-
-
-def test_prompt_builder_mentions_verified_reference_breadth_protocol(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="write",
-        user_message="Write the paper and verify the citations carefully.",
-        model="gpt-5.4",
-    )
-
-    assert "roughly 30 to 50 verified references" in prompt
-    assert "Every final citation must correspond to a real paper" in prompt
-    assert "paper/references.bib" in prompt
-    assert "Google Scholar" in prompt
-    assert "Semantic Scholar" in prompt
-    assert "SEARCH -> VERIFY -> RETRIEVE -> VALIDATE -> ADD" in prompt
-    assert "Google Scholar has no official API" in prompt
-    assert "Crossref" in prompt
-    assert "hand-write BibTeX" in prompt
-    assert "do one explicit reference audit" in prompt
-
-
-def test_prompt_builder_mentions_external_reasoning_and_paper_plan_contract(temp_home: Path) -> None:
-    builder, snapshot = _make_builder(temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="write",
-        user_message="Write the paper carefully and explain the reasoning.",
-        model="gpt-5.4",
-    )
-
-    assert "External reasoning, planning, and verification style" in prompt
-    assert "current judgment or conclusion" in prompt
-    assert "verification checklist or checks performed" in prompt
-    assert "paper/writing_plan.md" in prompt
-    assert "paper/outline_selection.md" in prompt
-    assert "paper/related_work_map.md" in prompt
-    assert "paper/figure_storyboard.md" in prompt
-    assert "alternatives considered" in prompt
-    assert "next revision action" in prompt
-    assert "experiment-to-section mapping" in prompt
-    assert "figure/table-to-data-source mapping" in prompt
+    assert "Use `memory` for reusable lessons, compact prior context, and cross-turn retrieval." in prompt
+    assert 'pass `tags` as a JSON array such as `["stage:baseline", "type:repro-lesson"]`' in prompt
+    assert "## Priority Memory For This Turn" in prompt
+    assert "stage_contract_protocol:" in prompt

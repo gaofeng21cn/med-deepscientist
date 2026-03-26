@@ -1,19 +1,11 @@
 import React from 'react'
 import { Box, Text } from 'ink'
-import Gradient from 'ink-gradient'
 import stringWidth from 'string-width'
 import { Logo } from './Logo.js'
 import { theme } from '../semantic-colors.js'
 import { useTerminalSize } from '../hooks/useTerminalSize.js'
+import { ThemedGradient } from './ThemedGradient.js'
 import type { ConnectorSnapshot, QuestSummary } from '../types.js'
-
-// Colors matching AsciiArt
-const COLORS = {
-  blue: '#4796E4',
-  red: '#F38BA8',
-  gradient: ['#9B59B6', '#8E44AD', '#C471ED', '#F64F9C'],
-  gold: '#B69B4A',
-}
 
 const clipText = (value: string, maxWidth: number) => {
   const safeWidth = Math.max(4, maxWidth)
@@ -143,9 +135,7 @@ export const WelcomePanel: React.FC<WelcomePanelProps> = ({
         {infoLines.map((info, idx) => (
           <Box key={idx}>
             {info.style === 'title' ? (
-              <Gradient colors={COLORS.gradient}>
-                <Text bold>{info.value}</Text>
-              </Gradient>
+              <ThemedGradient bold>{info.value}</ThemedGradient>
             ) : (
               <>
                 {info.label && (
@@ -169,10 +159,10 @@ export const WelcomePanel: React.FC<WelcomePanelProps> = ({
       </Box>
 
       <Box marginTop={1} width={columns} justifyContent="center">
-        <Text color={COLORS.gold}>Web Workspace</Text>
+        <Text color={theme.text.link}>Web Workspace</Text>
       </Box>
       <Box width={columns} justifyContent="center">
-        <Text bold color={COLORS.blue}>
+        <Text bold color={theme.text.accent}>
           {urlBannerText}
         </Text>
       </Box>

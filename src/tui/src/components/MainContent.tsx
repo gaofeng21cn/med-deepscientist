@@ -7,7 +7,7 @@ import {
   type ScrollState,
 } from './shared/Scrollable.js'
 import { MessageList } from './MessageList.js'
-import { ConfigScreen, type ConfigScreenItem } from './ConfigScreen.js'
+import { ConfigScreen, type ConfigPanel } from './ConfigScreen.js'
 import { HistoryItemDisplay } from './HistoryItemDisplay.js'
 import { QuestScreen } from './QuestScreen.js'
 import { WelcomePanel } from './WelcomePanel.js'
@@ -19,12 +19,7 @@ type MainContentProps = {
   quests: QuestSummary[]
   browseQuestId: string | null
   configMode: 'browse' | 'edit' | null
-  configItems: ConfigScreenItem[]
-  configIndex: number
-  configEditor?: {
-    item: ConfigScreenItem
-    content: string
-  } | null
+  configPanel: ConfigPanel | null
   questPanelMode: 'projects' | 'pause' | 'stop' | 'resume' | null
   questPanelQuests: QuestSummary[]
   questPanelIndex: number
@@ -45,9 +40,7 @@ const MainContentComponent: React.FC<MainContentProps> = ({
   quests,
   browseQuestId,
   configMode,
-  configItems,
-  configIndex,
-  configEditor,
+  configPanel,
   questPanelMode,
   questPanelQuests,
   questPanelIndex,
@@ -178,18 +171,26 @@ const MainContentComponent: React.FC<MainContentProps> = ({
     }
   })
 
+  const renderConfigPanel = () => {
+    const node = (
+      <ConfigScreen
+        panel={configPanel || { kind: 'root', items: [], selectedIndex: 0, selectedQuestId }}
+        availableHeight={availableHeight}
+      />
+    )
+    if (!viewportHeight) {
+      return node
+    }
+    return (
+      <Scrollable ref={scrollRef} height={viewportHeight} width={columns} onScrollState={handleScrollState}>
+        {node}
+      </Scrollable>
+    )
+  }
+
   if (showWelcome) {
     if (configMode) {
-      return (
-        <ConfigScreen
-          mode={configMode}
-          items={configItems}
-          selectedIndex={configIndex}
-          selectedQuestId={selectedQuestId}
-          editor={configEditor}
-          availableHeight={availableHeight}
-        />
-      )
+      return renderConfigPanel()
     }
     if (questPanelMode) {
       return (
@@ -216,16 +217,7 @@ const MainContentComponent: React.FC<MainContentProps> = ({
   }
 
   if (configMode) {
-    return (
-      <ConfigScreen
-        mode={configMode}
-        items={configItems}
-        selectedIndex={configIndex}
-        selectedQuestId={selectedQuestId}
-        editor={configEditor}
-        availableHeight={availableHeight}
-      />
-    )
+    return renderConfigPanel()
   }
 
   if (questPanelMode) {

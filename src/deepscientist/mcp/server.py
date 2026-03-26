@@ -11,6 +11,7 @@ from ..artifact import ArtifactService
 from ..artifact.metrics import MetricContractValidationError
 from ..bash_exec import BashExecService
 from ..memory import MemoryService
+from ..quest import QuestService
 from .context import McpContext
 
 DEFAULT_INLINE_BASH_LOG_LINE_LIMIT = 2000
@@ -18,14 +19,121 @@ DEFAULT_INLINE_BASH_LOG_HEAD_LINES = 500
 DEFAULT_INLINE_BASH_LOG_TAIL_LINES = 1500
 DEFAULT_INLINE_BASH_LOG_WINDOW_LINES = 200
 MAX_INLINE_BASH_LOG_WINDOW_LINES = 2000
+INTERACTION_WATCHDOG_TOOL_CALL_THRESHOLD = 25
+INTERACTION_WATCHDOG_SILENCE_THRESHOLD_SECONDS = 30 * 60
 LONG_BASH_LOG_HINT = (
     "Use `bash_exec(mode='read', id=..., start=..., tail=...)` to inspect a specific log window, "
     "or `bash_exec(mode='read', id=..., tail=...)` to inspect the latest rendered lines."
 )
+ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES = {
+    "confirm_baseline": (
+        "Baseline confirmation changed durable quest state and this tool does not send a user-visible "
+        "summary on its own. Send one concise artifact.interact(...) update now."
+    ),
+    "waive_baseline": (
+        "Baseline waiver changed durable quest state and this tool does not send a user-visible summary "
+        "on its own. Send one concise artifact.interact(...) update now."
+    ),
+    "submit_paper_outline": (
+        "Paper outline state changed durably and this tool does not send a user-visible summary on its own. "
+        "Send one concise artifact.interact(...) update now."
+    ),
+    "publish_baseline": (
+        "Baseline publication changed durable state and this tool does not send a user-visible summary "
+        "on its own. Send one concise artifact.interact(...) update now."
+    ),
+    "attach_baseline": (
+        "Baseline attachment changed durable quest state and this tool does not send a user-visible summary "
+        "on its own. Send one concise artifact.interact(...) update now."
+    ),
+    "complete_quest": (
+        "Quest completion changed durable state and this tool does not send a final user-visible summary "
+        "on its own. Send one concise artifact.interact(...) closing update now unless the user already "
+        "received an equivalent completion summary."
+    ),
+}
 
 
 def _metric_validation_error_payload(exc: MetricContractValidationError) -> dict[str, Any]:
     return exc.as_payload()
+
+
+def _progress_watchdog_note(tool_call_count: int) -> str:
+    return (
+        "By the way, you have gone "
+        f"{tool_call_count} tool calls without notifying the user via artifact.interact(...). "
+        "Please report your latest progress now."
+    )
+
+
+def _visibility_watchdog_note(seconds_since_last_update: int) -> str:
+    minutes = max(1, seconds_since_last_update // 60)
+    return (
+        "By the way, it has been "
+        f"{minutes} minutes since the last user-visible artifact.interact(...). "
+        "Send one concise progress update now before continuing with background work."
+    )
+
+
+def _collect_interaction_watchdog_notes(
+    watchdog: dict[str, Any],
+    *,
+    state_change_note: str | None = None,
+) -> list[dict[str, str]]:
+    notes: list[dict[str, str]] = []
+    count = int((watchdog or {}).get("tool_calls_since_last_artifact_interact") or 0)
+    if count >= INTERACTION_WATCHDOG_TOOL_CALL_THRESHOLD:
+        notes.append(
+            {
+                "kind": "progress",
+                "message": _progress_watchdog_note(count),
+            }
+        )
+    silence_seconds = int((watchdog or {}).get("seconds_since_last_artifact_interact") or 0)
+    if count > 0 and silence_seconds >= INTERACTION_WATCHDOG_SILENCE_THRESHOLD_SECONDS:
+        notes.append(
+            {
+                "kind": "visibility",
+                "message": _visibility_watchdog_note(silence_seconds),
+            }
+        )
+    if state_change_note:
+        notes.append(
+            {
+                "kind": "state_change",
+                "message": state_change_note,
+            }
+        )
+    return notes
+
+
+def _attach_interaction_watchdog(
+    payload: dict[str, Any],
+    watchdog: dict[str, Any],
+    *,
+    state_change_note: str | None = None,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    enriched["interaction_watchdog"] = dict(watchdog or {})
+    notes = _collect_interaction_watchdog_notes(
+        watchdog,
+        state_change_note=state_change_note,
+    )
+    if not notes:
+        return enriched
+    enriched["watchdog_notes"] = notes
+    for item in notes:
+        kind = str(item.get("kind") or "").strip()
+        message = str(item.get("message") or "").strip()
+        if not message:
+            continue
+        if kind == "progress":
+            enriched["progress_watchdog_note"] = message
+        elif kind == "visibility":
+            enriched["visibility_watchdog_note"] = message
+        elif kind == "state_change":
+            enriched["state_change_watchdog_note"] = message
+    return enriched
 
 
 def _split_bash_log_lines(log_text: str) -> list[str]:
@@ -341,6 +449,7 @@ def build_memory_server(context: McpContext) -> FastMCP:
 
 def build_artifact_server(context: McpContext) -> FastMCP:
     service = ArtifactService(context.home)
+    quest_service = service.quest_service
     server = FastMCP(
         "artifact",
         instructions=(
@@ -350,6 +459,19 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         ),
         log_level="ERROR",
     )
+
+    def finalize_state_changing_artifact_tool(payload: dict[str, Any], *, tool_name: str) -> dict[str, Any]:
+        quest_root = context.require_quest_root().resolve()
+        quest_service.record_tool_activity(
+            quest_root,
+            tool_name=f"artifact.{tool_name}",
+        )
+        watchdog = quest_service.artifact_interaction_watchdog_status(quest_root)
+        return _attach_interaction_watchdog(
+            payload,
+            watchdog,
+            state_change_note=ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES.get(tool_name),
+        )
 
     @server.tool(name="record", description="Write a structured artifact record under the current quest.")
     def record(payload: dict[str, Any], comment: str | dict[str, Any] | None = None) -> dict[str, Any]:
@@ -620,7 +742,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         selected_reason: str | None = None,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return service.submit_paper_outline(
+        result = service.submit_paper_outline(
             context.require_quest_root(),
             mode=mode,
             outline_id=outline_id,
@@ -632,6 +754,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             review_result=review_result,
             selected_reason=selected_reason,
         )
+        return finalize_state_changing_artifact_tool(result, tool_name="submit_paper_outline")
 
     @server.tool(
         name="list_paper_outlines",
@@ -733,7 +856,8 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         if comment is not None and "comment" not in enriched:
             enriched["comment"] = comment
         enriched.setdefault("source", {"kind": "artifact_publish", "quest_id": context.quest_id, "quest_root": str(context.require_quest_root())})
-        return service.publish_baseline(context.require_quest_root(), enriched)
+        result = service.publish_baseline(context.require_quest_root(), enriched)
+        return finalize_state_changing_artifact_tool(result, tool_name="publish_baseline")
 
     @server.tool(name="attach_baseline", description="Attach a published baseline to the current quest.")
     def attach_baseline(
@@ -741,7 +865,8 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         variant_id: str | None = None,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return service.attach_baseline(context.require_quest_root(), baseline_id, variant_id)
+        result = service.attach_baseline(context.require_quest_root(), baseline_id, variant_id)
+        return finalize_state_changing_artifact_tool(result, tool_name="attach_baseline")
 
     @server.tool(
         name="confirm_baseline",
@@ -764,7 +889,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         try:
-            return service.confirm_baseline(
+            result = service.confirm_baseline(
                 context.require_quest_root(),
                 baseline_path=baseline_path,
                 comment=comment,
@@ -779,6 +904,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
                 auto_advance=auto_advance,
                 strict_metric_contract=True,
             )
+            return finalize_state_changing_artifact_tool(result, tool_name="confirm_baseline")
         except MetricContractValidationError as exc:
             return _metric_validation_error_payload(exc)
 
@@ -791,12 +917,13 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         auto_advance: bool = True,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return service.waive_baseline(
+        result = service.waive_baseline(
             context.require_quest_root(),
             reason=reason,
             comment=comment,
             auto_advance=auto_advance,
         )
+        return finalize_state_changing_artifact_tool(result, tool_name="waive_baseline")
 
     @server.tool(
         name="arxiv",
@@ -852,7 +979,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         supersede_open_requests: bool = True,
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return service.interact(
+        result = service.interact(
             context.require_quest_root(),
             kind=kind,
             message=message,
@@ -873,6 +1000,8 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             reply_to_interaction_id=reply_to_interaction_id,
             supersede_open_requests=supersede_open_requests,
         )
+        result["interaction_watchdog"] = quest_service.artifact_interaction_watchdog_status(context.require_quest_root())
+        return result
 
     @server.tool(
         name="complete_quest",
@@ -885,16 +1014,20 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         summary: str = "",
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return service.complete_quest(
+        result = service.complete_quest(
             context.require_quest_root(),
             summary=summary,
         )
+        if result.get("ok") is True and str(result.get("status") or "").strip() == "completed":
+            return finalize_state_changing_artifact_tool(result, tool_name="complete_quest")
+        return result
 
     return server
 
 
 def build_bash_exec_server(context: McpContext) -> FastMCP:
     service = BashExecService(context.home)
+    quest_service = QuestService(context.home)
     server = FastMCP(
         "bash_exec",
         instructions=(
@@ -944,6 +1077,15 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
         comment: str | dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         quest_root = context.require_quest_root().resolve()
+
+        def finalize(payload: dict[str, Any]) -> dict[str, Any]:
+            quest_service.record_tool_activity(
+                quest_root,
+                tool_name=f"bash_exec.{normalized_mode}",
+            )
+            watchdog = quest_service.artifact_interaction_watchdog_status(quest_root)
+            return _attach_interaction_watchdog(payload, watchdog)
+
         normalized_mode = (mode or "detach").strip().lower()
         if normalized_mode == "create":
             normalized_mode = "await"
@@ -973,12 +1115,12 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 "history_lines": history_lines,
             }
             if normalized_mode == "history":
-                return {
+                return finalize({
                     "count": len(items),
                     "lines": history_lines,
                     "items": items,
-                }
-            return payload
+                })
+            return finalize(payload)
         if normalized_mode == "read":
             bash_id = service.resolve_session_id(quest_root, id)
             session = service.get_session(quest_root, bash_id)
@@ -1007,7 +1149,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                         tail=tail if tail is not None else tail_limit,
                     )
                 )
-                return payload
+                return finalize(payload)
             use_tail = tail_limit is not None or before_seq is not None or after_seq is not None or normalized_order != "asc"
             if use_tail:
                 resolved_tail_limit = max(1, min(int(tail_limit or 200), 1000))
@@ -1034,7 +1176,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 payload["after_seq"] = tail_meta.get("after_seq")
                 payload["before_seq"] = tail_meta.get("before_seq")
                 payload["order"] = normalized_order
-                return payload
+                return finalize(payload)
             payload = service.build_tool_result(
                 context,
                 session=session,
@@ -1043,7 +1185,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 export_log_to=export_log_to,
             )
             payload.update(_build_default_bash_log_payload_from_path(service.terminal_log_path(quest_root, bash_id)))
-            return payload
+            return finalize(payload)
         if normalized_mode == "kill":
             bash_id = service.resolve_session_id(quest_root, id)
             session = service.request_stop(
@@ -1055,17 +1197,17 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
             )
             if wait:
                 session = service.wait_for_session(quest_root, bash_id, timeout_seconds=timeout_seconds)
-            return service.build_tool_result(context, session=session, include_log=False)
+            return finalize(service.build_tool_result(context, session=session, include_log=False))
         if normalized_mode == "await" and not command:
             bash_id = service.resolve_session_id(quest_root, id)
             session = service.wait_for_session(quest_root, bash_id, timeout_seconds=timeout_seconds)
-            return service.build_tool_result(
+            return finalize(service.build_tool_result(
                 context,
                 session=session,
                 include_log=False,
                 export_log=export_log,
                 export_log_to=export_log_to,
-            )
+            ))
         if not (command or "").strip():
             raise ValueError("command is required for `detach` and `await`.")
         session = service.start_session(
@@ -1078,15 +1220,15 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
             comment=comment,
         )
         if normalized_mode == "detach":
-            return service.build_tool_result(context, session=session, include_log=False)
+            return finalize(service.build_tool_result(context, session=session, include_log=False))
         session = service.wait_for_session(quest_root, str(session["bash_id"]), timeout_seconds=timeout_seconds)
-        return service.build_tool_result(
+        return finalize(service.build_tool_result(
             context,
             session=session,
             include_log=False,
             export_log=export_log,
             export_log_to=export_log_to,
-        )
+        ))
 
     return server
 

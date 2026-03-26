@@ -71,12 +71,15 @@ export async function listFiles(
  * Note: Backend returns `FileTreeNode[]` directly (already nested structure).
  * We convert it to `FileTreeResponse` format for consistency with the rest of the API.
  */
-export async function getFileTree(projectId: string): Promise<FileTreeResponse> {
+export async function getFileTree(
+  projectId: string,
+  options: { force?: boolean } = {}
+): Promise<FileTreeResponse> {
   const demoTree = buildDemoFileTree(projectId);
   if (demoTree) {
     return demoTree;
   }
-  return await getQuestFileTree(projectId);
+  return await getQuestFileTree(projectId, options);
 }
 
 /**

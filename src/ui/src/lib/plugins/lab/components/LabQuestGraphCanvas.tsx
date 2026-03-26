@@ -12,6 +12,7 @@ import {
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useNodesInitialized,
   useReactFlow,
   type Node,
   type Edge,
@@ -226,13 +227,33 @@ type BranchInsight = {
   workflowState: LabQuestGraphNode['workflow_state'] | null
 }
 
+type BranchMemorySnapshot = {
+  count: number
+  latestTitle: string | null
+  latestSummary: string | null
+  latestStamp: string | null
+}
+
 type PipelineStepStatus = 'done' | 'active' | 'pending'
 
 const GRID_X = 240
 const GRID_Y = 170
 const DEPTH_SPREAD = 28
-const DAGRE_NODE_WIDTH = 190
-const DAGRE_NODE_HEIGHT = 110
+const DAGRE_NODE_WIDTH = 228
+const DAGRE_NODE_HEIGHT = 144
+const DAGRE_BRANCH_NODE_BASE_HEIGHT = 96
+const DAGRE_BRANCH_NODE_MIN_HEIGHT = 160
+const DAGRE_BRANCH_NODE_TEXT_ROW_HEIGHT = 16
+const DAGRE_BRANCH_NODE_SUMMARY_HEIGHT = 36
+const DAGRE_BRANCH_NODE_METRIC_HEIGHT = 84
+const DAGRE_BRANCH_NODE_MEMORY_HEIGHT = 56
+const DAGRE_BRANCH_NODE_TREND_HEIGHT = 48
+const DAGRE_STAGE_NODE_HEIGHT = 132
+const DAGRE_EVENT_NODE_HEIGHT = 140
+const DAGRE_LAYOUT_BUFFER_HEIGHT = 16
+const AUTO_LAYOUT_GAP_X = 36
+const AUTO_LAYOUT_GAP_Y = 32
+const AUTO_LAYOUT_MAX_PASSES = 8
 const DAY_MS = 24 * 60 * 60 * 1000
 const STALE_BRANCH_MS = 3 * DAY_MS
 const EMPTY_GRAPH_NODES: LabQuestGraphNode[] = []
@@ -1818,7 +1839,12 @@ const GraphHoverCard = ({ card }: { card: GraphHoverCardState | null }) => {
 const buildDagreLayout = (
   nodes: LabQuestGraphNode[],
   edges: LabQuestGraphEdge[],
-  options?: { rankdir?: 'LR' | 'TB'; nodesep?: number; ranksep?: number }
+  options?: {
+    rankdir?: 'LR' | 'TB'
+    nodesep?: number
+    ranksep?: number
+    getNodeSize?: (node: LabQuestGraphNode) => DagreNodeSize
+  }
 ) => {
   const graph = new dagre.graphlib.Graph()
   graph.setDefaultEdgeLabel(() => ({}))
@@ -1827,8 +1853,11 @@ const buildDagreLayout = (
     nodesep: options?.nodesep ?? 70,
     ranksep: options?.ranksep ?? 120,
   })
+  const nodeSizes = new Map<string, DagreNodeSize>()
   nodes.forEach((node) => {
-    graph.setNode(node.node_id, { width: DAGRE_NODE_WIDTH, height: DAGRE_NODE_HEIGHT })
+    const size = options?.getNodeSize?.(node) ?? DEFAULT_DAGRE_NODE_SIZE
+    nodeSizes.set(node.node_id, size)
+    graph.setNode(node.node_id, size)
   })
   edges.forEach((edge) => {
     graph.setEdge(edge.source, edge.target)
@@ -1841,28 +1870,50 @@ const buildDagreLayout = (
       positions[node.node_id] = { x: 0, y: 0 }
       return
     }
+    const size = nodeSizes.get(node.node_id) ?? DEFAULT_DAGRE_NODE_SIZE
     positions[node.node_id] = {
-      x: layoutNode.x - DAGRE_NODE_WIDTH / 2,
-      y: layoutNode.y - DAGRE_NODE_HEIGHT / 2,
+      x: layoutNode.x - size.width / 2,
+      y: layoutNode.y - size.height / 2,
     }
   })
   return positions
 }
 
-const buildBranchLayout = (nodes: LabQuestGraphNode[], edges: LabQuestGraphEdge[]) => {
+const buildBranchLayout = (
+  nodes: LabQuestGraphNode[],
+  edges: LabQuestGraphEdge[],
+  options: {
+    nodeDisplayMode: 'summary' | 'metric'
+    curveMetric: string | null
+    curveMode: 'sota' | 'full'
+    branchInsights: Map<string, BranchInsight>
+    memoryByBranch: Map<string, BranchMemorySnapshot>
+  }
+) => {
   if (nodes.length === 0) return {}
   return buildDagreLayout(nodes, edges, {
     rankdir: 'LR',
     nodesep: nodes.length > 60 ? 44 : nodes.length > 24 ? 56 : 78,
     ranksep: nodes.length > 100 ? 96 : nodes.length > 60 ? 112 : 136,
+    getNodeSize: (node) => estimateBranchNodeSize(node, options),
   })
 }
 
 const buildEventLayout = (nodes: LabQuestGraphNode[], edges: LabQuestGraphEdge[]) =>
-  buildDagreLayout(nodes, edges, { rankdir: 'TB', nodesep: 60, ranksep: 110 })
+  buildDagreLayout(nodes, edges, {
+    rankdir: 'TB',
+    nodesep: 60,
+    ranksep: 110,
+    getNodeSize: () => ({ width: DAGRE_NODE_WIDTH, height: DAGRE_EVENT_NODE_HEIGHT }),
+  })
 
 const buildStageLayout = (nodes: LabQuestGraphNode[], edges: LabQuestGraphEdge[]) =>
-  buildDagreLayout(nodes, edges, { rankdir: 'LR', nodesep: 120, ranksep: 160 })
+  buildDagreLayout(nodes, edges, {
+    rankdir: 'LR',
+    nodesep: 120,
+    ranksep: 160,
+    getNodeSize: () => ({ width: DAGRE_NODE_WIDTH, height: DAGRE_STAGE_NODE_HEIGHT }),
+  })
 
 function resolveLayoutMap(layoutJson: QuestLayoutJson | null, viewMode: 'branch' | 'event' | 'stage') {
   if (!layoutJson) return {}
@@ -2139,6 +2190,180 @@ const shallowArrayEqual = (a?: unknown[] | null, b?: unknown[] | null) => {
     if (a[i] !== b[i]) return false
   }
   return true
+}
+
+type DagreNodeSize = {
+  width: number
+  height: number
+}
+
+const DEFAULT_DAGRE_NODE_SIZE: DagreNodeSize = {
+  width: DAGRE_NODE_WIDTH,
+  height: DAGRE_NODE_HEIGHT,
+}
+
+const estimateBranchNodeSize = (
+  node: LabQuestGraphNode,
+  options: {
+    nodeDisplayMode: 'summary' | 'metric'
+    curveMetric: string | null
+    curveMode: 'sota' | 'full'
+    branchInsights: Map<string, BranchInsight>
+    memoryByBranch: Map<string, BranchMemorySnapshot>
+  }
+): DagreNodeSize => {
+  const isPlaceholder = Boolean(node.placeholder || node.node_kind === 'placeholder')
+  const isBaselineRoot = node.node_kind === 'baseline_root'
+  const branchInsight = node.branch_name ? options.branchInsights.get(node.branch_name) ?? null : null
+  const branchMemory = node.branch_name ? options.memoryByBranch.get(node.branch_name) ?? null : null
+  const fallbackSummary =
+    clampCanvasText(node.node_summary?.last_error, 96) ||
+    clampCanvasText(node.node_summary?.last_reply, 96) ||
+    clampCanvasText(node.node_summary?.last_event_type, 96) ||
+    null
+  let height = DAGRE_BRANCH_NODE_BASE_HEIGHT
+  const hasPrimarySubtitle = isBaselineRoot
+    ? Boolean(node.status)
+    : Boolean(node.idea_title || branchInsight?.stageLabel || node.idea_id)
+  if (hasPrimarySubtitle) {
+    height += DAGRE_BRANCH_NODE_TEXT_ROW_HEIGHT
+  }
+  if (node.parent_branch || node.foundation_label) {
+    height += DAGRE_BRANCH_NODE_TEXT_ROW_HEIGHT
+  }
+  if (options.nodeDisplayMode === 'metric') {
+    height += DAGRE_BRANCH_NODE_METRIC_HEIGHT
+  } else if (branchInsight?.nowDoing || node.idea_problem || fallbackSummary) {
+    height += DAGRE_BRANCH_NODE_SUMMARY_HEIGHT
+  }
+  if (!isPlaceholder && !isBaselineRoot && branchMemory) {
+    height += DAGRE_BRANCH_NODE_MEMORY_HEIGHT
+  }
+  if (
+    (extractTrend(node, {
+      metricKey: options.curveMetric || null,
+      mode: options.curveMode,
+    }) || []).length > 0
+  ) {
+    height += DAGRE_BRANCH_NODE_TREND_HEIGHT
+  }
+  if (isBaselineRoot) {
+    height += 10
+  }
+  return {
+    width: DAGRE_NODE_WIDTH,
+    height: Math.max(DAGRE_BRANCH_NODE_MIN_HEIGHT, height + DAGRE_LAYOUT_BUFFER_HEIGHT),
+  }
+}
+
+const resolveNodeMeasuredSize = (
+  node: QuestFlowNode,
+  getMeasuredSize?: (id: string) => DagreNodeSize | null
+): DagreNodeSize => {
+  const measured = getMeasuredSize?.(node.id)
+  return {
+    width: measured?.width ?? node.measured?.width ?? node.width ?? DAGRE_NODE_WIDTH,
+    height: measured?.height ?? node.measured?.height ?? node.height ?? DAGRE_NODE_HEIGHT,
+  }
+}
+
+const resolveNodeSpacingCollisions = (
+  nodes: QuestFlowNode[],
+  options: {
+    viewMode: 'branch' | 'event' | 'stage'
+    getMeasuredSize?: (id: string) => DagreNodeSize | null
+    gapX?: number
+    gapY?: number
+  }
+): QuestFlowNode[] => {
+  if (nodes.length <= 1) return nodes
+
+  const gapX = options.gapX ?? AUTO_LAYOUT_GAP_X
+  const gapY = options.gapY ?? AUTO_LAYOUT_GAP_Y
+  const trackedNodes = nodes.filter((node) => !isAgentNode(node))
+  if (trackedNodes.length <= 1) return nodes
+
+  const positions = new Map<string, Position>(
+    nodes.map((node) => [node.id, { x: node.position.x, y: node.position.y }])
+  )
+  const sizeById = new Map<string, DagreNodeSize>(
+    trackedNodes.map((node) => [node.id, resolveNodeMeasuredSize(node, options.getMeasuredSize)])
+  )
+
+  let moved = false
+  for (let pass = 0; pass < AUTO_LAYOUT_MAX_PASSES; pass += 1) {
+    let passMoved = false
+    const ordered = [...trackedNodes].sort((left, right) => {
+      const leftPos = positions.get(left.id) ?? left.position
+      const rightPos = positions.get(right.id) ?? right.position
+      if (options.viewMode === 'event') {
+        return leftPos.y - rightPos.y || leftPos.x - rightPos.x
+      }
+      return leftPos.x - rightPos.x || leftPos.y - rightPos.y
+    })
+
+    for (let index = 0; index < ordered.length; index += 1) {
+      const current = ordered[index]
+      const currentPos = positions.get(current.id) ?? current.position
+      const currentSize = sizeById.get(current.id) ?? resolveNodeMeasuredSize(current, options.getMeasuredSize)
+      for (let nextIndex = index + 1; nextIndex < ordered.length; nextIndex += 1) {
+        const target = ordered[nextIndex]
+        const targetPos = positions.get(target.id) ?? target.position
+        const targetSize = sizeById.get(target.id) ?? resolveNodeMeasuredSize(target, options.getMeasuredSize)
+
+        const overlapsHorizontally =
+          currentPos.x < targetPos.x + targetSize.width + gapX &&
+          targetPos.x < currentPos.x + currentSize.width + gapX
+        const overlapsVertically =
+          currentPos.y < targetPos.y + targetSize.height + gapY &&
+          targetPos.y < currentPos.y + currentSize.height + gapY
+
+        if (!overlapsHorizontally || !overlapsVertically) {
+          continue
+        }
+
+        const verticalShift = currentPos.y + currentSize.height + gapY - targetPos.y
+        const horizontalShift = currentPos.x + currentSize.width + gapX - targetPos.x
+        const preferVertical = options.viewMode !== 'event'
+        const verticalCost = verticalShift * (preferVertical ? 0.88 : 1.12)
+        const horizontalCost = horizontalShift * (preferVertical ? 1.12 : 0.88)
+        const targetPosition = positions.get(target.id) ?? { x: target.position.x, y: target.position.y }
+
+        if (verticalCost <= horizontalCost) {
+          targetPosition.y += Math.max(0, verticalShift)
+        } else {
+          targetPosition.x += Math.max(0, horizontalShift)
+        }
+
+        positions.set(target.id, targetPosition)
+        passMoved = true
+        moved = true
+      }
+    }
+
+    if (!passMoved) {
+      break
+    }
+  }
+
+  if (!moved) return nodes
+
+  const resolved = nodes.map((node) => {
+    const nextPosition = positions.get(node.id)
+    if (!nextPosition) return node
+    if (
+      Math.abs(nextPosition.x - node.position.x) < 0.5 &&
+      Math.abs(nextPosition.y - node.position.y) < 0.5
+    ) {
+      return node
+    }
+    return {
+      ...node,
+      position: nextPosition,
+    }
+  })
+
+  return areNodesEquivalent(nodes, resolved) ? nodes : resolved
 }
 
 const isAgentNode = (node?: QuestFlowNode | null) => {
@@ -2532,6 +2757,7 @@ function LabQuestGraphCanvasInner({
   const interactionLocked = Boolean(readOnly || atEventId)
   const setSelectionStore = useLabGraphSelectionStore((state) => state.setSelection)
   const flow = useReactFlow()
+  const nodesInitialized = useNodesInitialized()
   const boundsRef = React.useRef<HTMLDivElement | null>(null)
   const fittedViewportRef = React.useRef(new Set<string>())
   const [nodes, setNodes, onNodesChange] = useNodesState<QuestFlowNode>([])
@@ -3318,8 +3544,15 @@ function LabQuestGraphCanvasInner({
     [branchEdgesRaw, branchNodeIdSet]
   )
   const branchLayoutFallback = React.useMemo(
-    () => buildBranchLayout(branchNodes, branchEdges),
-    [branchEdges, branchNodes]
+    () =>
+      buildBranchLayout(branchNodes, branchEdges, {
+        nodeDisplayMode,
+        curveMetric: curveMetric || null,
+        curveMode,
+        branchInsights,
+        memoryByBranch,
+      }),
+    [branchEdges, branchInsights, branchNodes, curveMetric, curveMode, memoryByBranch, nodeDisplayMode]
   )
   const branchLayoutExplicit = React.useMemo(() => resolveLayoutMap(layoutJson, 'branch'), [layoutJson])
   const branchLayoutMap = React.useMemo(
@@ -3363,8 +3596,14 @@ function LabQuestGraphCanvasInner({
         ? buildEventLayout(viewNodes, viewEdges)
         : viewMode === 'stage'
           ? buildStageLayout(viewNodes, viewEdges)
-          : buildBranchLayout(viewNodes, viewEdges),
-    [viewMode, viewNodes, viewEdges]
+          : buildBranchLayout(viewNodes, viewEdges, {
+              nodeDisplayMode,
+              curveMetric: curveMetric || null,
+              curveMode,
+              branchInsights,
+              memoryByBranch,
+            }),
+    [branchInsights, curveMetric, curveMode, memoryByBranch, nodeDisplayMode, viewEdges, viewMode, viewNodes]
   )
   const explicitLayout = React.useMemo(
     () => ({
@@ -3846,6 +4085,28 @@ function LabQuestGraphCanvasInner({
   }, [combinedNodes, computedEdges, explicitLayout, setEdges, setNodes, viewMode])
 
   React.useEffect(() => {
+    if (!nodesInitialized) return
+    if (nodes.length <= 1) return
+    if (nodes.some((node) => node.dragging)) return
+
+    const resolved = resolveNodeSpacingCollisions(nodes, {
+      viewMode,
+      getMeasuredSize: (id) => {
+        const internal = flow.getInternalNode(id)
+        if (!internal) return null
+        return {
+          width: internal.measured?.width ?? internal.width ?? DAGRE_NODE_WIDTH,
+          height: internal.measured?.height ?? internal.height ?? DAGRE_NODE_HEIGHT,
+        }
+      },
+    })
+
+    if (!areNodesEquivalent(nodes, resolved)) {
+      setNodes(resolved)
+    }
+  }, [flow, nodes, nodesInitialized, setNodes, viewMode])
+
+  React.useEffect(() => {
     viewModeRef.current = viewMode
   }, [viewMode])
 
@@ -3953,8 +4214,11 @@ function LabQuestGraphCanvasInner({
     if (!targetId) return
     const target = nodes.find((node) => node.id === targetId)
     if (!target) return
-    const centerX = target.position.x + 120
-    const centerY = target.position.y + 60
+    const internal = flow.getInternalNode(targetId)
+    const targetWidth = internal?.measured?.width ?? target.measured?.width ?? target.width ?? DAGRE_NODE_WIDTH
+    const targetHeight = internal?.measured?.height ?? target.measured?.height ?? target.height ?? DAGRE_NODE_HEIGHT
+    const centerX = target.position.x + targetWidth / 2
+    const centerY = target.position.y + targetHeight / 2
     try {
       // Center the viewport, but do not force a zoom level.
       // Forcing zoom makes wheel zoom feel broken/locked.

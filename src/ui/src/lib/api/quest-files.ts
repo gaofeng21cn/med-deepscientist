@@ -29,6 +29,10 @@ type CachedQuestFile = FileAPIResponse & {
 const treeCache = new Map<string, { expiresAt: number; payload: FileTreeResponse }>()
 const fileCache = new Map<string, CachedQuestFile>()
 
+type QuestTreeOptions = {
+  force?: boolean
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
@@ -258,6 +262,9 @@ export function flattenQuestExplorerPayload(
 }
 
 async function loadQuestTree(projectId: string, force = false): Promise<FileTreeResponse> {
+  if (force) {
+    invalidateQuestFileTree(projectId)
+  }
   const cached = treeCache.get(projectId)
   if (!force && cached && cached.expiresAt > Date.now()) {
     return cached.payload
@@ -270,6 +277,23 @@ async function loadQuestTree(projectId: string, force = false): Promise<FileTree
     payload,
   })
   return payload
+}
+
+export function invalidateQuestFileTree(projectId?: string | null) {
+  const normalizedProjectId = typeof projectId === 'string' ? projectId.trim() : ''
+  if (!normalizedProjectId) {
+    treeCache.clear()
+    fileCache.clear()
+    return
+  }
+
+  treeCache.delete(normalizedProjectId)
+  for (const key of Array.from(fileCache.keys())) {
+    const ref = parseQuestNodeId(key)
+    if (ref?.projectId === normalizedProjectId) {
+      fileCache.delete(key)
+    }
+  }
 }
 
 function getCachedFile(fileId: string) {
@@ -310,16 +334,23 @@ function resolveQuestDocumentPath(document: OpenDocumentPayload): string | null 
   return null
 }
 
-export async function listQuestFiles(projectId: string, parentId?: string | null): Promise<FileAPIResponse[]> {
-  const tree = await loadQuestTree(projectId)
+export async function listQuestFiles(
+  projectId: string,
+  parentId?: string | null,
+  options: QuestTreeOptions = {}
+): Promise<FileAPIResponse[]> {
+  const tree = await loadQuestTree(projectId, options.force === true)
   if (parentId === undefined || parentId === null) {
     return tree.files.filter((item) => item.parent_id === null)
   }
   return tree.files.filter((item) => item.parent_id === parentId)
 }
 
-export async function getQuestFileTree(projectId: string): Promise<FileTreeResponse> {
-  return await loadQuestTree(projectId)
+export async function getQuestFileTree(
+  projectId: string,
+  options: QuestTreeOptions = {}
+): Promise<FileTreeResponse> {
+  return await loadQuestTree(projectId, options.force === true)
 }
 
 export async function getQuestFile(fileId: string): Promise<FileAPIResponse> {

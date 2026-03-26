@@ -11,6 +11,7 @@ import { FadeContent, GlareHover } from '@/components/react-bits'
 import { client } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 import { useOnboardingStore } from '@/lib/stores/onboarding'
+import { useUILanguageStore } from '@/lib/stores/ui-language'
 import { runtimeVersion } from '@/lib/runtime/quest-runtime'
 import { HERO_COPY, HERO_STAGES } from './hero-content'
 import type { ConnectorAvailabilitySnapshot, QuestSummary } from '@/types'
@@ -21,7 +22,18 @@ import HeroProgress from './HeroProgress'
 import { UpdateReminderDialog } from './UpdateReminderDialog'
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
-const FINAL_SCROLL_HOLD = 0.2
+
+function readPageScrollTop(): number {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return 0
+  }
+  return Math.max(
+    window.scrollY,
+    window.pageYOffset,
+    document.documentElement?.scrollTop || 0,
+    document.body?.scrollTop || 0
+  )
+}
 
 function sortQuests(items: QuestSummary[]) {
   return [...items].sort((left, right) => {
@@ -34,6 +46,7 @@ function sortQuests(items: QuestSummary[]) {
 export default function Hero() {
   const navigate = useNavigate()
   const { locale } = useI18n()
+  const saveLanguagePreference = useUILanguageStore((state) => state.saveLanguagePreference)
   const {
     hydrated: onboardingHydrated,
     firstRunHandled,
@@ -58,12 +71,8 @@ export default function Hero() {
   const [showProgress, setShowProgress] = useState(true)
   const progressRef = useRef(0)
   const targetRef = useRef(0)
-  const holdRef = useRef(0)
   const rafRef = useRef<number | null>(null)
-  const allowScrollProgressRef = useRef(true)
   const lastScrollYRef = useRef(0)
-  const lockedScrollYRef = useRef<number | null>(null)
-  const scheduleTickRef = useRef<() => void>(() => {})
   const [questDialogOpen, setQuestDialogOpen] = useState(false)
   const [quests, setQuests] = useState<QuestSummary[]>([])
   const [questsLoading, setQuestsLoading] = useState(false)
@@ -76,6 +85,7 @@ export default function Hero() {
   const [connectorAvailabilityResolved, setConnectorAvailabilityResolved] = useState(false)
   const [entryCoachDismissed, setEntryCoachDismissed] = useState(false)
   const currentVersion = useMemo(() => runtimeVersion(), [])
+  const landingModalOpen = questDialogOpen || createDialogOpen
 
   useEffect(() => {
     document.body.classList.add('font-project')
@@ -136,7 +146,6 @@ export default function Hero() {
     if (isPortraitMode) {
       targetRef.current = 0
       progressRef.current = 0
-      holdRef.current = 0
       setProgress(0)
       setShowProgress(false)
       return
@@ -146,7 +155,7 @@ export default function Hero() {
     if (!element) return
 
     const updateVisibility = (heroTop: number, heroHeight: number) => {
-      const viewportTop = window.scrollY
+      const viewportTop = readPageScrollTop()
       const viewportBottom = viewportTop + window.innerHeight
       const heroBottom = heroTop + heroHeight
       const isVisible = viewportBottom > heroTop && viewportTop < heroBottom
@@ -174,31 +183,13 @@ export default function Hero() {
       }
     }
 
-    scheduleTickRef.current = scheduleTick
-
     const updateTarget = () => {
-      const scrollY = window.scrollY
+      const scrollY = readPageScrollTop()
       const heroTop = element.getBoundingClientRect().top + scrollY
       const heroHeight = element.offsetHeight
       const travel = Math.max(1, heroHeight - window.innerHeight)
 
       updateVisibility(heroTop, heroHeight)
-
-      if (!allowScrollProgressRef.current) {
-        if (scrollY > heroTop + 2) {
-          allowScrollProgressRef.current = true
-          lockedScrollYRef.current = null
-        } else {
-          if (lockedScrollYRef.current === null) {
-            lockedScrollYRef.current = scrollY
-          }
-          if (scrollY !== lockedScrollYRef.current) {
-            window.scrollTo({ top: lockedScrollYRef.current, behavior: 'auto' })
-          }
-          lastScrollYRef.current = lockedScrollYRef.current
-          return
-        }
-      }
 
       const scrolled = clamp(scrollY - heroTop, 0, travel)
       const nextTarget = scrolled / travel
@@ -206,75 +197,26 @@ export default function Hero() {
       lastScrollYRef.current = scrollY
       targetRef.current =
         scrollY < lastScrollY ? nextTarget : Math.max(targetRef.current, nextTarget)
-      if (targetRef.current < 1) {
-        holdRef.current = 0
-      }
       scheduleTick()
     }
 
     updateTarget()
     window.addEventListener('scroll', updateTarget, { passive: true })
+    document.addEventListener('scroll', updateTarget, { passive: true })
+    document.body.addEventListener('scroll', updateTarget, { passive: true })
+    document.documentElement.addEventListener('scroll', updateTarget, { passive: true })
     window.addEventListener('resize', updateTarget)
 
     return () => {
       window.removeEventListener('scroll', updateTarget)
+      document.removeEventListener('scroll', updateTarget)
+      document.body.removeEventListener('scroll', updateTarget)
+      document.documentElement.removeEventListener('scroll', updateTarget)
       window.removeEventListener('resize', updateTarget)
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       rafRef.current = null
     }
   }, [reducedMotion, isPortraitMode])
-
-  useEffect(() => {
-    if (isMobile || isPortraitMode) {
-      allowScrollProgressRef.current = true
-      lockedScrollYRef.current = null
-      return
-    }
-
-    const handleWheel = (event: WheelEvent) => {
-      const element = heroRef.current
-      if (!element) return
-
-      const heroTop = element.getBoundingClientRect().top + window.scrollY
-      const heroHeight = element.offsetHeight
-      const heroBottom = heroTop + heroHeight
-      const viewportTop = window.scrollY
-      const viewportBottom = viewportTop + window.innerHeight
-      const isVisible = viewportBottom > heroTop && viewportTop < heroBottom
-
-      if (!isVisible) return
-
-      const virtualProgress = clamp(targetRef.current + holdRef.current, 0, 1 + FINAL_SCROLL_HOLD)
-      const shouldLock = viewportTop <= heroTop + 2 && virtualProgress < 1 + FINAL_SCROLL_HOLD
-
-      if (!shouldLock) {
-        if (!allowScrollProgressRef.current) {
-          allowScrollProgressRef.current = true
-          lockedScrollYRef.current = null
-        }
-        return
-      }
-
-      event.preventDefault()
-      if (allowScrollProgressRef.current) {
-        lockedScrollYRef.current = window.scrollY
-      }
-      allowScrollProgressRef.current = false
-      if (lockedScrollYRef.current !== null && window.scrollY !== lockedScrollYRef.current) {
-        window.scrollTo({ top: lockedScrollYRef.current, behavior: 'auto' })
-        lastScrollYRef.current = lockedScrollYRef.current
-      }
-
-      const delta = event.deltaY / (window.innerHeight * 1.6)
-      const nextVirtual = clamp(virtualProgress + delta, 0, 1 + FINAL_SCROLL_HOLD)
-      targetRef.current = Math.min(1, nextVirtual)
-      holdRef.current = Math.max(0, nextVirtual - 1)
-      scheduleTickRef.current()
-    }
-
-    window.addEventListener('wheel', handleWheel, { passive: false })
-    return () => window.removeEventListener('wheel', handleWheel)
-  }, [isMobile, isPortraitMode])
 
   useEffect(() => {
     if (!questDialogOpen) {
@@ -395,6 +337,31 @@ export default function Hero() {
     !createDialogOpen &&
     !questDialogOpen &&
     (shouldShowConnectorCoach || shouldShowTutorialCoach)
+
+  useEffect(() => {
+    const htmlStyle = document.documentElement.style
+    const bodyStyle = document.body.style
+    const previousHtmlOverflowY = htmlStyle.overflowY
+    const previousHtmlOverflowX = htmlStyle.overflowX
+    const previousBodyOverflow = bodyStyle.overflow
+    const previousBodyOverflowX = bodyStyle.overflowX
+    const previousBodyOverflowY = bodyStyle.overflowY
+
+    const shouldLockBackground = landingModalOpen || entryCoachOpen
+    htmlStyle.overflowX = 'hidden'
+    htmlStyle.overflowY = shouldLockBackground ? 'hidden' : 'auto'
+    bodyStyle.overflow = shouldLockBackground ? 'hidden' : 'auto'
+    bodyStyle.overflowX = 'hidden'
+    bodyStyle.overflowY = shouldLockBackground ? 'hidden' : 'auto'
+
+    return () => {
+      htmlStyle.overflowY = previousHtmlOverflowY
+      htmlStyle.overflowX = previousHtmlOverflowX
+      bodyStyle.overflow = previousBodyOverflow
+      bodyStyle.overflowX = previousBodyOverflowX
+      bodyStyle.overflowY = previousBodyOverflowY
+    }
+  }, [entryCoachOpen, landingModalOpen])
 
   return (
     <>
@@ -539,6 +506,9 @@ export default function Hero() {
         showConnectorStep={shouldShowConnectorCoach}
         showTutorialStep={shouldShowTutorialCoach}
         onClose={() => setEntryCoachDismissed(true)}
+        onSetLanguage={(language) => {
+          void saveLanguagePreference(language)
+        }}
         onOpenConnectorSettings={() => {
           setEntryCoachDismissed(true)
           navigate('/settings/connector', { state: { configName: 'connectors' } })

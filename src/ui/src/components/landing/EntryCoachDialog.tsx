@@ -163,7 +163,7 @@ export function EntryCoachDialog({
             <div className="inline-flex rounded-full border border-[rgba(126,108,82,0.14)] bg-[rgba(244,239,233,0.84)] p-1">
               <button
                 type="button"
-                onClick={() => onSetLanguage('zh')}
+                onClick={() => onSetLanguage?.('zh')}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition',
                   locale === 'zh'
@@ -175,7 +175,7 @@ export function EntryCoachDialog({
               </button>
               <button
                 type="button"
-                onClick={() => onSetLanguage('en')}
+                onClick={() => onSetLanguage?.('en')}
                 className={cn(
                   'rounded-full px-3 py-1.5 text-xs font-semibold transition',
                   locale === 'en'
