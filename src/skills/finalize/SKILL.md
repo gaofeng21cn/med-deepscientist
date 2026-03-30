@@ -17,6 +17,7 @@ Use this skill to close or pause a quest responsibly.
 - When finalize reaches a real closure state, pause-ready packet, or route-back decision, send one threaded `artifact.interact(kind='milestone', ...)` update that names the recommendation, why it is the right call, and any reopen condition that still matters.
 - True quest completion still requires explicit user approval through the runtime completion flow before calling `artifact.complete_quest(...)`.
 - Rechecking that the same bundle files still exist, or re-aligning status surfaces without changing the closure judgment, does not by itself count as a fresh milestone.
+- Hard execution rule: if this stage needs terminal work such as Git inspection, packaging checks, document builds, or file inspection, every such command must go through `bash_exec`.
 
 ## Stage purpose
 

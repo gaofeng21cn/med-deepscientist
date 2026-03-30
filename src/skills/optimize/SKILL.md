@@ -17,6 +17,7 @@ It does not replace the normal quest runtime. It tells you how to use the existi
 - Ordinary candidate creation, smoke checks, and route updates should stay concise.
 - Use richer milestone updates only when a candidate is promoted, a strong run finishes, the frontier shifts materially, or a fusion/debug route becomes the new main path.
 - When the user asks for the current optimization state, answer from the frontier and durable artifacts rather than from chat memory.
+- Hard execution rule: every terminal command in this stage must go through `bash_exec`; do not use any other terminal path for smoke checks, quick validations, long runs, Git, Python, package-manager, or file-inspection commands.
 
 ## Stage purpose
 

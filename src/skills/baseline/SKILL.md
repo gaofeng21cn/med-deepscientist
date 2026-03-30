@@ -13,6 +13,7 @@ The target is one trustworthy baseline line, not an endless reproduction diary.
 - Follow the shared interaction contract injected by the system prompt.
 - Keep ordinary setup and debugging updates concise.
 - Use richer milestone updates only when the baseline becomes trusted, caveated, blocked, waived, or route-changing.
+- Hard execution rule: every terminal command in this stage must go through `bash_exec`; do not use any other terminal path for setup, reproduction, monitoring, verification, Git, Python, package-manager, or file-inspection commands.
 - Prefer `bash_exec` for setup, reproduction, monitoring, and verification commands so the baseline line stays durable and auditable.
 
 ## Non-negotiable rules

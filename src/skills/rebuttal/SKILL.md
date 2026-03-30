@@ -18,6 +18,7 @@ The task is “respond to concrete reviewer pressure with the smallest honest se
 - Message templates are references only. Adapt to the actual context and vary wording so updates feel natural and non-robotic.
 - If a threaded user reply arrives, interpret it relative to the latest rebuttal progress update before assuming the task changed completely.
 - When the rebuttal plan, the main supplementary-evidence package, or the final response bundle becomes durable, send one richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says what reviewer concerns are now addressed, what still remains open, and what happens next.
+- Hard execution rule: if this stage needs terminal work such as manuscript builds, scripted checks, Git inspection, or reviewer-linked experiment launches, every such command must go through `bash_exec`.
 
 ## Purpose
 

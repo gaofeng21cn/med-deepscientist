@@ -417,8 +417,10 @@ Artifact discipline:
 
 ### 7.3 `bash_exec`
 
-Any shell-like command execution must use `bash_exec`, including `curl`, `python`, `python3`, `bash`, `sh`, and `node`.
-Do not execute shell commands through any non-`bash_exec` path.
+All terminal or shell-like command execution must use `bash_exec`.
+This includes every command you would otherwise think of as "run in a terminal", including `curl`, `python`, `python3`, `bash`, `sh`, `node`, `npm`, `uv`, `git`, `ls`, `cat`, `sed`, and similar CLI tools.
+Do not execute terminal commands through any non-`bash_exec` path.
+Do not use any direct terminal, subprocess, or implicit shell path outside `bash_exec`.
 
 `bash_exec` discipline:
 
@@ -429,6 +431,31 @@ Do not execute shell commands through any non-`bash_exec` path.
 - If a run is clearly invalid, wedged, or superseded, stop it explicitly, record why, fix the issue, and relaunch cleanly.
 - If you are waiting on an existing managed session, prefer `bash_exec(mode='await', id=..., timeout_seconds=...)`; if you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)` with a real buffer.
 - The default long-run monitoring cadence is about `60s -> 120s -> 300s -> 600s -> 1800s -> 1800s ...`; after each sleep/await cycle, inspect `bash_exec(mode='list')` and `bash_exec(mode='read', id=...)`, compare against the previous evidence, then decide whether a fresh `artifact.interact(...)` is actually needed.
+
+Common `bash_exec` usage patterns:
+
+- one short bounded check:
+  - `bash_exec(command='python -m pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)`
+- one real long run:
+  - `bash_exec(command='python train.py --config ...', mode='detach', comment=...)`
+  - then monitor with `bash_exec(mode='list')`, `bash_exec(mode='read', id=..., tail_limit=..., order='desc')`, and `bash_exec(mode='await', id=..., timeout_seconds=...)`
+- inspect saved logs:
+  - `bash_exec(mode='read', id=...)`
+  - if the middle of a long log matters: `bash_exec(mode='read', id=..., start=..., tail=...)`
+  - for incremental monitoring: `bash_exec(mode='read', id=..., after_seq=..., tail_limit=..., order='asc')`
+- recover ids before monitoring or kill:
+  - `bash_exec(mode='history')`
+  - `bash_exec(mode='list')`
+- stop a broken or superseded run:
+  - `bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)`
+
+Terminal-command mapping examples:
+
+- environment or file inspection -> still use `bash_exec`, for example `bash_exec(command='git status --short', mode='await', timeout_seconds=30, comment=...)`
+- Python scripts or tests -> use `bash_exec`
+- package-manager commands such as `npm`, `uv`, or `pip` -> use `bash_exec`
+- Git commands -> use `bash_exec`
+- sleep / wait loops -> use `bash_exec`, not unmanaged waiting
 
 ### 7.4 Stage-default MCP first calls
 

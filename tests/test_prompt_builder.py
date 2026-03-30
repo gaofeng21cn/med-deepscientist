@@ -65,8 +65,8 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
     assert "#F3EEE8" in prompt
     assert "plt.rcParams.update" in prompt
     assert "AutoFigure-Edit" in prompt
-    assert len(prompt.splitlines()) < 1600
-    assert len(prompt) < 100000
+    assert len(prompt.splitlines()) < 1800
+    assert len(prompt) < 120000
 
 
 def test_prompt_builder_includes_recovery_resume_packet_for_daemon_recovery(temp_home: Path) -> None:
@@ -814,8 +814,8 @@ def test_prompt_builder_delegates_stage_specific_sop_to_skills(temp_home: Path) 
 
     for prompt in (experiment_prompt, idea_prompt, analysis_prompt, write_prompt):
         assert "stage_contract_protocol:" in prompt
-        assert len(prompt.splitlines()) < 1600
-        assert len(prompt) < 100000
+        assert len(prompt.splitlines()) < 1800
+        assert len(prompt) < 120000
 
     assert "RUN.md" not in experiment_prompt
     assert "problem-first vs solution-first" not in idea_prompt
@@ -1210,9 +1210,9 @@ def test_prompt_builder_requires_all_shell_like_commands_to_use_bash_exec(temp_h
         model="gpt-5.4",
     )
 
-    assert "Any shell-like command execution must use `bash_exec`" in prompt
-    assert "including `curl`, `python`, `python3`, `bash`, `sh`, and `node`" in prompt
-    assert "Do not execute shell commands through any non-`bash_exec` path." in prompt
+    assert "All terminal or shell-like command execution must use `bash_exec`." in prompt
+    assert "including `curl`, `python`, `python3`, `bash`, `sh`, `node`, `npm`, `uv`, `git`, `ls`, `cat`, `sed`" in prompt
+    assert "Do not execute terminal commands through any non-`bash_exec` path." in prompt or "Do not execute terminal commands through any non-`bash_exec` path" in prompt
 
 
 def test_prompt_builder_mentions_queued_user_message_mailbox(temp_home: Path) -> None:

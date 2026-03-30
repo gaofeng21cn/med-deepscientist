@@ -19,6 +19,7 @@ It is also not the same as `rebuttal`.
 - Follow the shared interaction contract injected by the system prompt.
 - For ordinary active work, prefer a concise progress update once work has crossed roughly 6 tool calls with a human-meaningful delta, and do not drift beyond roughly 12 tool calls or about 8 minutes without a user-visible update.
 - When the review report, revision plan, or follow-up experiment TODO list becomes durable, send a richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` update that says what the main risks are, what should be fixed next, and whether the next route is writing, experiment, or claim downgrade.
+- Hard execution rule: if this stage needs terminal work such as document builds, scripted checks, Git inspection, or file inspection, every such command must go through `bash_exec`.
 
 ## Purpose
 
