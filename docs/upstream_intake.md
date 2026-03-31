@@ -1,0 +1,167 @@
+# Upstream Intake Guide
+
+This document defines how `MedicalDeepScientist` absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
+
+## Core Rule
+
+Upstream changes must enter through a dedicated intake worktree, pass fork-level regression and `MedAutoScience` compatibility regression, then be recorded in the medical fork audit surface before they can reach `main`.
+
+## Why This Exists
+
+`MedicalDeepScientist` is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
+
+That means upstream changes are only useful when they satisfy all of these:
+
+- they solve a real runtime problem we care about
+- they preserve the compatibility contract that `MedAutoScience` depends on
+- they leave a durable audit trail in this repository
+
+## Intake Policy
+
+Prefer:
+
+- deterministic runtime bugfixes
+- daemon correctness fixes
+- document asset / worktree resolution fixes
+- changes that preserve daemon API shape and quest/worktree layout
+
+Review carefully before accepting:
+
+- daemon API payload/status changes
+- quest/worktree/paper/result layout changes
+- workflow or prompt orchestration changes
+- large dependency / lock refreshes
+
+Reject by default:
+
+- advertising or traffic-driving prompt edits
+- unreviewed strategy rewrites
+- changes that silently expand the compatibility surface
+
+## Standard Intake Procedure
+
+### 1. Keep the repository root on `main`
+
+Do not perform intake work directly in the root checkout.
+
+Create a worktree:
+
+```bash
+cd /Users/gaofeng/workspace/MedicalDeepScientist
+git fetch upstream
+git worktree add .worktree/intake-2026-03-31-daemon-fix -b intake/2026-03-31-daemon-fix
+```
+
+### 2. Ask `MedAutoScience` whether intake is appropriate
+
+Run the upgrade gate from `med-autoscience` first:
+
+```bash
+cd /Users/gaofeng/workspace/med-autoscience
+PYTHONPATH=src python3 -m med_autoscience.cli deepscientist-upgrade-check --profile /path/to/profile.toml --refresh
+```
+
+This separates:
+
+- upstream has moved
+- we are ready to absorb it
+
+### 3. Select specific upstream commits
+
+Do not bulk-sync an arbitrary upstream window.
+
+Record for each candidate:
+
+- upstream commit SHA
+- kind
+- expected benefit
+- compatibility risk
+
+Preferred default:
+
+```bash
+git cherry-pick <upstream-commit>
+```
+
+### 4. Run fork-local verification
+
+At minimum, run the tests directly related to the absorbed change.
+
+Example for daemon/document asset fixes:
+
+```bash
+PYTHONPATH=src pytest -q tests/test_daemon_api.py -k 'document_asset_resolves_path_documents_from_active_worktree'
+```
+
+### 5. Run `MedAutoScience` compatibility verification
+
+The fork is not considered safe just because this repository passes.
+
+Run `med-autoscience` regression against the current fork, especially if the intake touched:
+
+- runtime behavior
+- daemon API
+- worktree / paper / artifact layout
+- document assets
+
+### 6. Update the fork audit surface
+
+Every successful intake must update:
+
+- [`MEDICAL_FORK_MANIFEST.json`](../MEDICAL_FORK_MANIFEST.json)
+- [`docs/medical_fork_baseline.md`](./medical_fork_baseline.md)
+
+For each absorbed commit, record:
+
+- `commit`
+- `kind`
+- `summary`
+- verification evidence
+
+### 7. Only then merge back to `main`
+
+An intake branch may return to `main` only when:
+
+- fork regression passes
+- `MedAutoScience` compatibility regression passes
+- manifest and baseline documents are updated
+- no unexplained API/layout drift remains
+
+## Required Audit Surfaces
+
+### `MEDICAL_FORK_MANIFEST.json`
+
+Every absorbed commit should appear in `applied_commits`.
+
+Example:
+
+```json
+{
+  "commit": "d4994dba3ae1720a60daa7c80f5043f3722f32d8",
+  "kind": "runtime_bugfix",
+  "summary": "Fix worktree document asset resolution"
+}
+```
+
+### `docs/medical_fork_baseline.md`
+
+This is the human-readable changelog for the controlled fork. Record:
+
+- commit
+- kind
+- reason
+- verification command
+
+## Forbidden Moves
+
+- editing the root checkout directly and treating it as intake state
+- merging `upstream/main` blindly into `main`
+- accepting prompt ads or workflow changes without review
+- changing daemon API or quest/worktree layout without compatibility analysis
+- declaring intake complete without `MedAutoScience` regression
+
+## Companion Document
+
+The governance-side view of the same process lives in:
+
+- `med-autoscience/guides/upstream_intake.md`

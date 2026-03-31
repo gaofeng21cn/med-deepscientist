@@ -26,3 +26,7 @@ This repository is a controlled local fork used to stabilize runtime truth befor
 - source_dirty_paths:
   - `uv.lock`
 - regenerated_after_commit: `d4994dba3ae1720a60daa7c80f5043f3722f32d8`
+
+## Upstream Intake Policy
+
+Future upstream absorption must follow the controlled intake procedure documented in [`docs/upstream_intake.md`](./upstream_intake.md).
