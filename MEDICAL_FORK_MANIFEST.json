@@ -1,0 +1,12 @@
+{
+  "name": "MedicalDeepScientist Phase 1 Fork",
+  "baseline_commit": "a7853fda3432d37f6dee91fa6e66330f564bd8be",
+  "cherry_picks": [
+    "d4994dba3ae1720a60daa7c80f5043f3722f32d8"
+  ],
+  "notes": [
+    "Controlled fork for medical research execution with audited adjunct fixes.",
+    "All patches must be explicitly cherry-picked and recorded above."
+  ],
+  "created": "2026-03-31"
+}

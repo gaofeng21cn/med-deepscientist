@@ -1,3 +1,7 @@
+<p align="center">
+  <strong>Controlled fork for Phase 1 medical research execution. This repository is frozen at the MEDICAL_FORK_MANIFEST.json baseline and receives only the audited patches listed there.</strong>
+</p>
+
 <h1 align="center">
   <img src="assets/branding/logo.svg" alt="DeepScientist logo" width="84" />
   DeepScientist
