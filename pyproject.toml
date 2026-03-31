@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deepscientist"
 version = "1.5.15"
-description = "DeepScientist Core skeleton"
+description = "Controlled DeepScientist-derived runtime fork for MedAutoScience compatibility"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }

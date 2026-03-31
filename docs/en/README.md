@@ -1,91 +1,61 @@
-# DeepScientist Docs
+# med-deepscientist Docs
 
-DeepScientist is not just a long-running autonomous scientific discovery system. It is also a persistent research map that lives on your own machine.
+`med-deepscientist` is the controlled runtime fork that `MedAutoScience` uses as its execution engine.
 
-2 minutes to install. 2 minutes to bind Weixin. 2 minutes to launch. Extremely fast and easy to use.
+This docs index is for the runtime repository itself. Most medical users should start from `MedAutoScience`. This repository matters when you need to understand:
 
-It is also a workshop-style collaboration environment: let it keep moving autonomously, or step in anytime to collaborate, edit code, run the terminal yourself, or keep notes and plans in a Notion-style workspace.
+- why the runtime is forked
+- what compatibility contract the fork preserves
+- how upstream `DeepScientist` changes are absorbed safely
+- how the inherited runtime still works underneath
 
-Use DeepScientist anywhere: on the server through TUI, in the browser through Web, on the phone through Weixin or QQ, and even on glasses through Rokid Glasses.
+Compatibility names currently remain:
 
-## News
+- Python package: `deepscientist`
+- CLI: `ds`
+- npm package: `@researai/deepscientist`
 
-- `2026/03/24`: DeepScientist officially releases `v1.5`.
-- `2026/02/01`: the DeepScientist paper is available on [OpenReview](https://openreview.net/forum?id=cZFgsLq8Gs) for `ICLR 2026`.
+## Start Here
 
-## More From ResearAI
+- [Repository README](../../README.md)
+  Project positioning, fork rationale, architecture, and compatibility policy.
+- [Fork Baseline](../medical_fork_baseline.md)
+  Human-readable freeze baseline and applied patch history.
+- [Upstream Intake Guide](../upstream_intake.md)
+  The required process for absorbing upstream `DeepScientist` changes.
 
-AI Scientist and AutoFigure projects worth exploring alongside DeepScientist:
-
-| Project | What it does |
-|---|---|
-| [AutoFigure](https://github.com/ResearAI/AutoFigure) | generate paper-ready figures |
-| [AutoFigure-Edit](https://github.com/ResearAI/AutoFigure-Edit) | editable vector paper figures |
-| [DeepReviewer-v2](https://github.com/ResearAI/DeepReviewer-v2) | review papers and drafts |
-| [Awesome-AI-Scientist](https://github.com/ResearAI/Awesome-AI-Scientist) | curated AI scientist landscape |
-
-This page is the shortest path to the right document.
-
-## If you are new
-
-- [00 Quick Start](./00_QUICK_START.md)
-  Start here if you want to install DeepScientist, launch it locally, and create your first project.
-- [05 TUI Guide](./05_TUI_GUIDE.md)
-  Read this if your main surface is the terminal and you want one end-to-end path through `ds --tui`, quests, connectors, and cross-surface work.
-- [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md)
-  Read this when you want to run DeepScientist through MiniMax, GLM, Volcengine Ark, Alibaba Bailian, or another Codex profile.
-- [12 Guided Workflow Tour](./12_GUIDED_WORKFLOW_TOUR.md)
-  Follow the real product flow from landing page to workspace, step by step.
-- [02 Start Research Guide](./02_START_RESEARCH_GUIDE.md)
-  Read this next if you want to understand each field in the `Start Research` dialog and what it actually submits.
-
-## If you want to launch a project well
-
-- [02 Start Research Guide](./02_START_RESEARCH_GUIDE.md)
-  Explains the current frontend fields, derived contract fields, and practical examples.
-- [01 Settings Reference](./01_SETTINGS_REFERENCE.md)
-  Use this when you need to configure runners, connectors, runtime defaults, or home paths.
-- [11 License And Risk Notice](./11_LICENSE_AND_RISK.md)
-  Read this first if you care about the license boundary, server safety, fabricated outputs, connector leakage, and public exposure risk.
-
-## If you want to collaborate through external surfaces
-
-- [16 Telegram Connector Guide](./16_TELEGRAM_CONNECTOR_GUIDE.md)
-  Bind Telegram through the built-in polling runtime and continue quests from bot chats.
-- [17 WhatsApp Connector Guide](./17_WHATSAPP_CONNECTOR_GUIDE.md)
-  Bind WhatsApp through the local-session runtime and continue quests from local chat sessions.
-- [18 Feishu Connector Guide](./18_FEISHU_CONNECTOR_GUIDE.md)
-  Bind Feishu through the built-in long-connection runtime and continue quests from bot chats.
-- [10 Weixin Connector Guide](./10_WEIXIN_CONNECTOR_GUIDE.md)
-  Bind personal WeChat through DeepScientist's built-in QR login and iLink runtime.
-- [03 QQ Connector Guide](./03_QQ_CONNECTOR_GUIDE.md)
-  Use QQ as a practical collaboration surface for progress, commands, and milestone delivery.
-- [04 Lingzhu Connector Guide](./04_LINGZHU_CONNECTOR_GUIDE.md)
-  Bind Lingzhu / Rokid Glasses to DeepScientist.
-
-## If you want to understand how the system works
-
-- [13 Core Architecture Guide](./13_CORE_ARCHITECTURE_GUIDE.md)
-  Read this first if you want a user-facing overview of launcher, daemon, quests, Canvas, memory, and connectors.
-- [14 Prompt, Skills, and MCP Guide](./14_PROMPT_SKILLS_AND_MCP_GUIDE.md)
-  Read this when you want the real turn-time structure: prompt assembly order, stage skills, and built-in MCP tool families.
-- [06 Runtime and Canvas](./06_RUNTIME_AND_CANVAS.md)
-  Explains how the daemon, workspace, canvas, and connector views fit together.
-- [07 Memory and MCP](./07_MEMORY_AND_MCP.md)
-  Explains memory, artifacts, and built-in MCP behavior.
-
-## If something is broken
-
-- [09 Doctor](./09_DOCTOR.md)
-  Start here for diagnostics and common runtime problems.
-- [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md)
-  Check this if the problem is likely in your Codex profile, provider endpoint, API key, or model configuration.
-- [01 Settings Reference](./01_SETTINGS_REFERENCE.md)
-  Check this if the problem is likely caused by config, credentials, or connector setup.
-
-## If you are developing DeepScientist
+## Runtime Maintenance
 
 - [90 Architecture](./90_ARCHITECTURE.md)
   High-level system contracts and repository structure.
 - [91 Development](./91_DEVELOPMENT.md)
   Maintainer-facing workflow and implementation notes.
+- [09 Doctor](./09_DOCTOR.md)
+  Startup diagnostics and runtime repair.
+- [01 Settings Reference](./01_SETTINGS_REFERENCE.md)
+  Runtime configuration and environment settings.
+
+## Inherited Runtime Surfaces
+
+These documents still describe the underlying runtime behavior that this fork currently preserves:
+
+- [05 TUI Guide](./05_TUI_GUIDE.md)
+- [06 Runtime and Canvas](./06_RUNTIME_AND_CANVAS.md)
+- [07 Memory and MCP](./07_MEMORY_AND_MCP.md)
+- [13 Core Architecture Guide](./13_CORE_ARCHITECTURE_GUIDE.md)
+- [14 Prompt, Skills, and MCP Guide](./14_PROMPT_SKILLS_AND_MCP_GUIDE.md)
+
+## Connector Runtime Guides
+
+- [03 QQ Connector Guide](./03_QQ_CONNECTOR_GUIDE.md)
+- [04 Lingzhu Connector Guide](./04_LINGZHU_CONNECTOR_GUIDE.md)
+- [10 Weixin Connector Guide](./10_WEIXIN_CONNECTOR_GUIDE.md)
+- [16 Telegram Connector Guide](./16_TELEGRAM_CONNECTOR_GUIDE.md)
+- [17 WhatsApp Connector Guide](./17_WHATSAPP_CONNECTOR_GUIDE.md)
+- [18 Feishu Connector Guide](./18_FEISHU_CONNECTOR_GUIDE.md)
+
+## Note On Scope
+
+This repository is deliberately narrower than upstream `DeepScientist`.
+
+Its job is not to become a separate medical orchestration product. Its job is to provide a stable, auditable runtime layer so `MedAutoScience` does not have to continuously re-adapt to upstream compatibility drift.

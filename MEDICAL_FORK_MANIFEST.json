@@ -1,10 +1,11 @@
 {
   "schema_version": 1,
-  "engine_id": "medicaldeepscientist",
-  "engine_family": "MedicalDeepScientist",
+  "engine_id": "med-deepscientist",
+  "engine_family": "MedDeepScientist",
+  "is_controlled_fork": true,
   "freeze_mode": "thin_fork",
   "upstream_source": {
-    "repo_path": "/Users/gaofeng/workspace/DeepScientist",
+    "repo_url": "https://github.com/ResearAI/DeepScientist",
     "base_commit": "a7853fda3432d37f6dee91fa6e66330f564bd8be"
   },
   "compatibility_contract": {

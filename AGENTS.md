@@ -1,10 +1,10 @@
-# DeepScientist Repository Guide
+# med-deepscientist Repository Guide
 
 This `AGENTS.md` applies to the entire repository.
 
 ## Mission
 
-Build DeepScientist as a small, local-first research operating system that:
+Build `med-deepscientist` as a controlled DeepScientist-derived runtime that:
 
 - runs on the user's machine by default
 - installs cleanly through npm
@@ -13,7 +13,7 @@ Build DeepScientist as a small, local-first research operating system that:
 - stores durable state in files plus Git
 - supports a full research loop inside one quest workspace
 
-The target is a focused core runtime, not a large platform.
+The target is a focused runtime layer for `MedAutoScience`, not a large independent platform.
 
 ## Public Repository Rules
 
@@ -54,7 +54,7 @@ Do not add references to deleted or private local files.
 
 - The authoritative runtime lives under `src/deepscientist/`.
 - `bin/ds.js` remains a thin launcher over the Python daemon and built UI bundles.
-- The public npm package is release-oriented and should publish as `@researai/deepscientist`.
+- Compatibility package names such as `@researai/deepscientist` and the `ds` CLI may remain until downstream cutover is complete.
 - Public npm installs must ship prebuilt `src/ui/dist/` and `src/tui/dist/` bundles.
 - Do not rely on end-user `postinstall` builds for the public npm path.
 

@@ -1,18 +1,24 @@
-# MedicalDeepScientist Freeze Baseline
+# med-deepscientist Freeze Baseline
 
-- engine_family: `MedicalDeepScientist`
+- public_project_name: `med-deepscientist`
+- engine_id: `med-deepscientist`
+- engine_family: `MedDeepScientist`
+- compatibility_runtime_names: Python package `deepscientist`, CLI `ds`, npm package `@researai/deepscientist`
 - freeze_mode: `thin_fork`
-- upstream_repo_path: `/Users/gaofeng/workspace/DeepScientist`
+- upstream_repo: `https://github.com/ResearAI/DeepScientist`
 - upstream_base_commit: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
-- phase: `phase1_local_freeze`
+- phase: `phase1_runtime_freeze`
 - package_rename_applied: `false`
 - daemon_api_shape_preserved: `true`
 - quest_layout_preserved: `true`
 - worktree_layout_preserved: `true`
 
-This repository is a controlled local fork used to stabilize runtime truth before protocol convergence work begins in `MedAutoScience`.
+`med-deepscientist` is a controlled fork used as the stable runtime layer under `MedAutoScience`.
+It exists to preserve long-running quest execution, daemon compatibility, and auditable runtime behavior while upstream `DeepScientist` continues to evolve on its own cadence.
 
-## Applied Phase 1 Patch
+## Applied Patchset
+
+### Phase 1 runtime bugfix
 
 - commit: `d4994dba3ae1720a60daa7c80f5043f3722f32d8`
 - kind: `runtime_bugfix`
@@ -27,6 +33,6 @@ This repository is a controlled local fork used to stabilize runtime truth befor
   - `uv.lock`
 - regenerated_after_commit: `d4994dba3ae1720a60daa7c80f5043f3722f32d8`
 
-## Upstream Intake Policy
+## Intake Policy
 
 Future upstream absorption must follow the controlled intake procedure documented in [`docs/upstream_intake.md`](./upstream_intake.md).

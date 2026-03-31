@@ -1,6 +1,6 @@
 # Upstream Intake Guide
 
-This document defines how `MedicalDeepScientist` absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
+This document defines how `med-deepscientist` absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
 
 ## Core Rule
 
@@ -8,7 +8,7 @@ Upstream changes must enter through a dedicated intake worktree, pass fork-level
 
 ## Why This Exists
 
-`MedicalDeepScientist` is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
+`med-deepscientist` is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
 
 That means upstream changes are only useful when they satisfy all of these:
 
@@ -47,7 +47,7 @@ Do not perform intake work directly in the root checkout.
 Create a worktree:
 
 ```bash
-cd /Users/gaofeng/workspace/MedicalDeepScientist
+cd <med-deepscientist-root>
 git fetch upstream
 git worktree add .worktree/intake-2026-03-31-daemon-fix -b intake/2026-03-31-daemon-fix
 ```
@@ -57,7 +57,7 @@ git worktree add .worktree/intake-2026-03-31-daemon-fix -b intake/2026-03-31-dae
 Run the upgrade gate from `med-autoscience` first:
 
 ```bash
-cd /Users/gaofeng/workspace/med-autoscience
+cd <med-autoscience-root>
 PYTHONPATH=src python3 -m med_autoscience.cli deepscientist-upgrade-check --profile /path/to/profile.toml --refresh
 ```
 

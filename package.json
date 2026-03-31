@@ -1,7 +1,7 @@
 {
   "name": "@researai/deepscientist",
   "version": "1.5.15",
-  "description": "DeepScientist is not just a fully open-source autonomous scientific discovery system. It is also a research map that keeps growing from every round.",
+  "description": "Controlled DeepScientist-derived runtime fork for MedAutoScience compatibility and stable medical research execution.",
   "license": "Apache-2.0",
   "files": [
     "AGENTS.md",
