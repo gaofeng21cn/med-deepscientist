@@ -7,6 +7,8 @@
 - freeze_mode: `thin_fork`
 - upstream_repo: `https://github.com/ResearAI/DeepScientist`
 - upstream_base_commit: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
+- canonical_fork_remote: `origin -> git@github.com:gaofeng21cn/med-deepscientist.git`
+- canonical_upstream_remote: `upstream -> git@github.com:ResearAI/DeepScientist.git`
 - phase: `phase1_runtime_freeze`
 - package_rename_applied: `false`
 - daemon_api_shape_preserved: `true`
@@ -15,6 +17,12 @@
 
 `med-deepscientist` is a controlled fork used as the stable runtime layer under `MedAutoScience`.
 It exists to preserve long-running quest execution, daemon compatibility, and auditable runtime behavior while upstream `DeepScientist` continues to evolve on its own cadence.
+
+Remote semantics are explicit:
+
+- `origin` is the canonical `med-deepscientist` GitHub repository
+- `upstream` is the upstream `DeepScientist` repository used for intake comparison
+- controlled-fork upgrade checks compare against `upstream/main`, not against the fork's own `origin/main`
 
 ## Applied Patchset
 

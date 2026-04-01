@@ -8,6 +8,11 @@
     "repo_url": "https://github.com/ResearAI/DeepScientist",
     "base_commit": "a7853fda3432d37f6dee91fa6e66330f564bd8be"
   },
+  "upstream_tracking": {
+    "remote_name": "upstream",
+    "branch": "main",
+    "ref": "upstream/main"
+  },
   "compatibility_contract": {
     "package_rename_applied": false,
     "daemon_api_shape_preserved": true,

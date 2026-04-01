@@ -2,7 +2,7 @@
 
 `med-deepscientist` is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
 
-It exists for one reason: keep the long-running autonomous runtime that `MedAutoScience` depends on stable enough to operate as infrastructure, instead of re-paying compatibility cost every time upstream changes prompts, skills, workflow defaults, or runtime surfaces.
+It exists to preserve the long-running autonomous runtime that `MedAutoScience` depends on, because upstream changes in prompts, skills, workflow defaults, or runtime surfaces tend to trigger expensive compatibility work for medical workspaces. Freezing a known-good baseline and accepting only audited intake keeps that runtime truth stable while MedAutoScience converges on a narrower runtime protocol.
 
 This repository is not a hostile rewrite of DeepScientist. It is a thin, audited fork that:
 
@@ -64,6 +64,16 @@ This repository is responsible for keeping these boundaries explicit and auditab
 - controlled intake process for upstream absorption
 
 It is intentionally not trying to become a second full product strategy on top of upstream.
+
+## Sustained evolution
+
+MedAutoScience and `med-deepscientist` evolve together:
+
+- the runtime stays restrained by compatibility contracts and documented intake so that every patch carries verifiable value
+- the medical orchestration layer iterates on controllers, overlays, and policies while keeping the runtime view clear
+- valuable upstream improvements continue to flow in when they pass intake, regression, and audit checks rather than being swept in wholesale
+
+This dual track lets us keep improving the runtime while still absorbing useful upstream work without forcing downstream teams to constantly requalify their workspaces.
 
 ## Naming and compatibility policy
 

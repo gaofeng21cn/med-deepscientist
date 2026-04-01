@@ -6,6 +6,15 @@ This document defines how `med-deepscientist` absorbs upstream `DeepScientist` c
 
 Upstream changes must enter through a dedicated intake worktree, pass fork-level regression and `MedAutoScience` compatibility regression, then be recorded in the medical fork audit surface before they can reach `main`.
 
+## Remote Convention
+
+This repository treats remotes explicitly:
+
+- `origin`: canonical `med-deepscientist` GitHub repository
+- `upstream`: upstream `DeepScientist` repository used for intake comparison
+
+Do not overload `origin` to mean upstream. Controlled-fork auditing in `MedAutoScience` compares this repository against `upstream/main`.
+
 ## Why This Exists
 
 `med-deepscientist` is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
