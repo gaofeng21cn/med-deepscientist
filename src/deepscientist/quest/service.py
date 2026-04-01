@@ -1629,6 +1629,77 @@ class QuestService:
                 best_root = paper_root
         return best_root
 
+    @staticmethod
+    def _bibtex_entry_count(text: str) -> int:
+        if not text.strip():
+            return 0
+        return len(re.findall(r"(?m)^\s*@[A-Za-z0-9_-]+\s*\{", text))
+
+    def _paper_reference_materialization_payload(
+        self,
+        quest_root: Path,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        resolved_workspace_root = workspace_root or self.active_workspace_root(quest_root)
+        paper_root = self._best_paper_root(quest_root, resolved_workspace_root) or (resolved_workspace_root / "paper")
+
+        roots: list[Path] = []
+        seen_roots: set[str] = set()
+        for root in (resolved_workspace_root, quest_root, paper_root.parent):
+            key = str(root.resolve(strict=False))
+            if key in seen_roots:
+                continue
+            seen_roots.add(key)
+            roots.append(root)
+
+        references_path = paper_root / "references.bib"
+        bibliography_entry_count = 0
+        for root in roots:
+            candidate = root / "paper" / "references.bib"
+            if not candidate.exists():
+                continue
+            entry_count = self._bibtex_entry_count(read_text(candidate, ""))
+            if entry_count > bibliography_entry_count:
+                bibliography_entry_count = entry_count
+                references_path = candidate
+        bibliography_ready = bibliography_entry_count > 0
+
+        literature_record_count = 0
+        literature_record_paths: list[str] = []
+        literature_record_counts: dict[str, int] = {}
+        for label, relative in (
+            ("pubmed", "literature/pubmed/records.jsonl"),
+            ("imported", "literature/imported/records.jsonl"),
+        ):
+            best_path: Path | None = None
+            best_count = -1
+            for root in roots:
+                candidate = root / relative
+                if not candidate.exists():
+                    continue
+                count = len(read_jsonl(candidate))
+                if count > best_count:
+                    best_count = count
+                    best_path = candidate
+            normalized_count = max(best_count, 0)
+            literature_record_counts[label] = normalized_count
+            literature_record_count += normalized_count
+            if best_path is not None:
+                literature_record_paths.append(str(best_path))
+
+        literature_ready = literature_record_count > 0
+        reference_materialization_ready = bibliography_ready and literature_ready
+        return {
+            "reference_materialization_ready": reference_materialization_ready,
+            "bibliography_ready": bibliography_ready,
+            "bibliography_entry_count": bibliography_entry_count,
+            "references_path": str(references_path),
+            "literature_ready": literature_ready,
+            "literature_record_count": literature_record_count,
+            "literature_record_counts": literature_record_counts,
+            "literature_record_paths": literature_record_paths,
+        }
+
     def _outline_record_from_paper_root(self, paper_root: Path) -> dict[str, Any]:
         outline_root = paper_root / "outline"
         manifest_path = outline_root / "manifest.json"
@@ -2209,6 +2280,7 @@ class QuestService:
     def _paper_contract_health_payload(
         self,
         *,
+        quest_root: Path,
         paper_contract: dict[str, Any] | None,
         paper_evidence: dict[str, Any] | None,
         analysis_inventory: dict[str, Any] | None,
@@ -2308,8 +2380,13 @@ class QuestService:
                             }
                         )
 
+        reference_materialization = self._paper_reference_materialization_payload(
+            quest_root,
+            workspace_root=((Path(str((paper_contract or {}).get("workspace_root") or "").strip()) if str((paper_contract or {}).get("workspace_root") or "").strip() else None) or None),
+        )
+        reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and not blocking_pending_slices
+        writing_ready = contract_ok and not blocking_pending_slices and reference_materialization_ready
         draft_path = str((paper_contract.get("paths") or {}).get("draft") or "").strip()
         draft_status = str(active_line.get("draft_status") or "").strip() or ("present" if draft_path else "missing")
         bundle_status = str(active_line.get("bundle_status") or "").strip() or (
@@ -2347,6 +2424,9 @@ class QuestService:
         elif unresolved_required_items or blocking_pending_slices:
             recommended_next_stage = "analysis-campaign"
             recommended_action = "complete_required_supplementary"
+        elif not reference_materialization_ready:
+            recommended_next_stage = "write"
+            recommended_action = "materialize_reference_materials"
         elif draft_status != "present":
             recommended_next_stage = "write"
             recommended_action = "draft_paper"
@@ -2364,6 +2444,10 @@ class QuestService:
             blocking_reasons.append("required outline items are still unresolved")
         if blocking_pending_slices:
             blocking_reasons.append("main-text supplementary slices are still pending")
+        if not bool(reference_materialization.get("bibliography_ready")):
+            blocking_reasons.append("paper bibliography is missing or empty")
+        if not bool(reference_materialization.get("literature_ready")):
+            blocking_reasons.append("literature records have not been materialized")
 
         return {
             "paper_line_id": active_line_id,
@@ -2399,6 +2483,14 @@ class QuestService:
             "blocking_open_supplementary_count": len(blocking_pending_slices),
             "draft_status": draft_status,
             "bundle_status": bundle_status,
+            "reference_materialization_ready": reference_materialization_ready,
+            "bibliography_ready": bool(reference_materialization.get("bibliography_ready")),
+            "bibliography_entry_count": int(reference_materialization.get("bibliography_entry_count") or 0),
+            "references_path": str(reference_materialization.get("references_path") or "").strip() or None,
+            "literature_ready": bool(reference_materialization.get("literature_ready")),
+            "literature_record_count": int(reference_materialization.get("literature_record_count") or 0),
+            "literature_record_counts": dict(reference_materialization.get("literature_record_counts") or {}),
+            "literature_record_paths": list(reference_materialization.get("literature_record_paths") or []),
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
@@ -3106,6 +3198,7 @@ class QuestService:
             analysis_inventory=analysis_inventory,
         )
         paper_contract_health = self._paper_contract_health_payload(
+            quest_root=quest_root,
             paper_contract=paper_contract,
             paper_evidence=paper_evidence,
             analysis_inventory=analysis_inventory,

@@ -68,6 +68,39 @@ def _confirm_local_baseline(artifact: ArtifactService, quest_root: Path, baselin
     )
 
 
+def _materialize_reference_materials(quest_root: Path, paper_root: Path, *, workspace_root: Path | None = None) -> None:
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "references.bib").write_text(
+        "@article{demo2026, title={Demo Reference}}\n",
+        encoding="utf-8",
+    )
+    roots: list[Path] = [quest_root]
+    if workspace_root is not None:
+        roots.append(workspace_root)
+    elif paper_root.parent != quest_root:
+        roots.append(paper_root.parent)
+    seen: set[str] = set()
+    for root in roots:
+        key = str(root.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        literature_root = root / "literature" / "pubmed"
+        literature_root.mkdir(parents=True, exist_ok=True)
+        (literature_root / "records.jsonl").write_text(
+            json.dumps(
+                {
+                    "record_id": "pubmed-demo-001",
+                    "source": "pubmed",
+                    "title": "Demo Reference",
+                    "pmid": "40000001",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+
 def test_confirm_baseline_writes_metric_contract_json_and_exposes_path(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -1307,6 +1340,10 @@ def test_artifact_stage_milestones_emit_semantic_connector_messages(temp_home: P
         outline_id=candidate["outline_id"],
         selected_reason="This outline matches the main claim and the evidence plan.",
     )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%semantic\n")
     campaign = artifact.create_analysis_campaign(
         quest_root,
         campaign_title="Semantic analysis",
@@ -1373,22 +1410,56 @@ def test_artifact_stage_milestones_emit_semantic_connector_messages(temp_home: P
     )
 
     qq_records = read_jsonl(temp_home / "logs" / "connectors" / "qq" / "outbox.jsonl")
-    texts = [str(item.get("text") or "") for item in qq_records]
-    idea_text = next(text for text in texts if text.startswith(f"Idea `{idea['idea_id']}`"))
-    main_text = next(text for text in texts if text.startswith("Main experiment `semantic-main-001`"))
-    outline_text = next(text for text in texts if text.startswith("Paper outline `"))
-    analysis_text = next(
-        text
-        for text in texts
-        if text.startswith(f"Analysis campaign `{campaign['campaign_id']}` is complete.")
+    idea_record = next(
+        item
+        for item in qq_records
+        if any(
+            isinstance(attachment, dict) and attachment.get("kind") == "idea_submission"
+            for attachment in (item.get("attachments") or [])
+        )
     )
-    bundle_text = next(text for text in texts if text.startswith("Paper bundle `Semantic Paper`"))
+    main_record = next(
+        item
+        for item in qq_records
+        if any(
+            isinstance(attachment, dict) and attachment.get("kind") == "main_experiment_recorded"
+            for attachment in (item.get("attachments") or [])
+        )
+    )
+    outline_record = next(
+        item
+        for item in qq_records
+        if any(
+            isinstance(attachment, dict) and attachment.get("kind") == "paper_outline_selected"
+            for attachment in (item.get("attachments") or [])
+        )
+    )
+    analysis_record = next(
+        item
+        for item in qq_records
+        if any(
+            isinstance(attachment, dict) and attachment.get("kind") == "analysis_campaign_complete"
+            for attachment in (item.get("attachments") or [])
+        )
+    )
+    bundle_record = next(
+        item
+        for item in qq_records
+        if any(
+            isinstance(attachment, dict) and attachment.get("kind") == "paper_bundle"
+            for attachment in (item.get("attachments") or [])
+        )
+    )
+    idea_text = str(idea_record.get("text") or "")
+    main_text = str(main_record.get("text") or "")
+    outline_text = str(outline_record.get("text") or "")
+    analysis_text = str(analysis_record.get("text") or "")
+    bundle_text = str(bundle_record.get("text") or "")
 
-    assert "Problem:\nThe baseline saturates too early during the full evaluation sweep and leaves the hard examples unresolved." in idea_text
-    assert "This second paragraph must remain visible in the connector milestone" in idea_text
-    assert "Hypothesis:\nA compact adapter should preserve the gain while keeping the intervention auditable." in idea_text
-    assert "Mechanism:\nInsert a compact residual adapter in the main path and keep the rest of the protocol fixed." in idea_text
-    assert "…" not in idea_text
+    assert idea_text.startswith(f"新 idea：Semantic route（{idea['branch']}）")
+    assert "创新点：Insert a compact residual adapter in the main path and keep the rest of the protocol fixed." in idea_text
+    assert "相对 Current head `main`：" in idea_text
+    assert "下一步：Experiment" in idea_text
 
     assert "Outcome:\n- Metric: acc=0.87" in main_text
     assert "Evaluation summary:\n- Takeaway: The compact adapter improves the primary metric against the confirmed baseline under the full validation recipe." in main_text
@@ -1412,6 +1483,49 @@ def test_artifact_stage_milestones_emit_semantic_connector_messages(temp_home: P
     assert "- PDF: `paper/paper.pdf`" in bundle_text
     assert "Next route:\nFinalize the paper package, review the bundle artifacts, and publish or close the quest when ready." in bundle_text
     assert "…" not in bundle_text
+
+
+def test_select_paper_outline_syncs_status_and_summary_into_paper_workspace_and_quest_root(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper line sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Sync Outline",
+        detailed_outline={
+            "title": "Sync Outline",
+            "research_questions": ["RQ-sync"],
+            "experimental_designs": ["EXP-sync"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the sync outline into the managed paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    workspace_status = (paper_workspace / "status.md").read_text(encoding="utf-8")
+    workspace_summary = (paper_workspace / "SUMMARY.md").read_text(encoding="utf-8")
+    quest_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    quest_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert "Paper Line Status" in workspace_status
+    assert "Sync Outline" in workspace_status
+    assert "Reference Materialization" in workspace_status
+    assert "materialize_reference_materials" in workspace_status
+    assert "Paper Line Summary" in workspace_summary
+    assert "Sync Outline" in workspace_summary
+    assert "Quest created. Waiting for baseline setup or reuse." not in workspace_status
+    assert "No completed milestones yet." not in workspace_summary
+    assert workspace_status == quest_status
+    assert workspace_summary == quest_summary
 
 
 def test_stage_view_branch_node_routes_to_experiment_and_analysis_content(temp_home: Path) -> None:
@@ -1831,7 +1945,7 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     paper_root.mkdir(parents=True, exist_ok=True)
     (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
-    (paper_root / "references.bib").write_text("@article{demo, title={Demo}}\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
     write_json(paper_root / "build" / "compile_report.json", {"ok": True})
     (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
@@ -1908,7 +2022,7 @@ def test_submit_paper_bundle_can_prepare_open_source_when_enabled(temp_home: Pat
     paper_root.mkdir(parents=True, exist_ok=True)
     (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
-    (paper_root / "references.bib").write_text("@article{demo, title={Demo}}\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
     write_json(paper_root / "build" / "compile_report.json", {"ok": True})
     (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
@@ -1970,7 +2084,7 @@ def test_submit_paper_bundle_blocks_unmapped_completed_analysis(temp_home: Path)
     paper_root.mkdir(parents=True, exist_ok=True)
     (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
-    (paper_root / "references.bib").write_text("@article{demo, title={Demo}}\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
     write_json(paper_root / "build" / "compile_report.json", {"ok": True})
     (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
@@ -1999,6 +2113,53 @@ def test_submit_paper_bundle_blocks_unmapped_completed_analysis(temp_home: Path)
         )
 
     assert "unmapped" in str(exc_info.value)
+
+
+def test_submit_paper_bundle_blocks_missing_reference_materialization(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper bundle missing references quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Missing Reference Outline",
+        detailed_outline={
+            "title": "Missing Reference Outline",
+            "research_questions": ["RQ-ref"],
+            "experimental_designs": ["Exp-ref"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use the outline but require managed references first.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(paper_root / "build" / "compile_report.json", {"ok": True})
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
+
+    with pytest.raises(ValueError) as exc_info:
+        artifact.submit_paper_bundle(
+            quest_root,
+            title="Missing Reference Paper",
+            summary="This should be blocked by the managed reference gate.",
+            pdf_path="paper/paper.pdf",
+        )
+
+    assert "reference materialization is incomplete" in str(exc_info.value)
+    assert "paper bibliography is missing or empty" in str(exc_info.value)
+    assert "literature records have not been materialized" in str(exc_info.value)
 
 
 def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home: Path) -> None:
@@ -2046,7 +2207,7 @@ def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home:
     )
     (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
-    (paper_root / "references.bib").write_text("@article{demo, title={Demo}}\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
     write_json(
         paper_root / "build" / "compile_report.json",

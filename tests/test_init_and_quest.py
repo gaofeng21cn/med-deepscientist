@@ -13,6 +13,23 @@ from deepscientist.shared import ensure_dir, write_json, write_text
 from deepscientist.skills import SkillInstaller
 
 
+def _materialize_reference_materials(quest_root: Path, paper_root: Path) -> None:
+    write_text(paper_root / "references.bib", "@article{demo2026, title={Demo Reference}}\n")
+    literature_root = ensure_dir(quest_root / "literature" / "pubmed")
+    write_text(
+        literature_root / "records.jsonl",
+        json.dumps(
+            {
+                "record_id": "pubmed-demo-001",
+                "source": "pubmed",
+                "title": "Demo Reference",
+                "pmid": "40000001",
+            }
+        )
+        + "\n",
+    )
+
+
 def test_init_creates_required_files(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
@@ -268,6 +285,7 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     review_root = ensure_dir(paper_root / "review")
     write_json(review_root / "submission_checklist.json", {"blocking_items": []})
     write_text(paper_root / "draft.md", "# Draft\n")
+    _materialize_reference_materials(quest_root, paper_root)
     analysis_manifest_root = ensure_dir(quest_root / ".ds" / "analysis_campaigns")
     write_json(
         analysis_manifest_root / "analysis-test.json",
@@ -344,6 +362,60 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     assert refreshed["analysis_inventory"]["campaigns"][0]["slices"][0]["slice_id"] == "slice-a"
     assert refreshed["analysis_inventory"]["campaigns"][0]["slices"][0]["branch"] == "analysis/idea-001/analysis-test-slice-a"
     assert refreshed["analysis_inventory"]["campaigns"][0]["slices"][0]["mapped"] is True
+
+
+def test_snapshot_blocks_finalize_when_reference_materialization_is_missing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper materialization gate quest")
+    quest_root = Path(snapshot["quest_root"])
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Reference Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-reference-gate",
+            "paper_branch": "paper/reference-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Reference Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-03-28T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/reference-gate",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    write_text(paper_root / "draft.md", "# Draft\n")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["contract_ok"] is True
+    assert health["writing_ready"] is False
+    assert health["finalize_ready"] is False
+    assert health["reference_materialization_ready"] is False
+    assert health["bibliography_ready"] is False
+    assert health["literature_ready"] is False
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "materialize_reference_materials"
+    assert "paper bibliography is missing or empty" in health["blocking_reasons"]
+    assert "literature records have not been materialized" in health["blocking_reasons"]
 
 
 def test_auto_generated_quest_ids_initialize_from_existing_numeric_quests(temp_home: Path) -> None:

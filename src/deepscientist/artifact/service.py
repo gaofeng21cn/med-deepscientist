@@ -3248,6 +3248,11 @@ class ArtifactService:
         unmapped_completed_items = [
             dict(item) for item in (gate_status.get("unmapped_completed_items") or []) if isinstance(item, dict)
         ]
+        reference_materialization = self.quest_service._paper_reference_materialization_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
+        reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         normalized_pending_slices = max(0, int(pending_slices or 0))
         blocking_reasons: list[str] = []
         if unmapped_completed_items:
@@ -3256,6 +3261,10 @@ class ArtifactService:
             blocking_reasons.append("required outline items are still unresolved")
         if normalized_pending_slices > 0:
             blocking_reasons.append("paper-facing supplementary slices are still pending")
+        if not bool(reference_materialization.get("bibliography_ready")):
+            blocking_reasons.append("paper bibliography is missing or empty")
+        if not bool(reference_materialization.get("literature_ready")):
+            blocking_reasons.append("literature records have not been materialized")
 
         if unmapped_completed_items:
             recommended_next_stage = "write"
@@ -3263,12 +3272,15 @@ class ArtifactService:
         elif unresolved_required_items or normalized_pending_slices > 0:
             recommended_next_stage = "analysis-campaign"
             recommended_action = "complete_required_supplementary"
+        elif not reference_materialization_ready:
+            recommended_next_stage = "write"
+            recommended_action = "materialize_reference_materials"
         else:
             recommended_next_stage = "write"
             recommended_action = "continue_writing"
 
         contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and normalized_pending_slices == 0
+        writing_ready = contract_ok and normalized_pending_slices == 0 and reference_materialization_ready
         overall_status = str(submission_checklist.get("overall_status") or bundle_manifest.get("status") or "").strip().lower()
         delivered_at = str(
             bundle_manifest.get("paper_delivered_to_user_at")
@@ -3304,12 +3316,105 @@ class ArtifactService:
             "unresolved_required_count": len(unresolved_required_items),
             "unmapped_completed_count": len(unmapped_completed_items),
             "open_supplementary_count": normalized_pending_slices,
+            "reference_materialization_ready": reference_materialization_ready,
+            "bibliography_ready": bool(reference_materialization.get("bibliography_ready")),
+            "bibliography_entry_count": int(reference_materialization.get("bibliography_entry_count") or 0),
+            "references_path": str(reference_materialization.get("references_path") or "").strip() or None,
+            "literature_ready": bool(reference_materialization.get("literature_ready")),
+            "literature_record_count": int(reference_materialization.get("literature_record_count") or 0),
+            "literature_record_counts": dict(reference_materialization.get("literature_record_counts") or {}),
+            "literature_record_paths": list(reference_materialization.get("literature_record_paths") or []),
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
             "unresolved_required_items": unresolved_required_items[:12],
             "unmapped_completed_items": unmapped_completed_items[:12],
         }
+
+    @staticmethod
+    def _paper_line_state_label(value: bool) -> str:
+        return "ready" if value else "blocked"
+
+    def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
+        blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        lines = [
+            "# Status",
+            "",
+            (
+                "Paper Line Status: "
+                f"`{str(payload.get('recommended_next_stage') or 'write').strip() or 'write'}` / "
+                f"`{str(payload.get('recommended_action') or 'continue').strip() or 'continue'}` on "
+                f"`{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`."
+            ),
+            "",
+            f"- Updated at: {str(payload.get('updated_at') or '').strip() or 'unknown'}",
+            f"- Paper Line ID: `{str(payload.get('paper_line_id') or 'unknown').strip() or 'unknown'}`",
+            f"- Paper Branch: `{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`",
+            f"- Title: {str(payload.get('title') or 'Not recorded').strip() or 'Not recorded'}",
+            f"- Selected Outline: `{str(payload.get('selected_outline_ref') or 'none').strip() or 'none'}`",
+            f"- Contract: `{self._paper_line_state_label(bool(payload.get('contract_ok')) )}`",
+            f"- Reference Materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
+            f"- Writing Readiness: `{self._paper_line_state_label(bool(payload.get('writing_ready')) )}`",
+            f"- Finalize Readiness: `{self._paper_line_state_label(bool(payload.get('finalize_ready')) )}`",
+            f"- Draft: `{str(payload.get('draft_status') or 'missing').strip() or 'missing'}`",
+            f"- Bundle: `{str(payload.get('bundle_status') or 'missing').strip() or 'missing'}`",
+            f"- Required Items Ready: `{int(payload.get('ready_required_count') or 0)}/{int(payload.get('required_count') or 0)}`",
+            f"- Sections Ready: `{int(payload.get('ready_section_count') or 0)}/{int(payload.get('section_count') or 0)}`",
+            f"- Supplementary Pending: `{int(payload.get('open_supplementary_count') or 0)}`",
+            f"- Bibliography Entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
+            f"- Literature Records: `{int(payload.get('literature_record_count') or 0)}`",
+            f"- Recommended Next Stage: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}`",
+            f"- Recommended Action: `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            "",
+            "## Blocking Reasons",
+            "",
+        ]
+        if blocking_reasons:
+            lines.extend(f"- {item}" for item in blocking_reasons)
+        else:
+            lines.append("- none")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _render_paper_line_summary_markdown(self, payload: dict[str, Any]) -> str:
+        blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        lines = [
+            "# Summary",
+            "",
+            (
+                "Paper Line Summary: "
+                f"{str(payload.get('title') or 'Untitled paper line').strip() or 'Untitled paper line'} on "
+                f"`{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`."
+            ),
+            "",
+            f"- Writing readiness: `{self._paper_line_state_label(bool(payload.get('writing_ready')) )}`",
+            f"- Finalize readiness: `{self._paper_line_state_label(bool(payload.get('finalize_ready')) )}`",
+            f"- Reference materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
+            f"- Bibliography entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
+            f"- Literature records: `{int(payload.get('literature_record_count') or 0)}`",
+            f"- Next step: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}` / `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            "",
+            "## Current Blockers",
+            "",
+        ]
+        if blocking_reasons:
+            lines.extend(f"- {item}" for item in blocking_reasons)
+        else:
+            lines.append("- none")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _write_paper_line_sync_documents(
+        self,
+        quest_root: Path,
+        payload: dict[str, Any],
+        *,
+        workspace_root: Path | None = None,
+    ) -> None:
+        status_text = self._render_paper_line_status_markdown(payload)
+        summary_text = self._render_paper_line_summary_markdown(payload)
+        for paper_sync_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
+            workspace_sync_root = paper_sync_root.parent
+            write_text(workspace_sync_root / "status.md", status_text)
+            write_text(workspace_sync_root / "SUMMARY.md", summary_text)
 
     def _write_paper_line_state(
         self,
@@ -3399,10 +3504,19 @@ class ArtifactService:
             "recommended_action": str(health.get("recommended_action") or "").strip() or None,
             "draft_status": "present" if draft_path.exists() else "missing",
             "bundle_status": "present" if bundle_path.exists() else "missing",
+            "reference_materialization_ready": bool(health.get("reference_materialization_ready")),
+            "bibliography_ready": bool(health.get("bibliography_ready")),
+            "bibliography_entry_count": int(health.get("bibliography_entry_count") or 0),
+            "references_path": str(health.get("references_path") or "").strip() or None,
+            "literature_ready": bool(health.get("literature_ready")),
+            "literature_record_count": int(health.get("literature_record_count") or 0),
+            "literature_record_counts": dict(health.get("literature_record_counts") or {}),
+            "literature_record_paths": list(health.get("literature_record_paths") or []),
             "updated_at": utc_now(),
         }
         for paper_sync_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
             write_json(paper_sync_root / "paper_line_state.json", payload)
+        self._write_paper_line_sync_documents(quest_root, payload, workspace_root=workspace_root)
         return payload
 
     def _active_baseline_attachment(self, quest_root: Path, workspace_root: Path | None = None) -> dict[str, Any] | None:
@@ -5120,6 +5234,7 @@ class ArtifactService:
                 "paper_lines": paper_lines,
             }
         payload = self.quest_service._paper_contract_health_payload(
+            quest_root=quest_root,
             paper_contract=paper_contract,
             paper_evidence=paper_evidence,
             analysis_inventory=analysis_inventory,
@@ -8905,6 +9020,21 @@ class ArtifactService:
                 )
             raise ValueError(
                 "submit_paper_bundle blocked because the paper evidence contract is incomplete: "
+                + "; ".join(problems)
+                + "."
+            )
+        reference_materialization = self.quest_service._paper_reference_materialization_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
+        if not bool(reference_materialization.get("reference_materialization_ready")):
+            problems: list[str] = []
+            if not bool(reference_materialization.get("bibliography_ready")):
+                problems.append("paper bibliography is missing or empty")
+            if not bool(reference_materialization.get("literature_ready")):
+                problems.append("literature records have not been materialized")
+            raise ValueError(
+                "submit_paper_bundle blocked because reference materialization is incomplete: "
                 + "; ".join(problems)
                 + "."
             )
