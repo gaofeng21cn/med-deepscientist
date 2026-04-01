@@ -10,7 +10,7 @@ This audit records the first controlled intake split for MedDeepScientist agains
 - merge_base: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
 - rev_list_main_vs_upstream: `ahead=6, behind=7`
 - audit_status: `classified`
-- execution_status: `batch_a_pending_intake_worktree`
+- execution_status: `intake_worktree_created_blocked_by_preexisting_baseline_failure`
 
 ## Evidence
 
@@ -74,3 +74,23 @@ These commits should not be imported as new work.
 ## Next Action
 
 Create a dedicated intake worktree and execute `bf97bfb` with fork regression plus MedAutoScience compatibility regression. Revisit `1865fa5` only as a separate feature-evaluation intake after the runtime-stability line is proven clean.
+
+## Current Blocker
+
+An intake worktree has already been created at:
+
+```text
+/Users/gaofeng/workspace/med-deepscientist/.worktree/intake-2026-04-01-bootstrap-routing
+```
+
+No upstream commit has been cherry-picked yet. Baseline verification in that clean worktree exposed a pre-existing failure before intake started:
+
+```bash
+rtk uv run pytest tests/test_daemon_api.py tests/test_prompt_builder.py -x -vv
+```
+
+Observed blocker:
+
+- failing test: `tests/test_daemon_api.py::test_bash_exec_handlers_expose_sessions_logs_and_stop`
+- reproduced on intake worktree before any cherry-pick
+- reproduced again on repository `main`, confirming that this is a baseline issue rather than an intake regression
