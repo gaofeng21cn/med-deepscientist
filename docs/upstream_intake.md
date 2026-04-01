@@ -1,23 +1,27 @@
 # Upstream Intake Guide
 
-This document defines how `med-deepscientist` absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
+This document defines how MedDeepScientist (`med-deepscientist` 仓库) absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
 
 ## Core Rule
 
 Upstream changes must enter through a dedicated intake worktree, pass fork-level regression and `MedAutoScience` compatibility regression, then be recorded in the medical fork audit surface before they can reach `main`.
 
+## Active Intake Audits
+
+- [`docs/upstream_intake_round_2026_04_01.md`](./upstream_intake_round_2026_04_01.md): first audited upstream intake split for the current `behind_count=7` gap against `upstream/main`
+
 ## Remote Convention
 
 This repository treats remotes explicitly:
 
-- `origin`: canonical `med-deepscientist` GitHub repository
+- `origin`: canonical MedDeepScientist (`med-deepscientist`) GitHub repository
 - `upstream`: upstream `DeepScientist` repository used for intake comparison
 
 Do not overload `origin` to mean upstream. Controlled-fork auditing in `MedAutoScience` compares this repository against `upstream/main`.
 
 ## Why This Exists
 
-`med-deepscientist` is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
+MedDeepScientist (`med-deepscientist` 仓库) is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
 
 That means upstream changes are only useful when they satisfy all of these:
 

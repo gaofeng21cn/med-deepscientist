@@ -1,6 +1,6 @@
-# med-deepscientist 文档总览
+# MedDeepScientist 文档总览
 
-`med-deepscientist` 是 `MedAutoScience` 依赖的受控 runtime fork。
+MedDeepScientist（`med-deepscientist` 仓库）是 `MedAutoScience` 依赖的受控 runtime fork。
 
 这个仓库定位为一个目的清晰的半独立 runtime layer：它锁定一个已经验证的 baseline，并通过受控 intake 去吸收符合兼容契约的上游改动，从而避免每次 `DeepScientist` 的 prompt、skill、workflow 或 runtime 变动都变成医疗研究者的迁移负担。
 
@@ -66,4 +66,4 @@
 - 为 `MedAutoScience` 降低上游兼容性漂移成本
 - 通过受控 intake 吸收有价值的上游改动
 
-在架构上，`MedAutoScience` 仍然是人类与 Agent 进入的主入口；`med-deepscientist` 则是由 MedAutoScience 管理的 runtime 工程面，持续优化同时保持兼容。
+在架构上，`MedAutoScience` 仍然是人类与 Agent 进入的主入口；MedDeepScientist（`med-deepscientist` 仓库）则是由 MedAutoScience 管理的 runtime 工程面，持续优化同时保持兼容。

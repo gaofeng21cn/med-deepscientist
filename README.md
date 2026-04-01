@@ -1,6 +1,6 @@
-# med-deepscientist
+# MedDeepScientist
 
-`med-deepscientist` is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
+MedDeepScientist (`med-deepscientist` 仓库) is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
 
 It exists to preserve the long-running autonomous runtime that `MedAutoScience` depends on, because upstream changes in prompts, skills, workflow defaults, or runtime surfaces tend to trigger expensive compatibility work for medical workspaces. Freezing a known-good baseline and accepting only audited intake keeps that runtime truth stable while MedAutoScience converges on a narrower runtime protocol.
 
@@ -29,12 +29,12 @@ For a medical research operating layer, that creates unnecessary cost:
 - runtime/layout changes can invalidate controller expectations
 - undocumented workflow drift can turn a normal upgrade into a migration project
 
-`med-deepscientist` exists to cap that cost.
+MedDeepScientist exists to cap that cost.
 
 ## Relationship to the rest of the stack
 
 - `DeepScientist`: upstream source of runtime capability and future improvements
-- `med-deepscientist`: controlled runtime fork used as the stable execution engine
+- Repository `med-deepscientist`: controlled runtime fork used as the stable execution engine
 - `MedAutoScience`: medical orchestration layer, policy layer, controller layer, and public entrypoint
 
 For medical workflows, humans and agents should enter through `MedAutoScience`, not through legacy DeepScientist entrypoints directly.
@@ -48,7 +48,7 @@ MedAutoScience
         ->
 runtime_protocol / runtime_transport
         ->
-med-deepscientist
+MedDeepScientist (`med-deepscientist` 仓库)
         ->
 quest runtime / daemon / worktrees
 ```
@@ -67,7 +67,7 @@ It is intentionally not trying to become a second full product strategy on top o
 
 ## Sustained evolution
 
-MedAutoScience and `med-deepscientist` evolve together:
+MedAutoScience and MedDeepScientist evolve together:
 
 - the runtime stays restrained by compatibility contracts and documented intake so that every patch carries verifiable value
 - the medical orchestration layer iterates on controllers, overlays, and policies while keeping the runtime view clear
@@ -77,7 +77,7 @@ This dual track lets us keep improving the runtime while still absorbing useful 
 
 ## Naming and compatibility policy
 
-The public project name is now `med-deepscientist`.
+The public project name is now `MedDeepScientist` (repository `med-deepscientist`).
 
 To avoid breaking active integrations too early, several internal compatibility shells remain in place for now:
 
@@ -127,7 +127,7 @@ See:
 ### Phase 3
 
 - retire unnecessary legacy coupling
-- make the public identity fully consistent with `med-deepscientist`
+- make the public identity fully consistent with MedDeepScientist
 - keep upstream intake sustainable instead of ad hoc
 
 ## Documentation

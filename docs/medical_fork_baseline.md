@@ -1,6 +1,6 @@
-# med-deepscientist Freeze Baseline
+# MedDeepScientist Freeze Baseline
 
-- public_project_name: `med-deepscientist`
+- public_project_name: `MedDeepScientist`
 - engine_id: `med-deepscientist`
 - engine_family: `MedDeepScientist`
 - compatibility_runtime_names: Python package `deepscientist`, CLI `ds`, npm package `@researai/deepscientist`
@@ -15,12 +15,12 @@
 - quest_layout_preserved: `true`
 - worktree_layout_preserved: `true`
 
-`med-deepscientist` is a controlled fork used as the stable runtime layer under `MedAutoScience`.
+MedDeepScientist (`med-deepscientist` 仓库) is a controlled fork used as the stable runtime layer under `MedAutoScience`.
 It exists to preserve long-running quest execution, daemon compatibility, and auditable runtime behavior while upstream `DeepScientist` continues to evolve on its own cadence.
 
 Remote semantics are explicit:
 
-- `origin` is the canonical `med-deepscientist` GitHub repository
+- `origin` is the canonical MedDeepScientist (`med-deepscientist`) GitHub repository
 - `upstream` is the upstream `DeepScientist` repository used for intake comparison
 - controlled-fork upgrade checks compare against `upstream/main`, not against the fork's own `origin/main`
 
