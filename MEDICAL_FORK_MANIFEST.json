@@ -24,6 +24,11 @@
       "commit": "d4994dba3ae1720a60daa7c80f5043f3722f32d8",
       "kind": "runtime_bugfix",
       "summary": "Fix worktree document asset resolution"
+    },
+    {
+      "commit": "bf97bfbf3fa4119924b10e2ff2c9edabece0b402",
+      "kind": "runtime_bugfix",
+      "summary": "stabilize stage routing for bootstrap quests"
     }
   ],
   "lock_policy": {

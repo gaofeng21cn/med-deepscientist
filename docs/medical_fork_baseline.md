@@ -33,6 +33,15 @@ Remote semantics are explicit:
 - reason: `document_asset` must resolve path documents from the active worktree so Web App previews for PNG / SVG / PDF remain correct.
 - verification: `PYTHONPATH=src pytest -q tests/test_daemon_api.py -k 'document_asset_resolves_path_documents_from_active_worktree'`
 
+### Round 1 upstream intake runtime bugfix
+
+- commit: `bf97bfbf3fa4119924b10e2ff2c9edabece0b402`
+- kind: `runtime_bugfix`
+- reason: bootstrap quests must not be misclassified as direct questions, and stage routing must not enter `experiment` before a durable `idea` or `optimize` anchor exists.
+- verification:
+  - `rtk uv run pytest -q tests/test_daemon_api.py -k 'classify_turn_intent_prefers_continue_stage_for_structured_bootstrap or turn_skill_for_rejects_experiment_without_durable_idea_in_algorithm_first or turn_skill_for_rejects_experiment_without_durable_idea_in_paper_mode'`
+  - `rtk uv run pytest -q tests/test_prompt_builder.py -k 'does_not_misclassify_structured_bootstrap_as_direct_question'`
+
 ## Lock Policy
 
 - mode: `regenerate_in_fork`

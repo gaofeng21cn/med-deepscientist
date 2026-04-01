@@ -4353,7 +4353,11 @@ def test_daemon_auto_continue_routes_into_review_companion_skill_after_decision_
     app = DaemonApp(temp_home)
     quest = app.quest_service.create("review continuation quest")
     quest_id = quest["quest_id"]
-    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.update_baseline_state(
+        Path(quest["quest_root"]),
+        baseline_gate="confirmed",
+        active_anchor="write",
+    )
 
     class ReviewRouteRunner:
         binary = ""

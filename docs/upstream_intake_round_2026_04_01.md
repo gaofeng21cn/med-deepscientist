@@ -9,8 +9,8 @@ This audit records the first controlled intake split for MedDeepScientist agains
 - comparison_ref: `upstream/main`
 - merge_base: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
 - rev_list_main_vs_upstream: `ahead=6, behind=7`
-- audit_status: `classified`
-- execution_status: `intake_worktree_created_blocked_by_preexisting_baseline_failure`
+- audit_status: `classified_and_executed`
+- execution_status: `round1_absorbed_bf97bfb`
 
 ## Evidence
 
@@ -71,11 +71,7 @@ These commits should not be imported as new work.
    - type: `merge_commit`
    - rationale: merge wrapper for the already-absorbed document-asset fix, not an intake unit by itself.
 
-## Next Action
-
-Create a dedicated intake worktree and execute `bf97bfb` with fork regression plus MedAutoScience compatibility regression. Revisit `1865fa5` only as a separate feature-evaluation intake after the runtime-stability line is proven clean.
-
-## Current Blocker
+## Execution Result
 
 An intake worktree has already been created at:
 
@@ -83,7 +79,7 @@ An intake worktree has already been created at:
 /Users/gaofeng/workspace/med-deepscientist/.worktree/intake-2026-04-01-bootstrap-routing
 ```
 
-No upstream commit has been cherry-picked yet. Baseline verification in that clean worktree exposed a pre-existing failure before intake started:
+Before intake started, baseline verification in that clean worktree exposed a pre-existing failure:
 
 ```bash
 rtk uv run pytest tests/test_daemon_api.py tests/test_prompt_builder.py -x -vv
@@ -94,3 +90,40 @@ Observed blocker:
 - failing test: `tests/test_daemon_api.py::test_bash_exec_handlers_expose_sessions_logs_and_stop`
 - reproduced on intake worktree before any cherry-pick
 - reproduced again on repository `main`, confirming that this is a baseline issue rather than an intake regression
+
+That baseline issue was fixed on `main` first as part of local runtime stabilization. The intake worktree was then fast-forwarded to the repaired `main`, and round 1 absorbed:
+
+1. upstream commit: `bf97bfbf3fa4119924b10e2ff2c9edabece0b402`
+   - intake commit: `1602d9a460782e388fd3611ea458ca9b805e44bc`
+   - decision: `absorbed`
+   - result: bootstrap messages now remain on the stage-execution path, and `experiment` is stage-gated behind durable `idea` or `optimize` prerequisites.
+
+## Verification
+
+The absorbed patch was verified on the intake worktree with:
+
+```bash
+rtk uv run pytest -q tests/test_daemon_api.py
+rtk uv run pytest -q tests/test_prompt_builder.py
+```
+
+Targeted coverage added or exercised by this round includes:
+
+- structured bootstrap payloads stay classified as `continue_stage`
+- prompt builder does not misclassify bootstrap requests as direct questions
+- auto-continue cannot route into `experiment` without a durable `idea` in paper mode
+- algorithm-first quests without a durable `idea` route to `optimize` instead of `experiment`
+
+## Remaining Deferred Intake
+
+Round 1 is complete for the stability target. Remaining upstream items keep their prior classification:
+
+- `1865fa5e608e5ccc0f9b92ba72fc770791538847` stays `defer_feature`
+- `4bff80151d9fa067672f47370f1fdd04fd54c91a` stays `reject_docs`
+- `3f3491759c1c931fbce3c3c08f0f60120ff5c127` stays `reject_docs`
+- `634b1fd` stays `reject_merge_wrapper`
+- `be424ed` stays `reject_merge_wrapper`
+
+## Next Action
+
+Merge `codex/intake-2026-04-01-bootstrap-routing` back to `main`, then treat `1865fa5` as a separate feature-evaluation intake only after the runtime line remains stable under real MedAutoScience workloads.
