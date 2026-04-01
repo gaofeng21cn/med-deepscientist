@@ -1309,3 +1309,33 @@ Mandatory Working Rules
 
     assert "turn_intent: continue_stage" in prompt
     assert "turn_mode: stage_execution" in prompt
+
+
+def test_prompt_builder_next_required_step_tracks_gated_optimize_route(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+    quest_root = Path(snapshot["quest_root"])
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+        active_anchor="experiment",
+    )
+    service.update_startup_context(
+        quest_root,
+        startup_contract={"need_research_paper": False},
+    )
+    service.update_research_state(
+        quest_root,
+        active_idea_id=None,
+    )
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="optimize",
+        user_message="",
+        model="gpt-5.4",
+        turn_reason="auto_continue",
+    )
+
+    assert "next_required_step: Continue the optimization loop" in prompt
+    assert "next_required_step: Continue the main experiment workflow" not in prompt

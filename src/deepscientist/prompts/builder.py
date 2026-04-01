@@ -92,7 +92,9 @@ def classify_turn_intent(user_message: str) -> str:
         "mandatory working rules",
     )
     structured_hit_count = sum(1 for marker in structured_bootstrap_markers if marker in normalized)
-    if structured_hit_count >= 2:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    has_structured_bootstrap_shape = len(lines) >= 4 and any(line.startswith("-") for line in lines)
+    if structured_hit_count >= 2 and has_structured_bootstrap_shape:
         return "continue_stage"
     if normalized.startswith("/new ") or normalized.startswith("/new\n"):
         return "continue_stage"
@@ -103,6 +105,37 @@ def classify_turn_intent(user_message: str) -> str:
     if any(marker in normalized for marker in command_markers):
         return "execute_user_command_first"
     return "continue_stage"
+
+
+def gate_stage_skill(snapshot: dict, candidate_skill: str) -> str:
+    skill = str(candidate_skill or "").strip()
+    baseline_gate = str(snapshot.get("baseline_gate") or "pending").strip().lower() or "pending"
+    startup_contract = snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else {}
+    custom_profile = str(startup_contract.get("custom_profile") or "").strip()
+    raw_need_research_paper = startup_contract.get("need_research_paper")
+    need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
+    active_idea_id = str(snapshot.get("active_idea_id") or "").strip()
+
+    if baseline_gate == "pending" and skill in {
+        "idea",
+        "optimize",
+        "experiment",
+        "analysis-campaign",
+        "write",
+        "review",
+        "rebuttal",
+        "finalize",
+    }:
+        if skill == "review" and custom_profile == "review_audit":
+            return skill
+        if skill == "rebuttal" and custom_profile == "revision_rebuttal":
+            return skill
+        return "baseline"
+
+    if skill == "experiment" and not active_idea_id:
+        return "idea" if need_research_paper else "optimize"
+
+    return skill
 
 
 class PromptBuilder:
@@ -540,6 +573,7 @@ class PromptBuilder:
         active_anchor = str(snapshot.get("active_anchor") or "decision").strip() or "decision"
         if continuation_anchor:
             active_anchor = continuation_anchor
+        active_anchor = gate_stage_skill(snapshot, active_anchor)
         active_idea_id = str(snapshot.get("active_idea_id") or "").strip()
         next_slice_id = str(snapshot.get("next_pending_slice_id") or "").strip()
         active_campaign_id = str(snapshot.get("active_analysis_campaign_id") or "").strip()
@@ -564,6 +598,10 @@ class PromptBuilder:
             return "Continue the analysis campaign from the current recorded slices and campaign state."
         if active_anchor == "write":
             return "Continue drafting or evidence-backed revision from the selected outline, draft, and paper state."
+        if active_anchor == "review":
+            return "Continue the review audit from the current draft, review materials, and durable audit findings."
+        if active_anchor == "rebuttal":
+            return "Continue the rebuttal workflow from the reviewer comments, paper state, and durable response plan."
         if active_anchor == "finalize":
             return "Continue final consolidation, summary, and closure checks without ending the quest early."
         return "Continue the current quest from the latest durable state instead of stopping early."

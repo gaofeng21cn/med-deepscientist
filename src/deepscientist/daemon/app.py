@@ -69,7 +69,7 @@ from ..connector.lingzhu_support import (
     lingzhu_verify_auth_header,
 )
 from ..prompts import PromptBuilder
-from ..prompts.builder import CONTINUATION_SKILLS, STANDARD_SKILLS, classify_turn_intent
+from ..prompts.builder import CONTINUATION_SKILLS, STANDARD_SKILLS, classify_turn_intent, gate_stage_skill
 from ..connector.qq_profiles import list_qq_profiles, merge_qq_profile_config, normalize_qq_connector_config
 from ..quest import QuestService
 from ..runners import CodexRunner, RunRequest, get_runner_factory, register_builtin_runners
@@ -2430,23 +2430,7 @@ class DaemonApp:
 
     @staticmethod
     def _turn_skill_stage_gate(snapshot: dict, candidate_skill: str) -> str:
-        skill = str(candidate_skill or "").strip()
-        baseline_gate = str(snapshot.get("baseline_gate") or "pending").strip().lower() or "pending"
-        startup_contract = snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else {}
-        raw_need_research_paper = startup_contract.get("need_research_paper")
-        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
-        active_idea_id = str(snapshot.get("active_idea_id") or "").strip()
-
-        if (
-            baseline_gate == "pending"
-            and skill in {"idea", "optimize", "experiment", "analysis-campaign", "write", "review", "rebuttal", "finalize"}
-        ):
-            return "baseline"
-
-        if skill == "experiment" and not active_idea_id:
-            return "idea" if need_research_paper else "optimize"
-
-        return skill
+        return gate_stage_skill(snapshot, candidate_skill)
 
     @staticmethod
     def _turn_skill_for(

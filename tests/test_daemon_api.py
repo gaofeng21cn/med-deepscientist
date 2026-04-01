@@ -255,6 +255,17 @@ Mandatory Working Rules
     assert classify_turn_intent(message) == "continue_stage"
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "What is the difference between research goals and launch mode?",
+        "Where should I put baseline context and reference papers?",
+    ],
+)
+def test_classify_turn_intent_keeps_bootstrap_questions_as_questions(message: str) -> None:
+    assert classify_turn_intent(message) == "answer_user_question_first"
+
+
 def test_turn_skill_for_rejects_experiment_without_durable_idea_in_algorithm_first() -> None:
     snapshot = {
         "active_anchor": "experiment",
@@ -279,6 +290,32 @@ def test_turn_skill_for_rejects_experiment_without_durable_idea_in_paper_mode() 
     }
 
     assert DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution") == "idea"
+
+
+@pytest.mark.parametrize(
+    ("custom_profile", "continuation_anchor"),
+    [
+        ("review_audit", "review"),
+        ("revision_rebuttal", "rebuttal"),
+    ],
+)
+def test_turn_skill_for_allows_custom_review_entry_before_baseline_confirmation(
+    custom_profile: str,
+    continuation_anchor: str,
+) -> None:
+    snapshot = {
+        "active_anchor": "write",
+        "continuation_anchor": continuation_anchor,
+        "baseline_gate": "pending",
+        "startup_contract": {
+            "custom_profile": custom_profile,
+        },
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution")
+        == continuation_anchor
+    )
 
 
 def _wait_for_json(url: str, *, timeout: float = 10.0) -> dict | list:
