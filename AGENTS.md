@@ -15,6 +15,14 @@ Build `med-deepscientist` as a controlled DeepScientist-derived runtime that:
 
 The target is a focused runtime layer for `MedAutoScience`, not a large independent platform.
 
+## Priority Order
+
+- First priority: improve `MedAutoScience -> MedDeepScientist` compatibility so this repository can serve as the default stable runtime with a narrower, more explicit runtime protocol.
+- Second priority: reduce unnecessary adapter debt, implicit layout assumptions, and duplicated runtime interpretation across the stack.
+- Third priority: selectively absorb upstream `DeepScientist` changes when they have clear runtime value.
+
+Do not treat upstream intake as the main development stream. Most upstream commits should be ignored. Intake is periodic and value-driven, not a requirement to study every new upstream commit individually.
+
 ## Public Repository Rules
 
 - Do not commit local workstation-specific absolute paths.

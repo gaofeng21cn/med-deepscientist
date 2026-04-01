@@ -6,6 +6,8 @@ This document defines how MedDeepScientist (`med-deepscientist` 仓库) absorbs 
 
 Upstream changes must enter through a dedicated intake worktree, pass fork-level regression and `MedAutoScience` compatibility regression, then be recorded in the medical fork audit surface before they can reach `main`.
 
+This workflow exists to filter occasional upstream changes. It is not the primary development loop for this repository.
+
 ## Active Intake Audits
 
 - [`docs/upstream_intake_round_2026_04_01.md`](./upstream_intake_round_2026_04_01.md): first audited upstream intake split for the current `behind_count=7` gap against `upstream/main`
@@ -28,6 +30,23 @@ That means upstream changes are only useful when they satisfy all of these:
 - they solve a real runtime problem we care about
 - they preserve the compatibility contract that `MedAutoScience` depends on
 - they leave a durable audit trail in this repository
+
+## Intake Cadence
+
+Do not inspect upstream commit-by-commit just because `upstream/main` moved.
+
+By default, upstream intake should happen only when at least one of these is true:
+
+- a concrete upstream runtime fix appears likely to reduce real compatibility cost
+- a maintainer explicitly starts a periodic upstream review round
+- a specific upstream PR / commit bundle has already been identified as valuable
+- a local bug or migration blocker points to a bounded upstream fix worth absorbing
+
+The main delivery stream remains:
+
+- improving `MedAutoScience -> MedDeepScientist` compatibility
+- converging the runtime protocol and transport boundary
+- reducing adapter and layout coupling
 
 ## Intake Policy
 
@@ -82,6 +101,7 @@ This separates:
 ### 3. Select specific upstream commits
 
 Do not bulk-sync an arbitrary upstream window.
+Do not treat every new upstream commit as an intake candidate worth detailed study.
 
 Record for each candidate:
 

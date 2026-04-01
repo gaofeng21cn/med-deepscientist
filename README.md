@@ -4,6 +4,8 @@ MedDeepScientist (`med-deepscientist` repo) is a controlled runtime fork of [Dee
 
 It exists to preserve the long-running autonomous runtime that `MedAutoScience` depends on, because upstream changes in prompts, skills, workflow defaults, or runtime surfaces tend to trigger expensive compatibility work for medical workspaces. Freezing a known-good baseline and accepting only audited intake keeps that runtime truth stable while MedAutoScience converges on a narrower runtime protocol.
 
+The primary engineering priority is not to follow upstream continuously. The primary engineering priority is to make `MedDeepScientist` a cleaner, narrower, and more stable runtime for `MedAutoScience`, so the medical stack can reduce adapter debt and rely on an explicit runtime protocol.
+
 This repository is not a hostile rewrite of DeepScientist. It is a thin, audited fork that:
 
 - freezes a known-good upstream baseline
@@ -48,7 +50,7 @@ MedAutoScience
         ->
 runtime_protocol / runtime_transport
         ->
-MedDeepScientist (`med-deepscientist` 仓库)
+MedDeepScientist (`med-deepscientist` repo)
         ->
 quest runtime / daemon / worktrees
 ```
@@ -70,7 +72,8 @@ It is intentionally not trying to become a second full product strategy on top o
 MedAutoScience and MedDeepScientist evolve together:
 
 - the runtime stays restrained by compatibility contracts and documented intake so that every patch carries verifiable value
-- the medical orchestration layer iterates on controllers, overlays, and policies while keeping the runtime view clear
+- the medical orchestration layer iterates on controllers, overlays, policies, and runtime protocol while keeping the runtime view clear
+- the main line of work is improving `MedAutoScience -> MedDeepScientist` compatibility and removing unnecessary adapter assumptions
 - valuable upstream improvements continue to flow in when they pass intake, regression, and audit checks rather than being swept in wholesale
 
 This dual track lets us keep improving the runtime while still absorbing useful upstream work without forcing downstream teams to constantly requalify their workspaces.
@@ -93,6 +96,10 @@ We still want useful upstream improvements.
 
 The rule is not "never sync upstream". The rule is "never sync upstream blindly".
 
+It is also not "inspect every upstream commit one by one".
+
+Most upstream commits do not deserve immediate engineering time in this fork. Intake is a periodic, trigger-based maintenance action, not the main delivery stream.
+
 When upstream ships a change that is actually valuable, we try to absorb it through the documented intake flow:
 
 1. inspect the upstream delta from `MedAutoScience`
@@ -101,6 +108,15 @@ When upstream ships a change that is actually valuable, we try to absorb it thro
 4. run `MedAutoScience` compatibility regression
 5. update the audit surfaces
 6. only then let the change return to the stable line
+
+In practice, we prefer to spend time on:
+
+- runtime compatibility with `MedAutoScience`
+- runtime protocol convergence
+- adapter retirement and boundary cleanup
+- deterministic runtime correctness fixes
+
+We only start a new intake round when there is a bounded upstream change set with clear runtime value, or when we intentionally run a periodic upstream review.
 
 That means we keep benefiting from upstream progress without forcing every downstream medical workspace to act like a canary.
 

@@ -73,11 +73,7 @@ These commits should not be imported as new work.
 
 ## Execution Result
 
-An intake worktree has already been created at:
-
-```text
-/Users/gaofeng/workspace/med-deepscientist/.worktree/intake-2026-04-01-bootstrap-routing
-```
+A dedicated intake worktree was created for this round, used to absorb the selected upstream patchset, and then removed after merge-back.
 
 Before intake started, baseline verification in that clean worktree exposed a pre-existing failure:
 
@@ -126,4 +122,6 @@ Round 1 is complete for the stability target. Remaining upstream items keep thei
 
 ## Next Action
 
-Merge `codex/intake-2026-04-01-bootstrap-routing` back to `main`, then treat `1865fa5` as a separate feature-evaluation intake only after the runtime line remains stable under real MedAutoScience workloads.
+Round 1 intake is complete and already merged to `main`.
+
+Treat `1865fa5` as a separate feature-evaluation intake only when it shows clear runtime value relative to ongoing `MedAutoScience -> MedDeepScientist` compatibility work.
