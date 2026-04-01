@@ -69,7 +69,7 @@ from ..connector.lingzhu_support import (
     lingzhu_verify_auth_header,
 )
 from ..prompts import PromptBuilder
-from ..prompts.builder import STANDARD_SKILLS, classify_turn_intent
+from ..prompts.builder import CONTINUATION_SKILLS, STANDARD_SKILLS, classify_turn_intent
 from ..connector.qq_profiles import list_qq_profiles, merge_qq_profile_config, normalize_qq_connector_config
 from ..quest import QuestService
 from ..runners import CodexRunner, RunRequest, get_runner_factory, register_builtin_runners
@@ -2382,6 +2382,7 @@ class DaemonApp:
             "next_pending_slice_id": str(snapshot.get("next_pending_slice_id") or "").strip() or None,
             "current_workspace_branch": str(snapshot.get("current_workspace_branch") or "").strip() or None,
             "continuation_policy": str(snapshot.get("continuation_policy") or "").strip() or None,
+            "continuation_anchor": str(snapshot.get("continuation_anchor") or "").strip() or None,
             "paper": {
                 "closure_state": str(paper_health.get("closure_state") or "").strip() or None,
                 "delivery_state": str(paper_health.get("delivery_state") or "").strip() or None,
@@ -2422,7 +2423,7 @@ class DaemonApp:
     @staticmethod
     def _continuation_anchor_for(snapshot: dict) -> str:
         continuation_anchor = str(snapshot.get("continuation_anchor") or "").strip()
-        if continuation_anchor in STANDARD_SKILLS:
+        if continuation_anchor in CONTINUATION_SKILLS:
             return continuation_anchor
         active_anchor = str(snapshot.get("active_anchor") or "").strip()
         return active_anchor if active_anchor in STANDARD_SKILLS else "decision"
@@ -2898,9 +2899,17 @@ class DaemonApp:
         snapshot = self.quest_service.snapshot(quest_id)
         current_status = str(snapshot.get("status") or snapshot.get("display_status") or "active").strip() or "active"
         normalized_status = "active" if current_status == "running" else current_status
-        snapshot = self.quest_service.mark_turn_finished(quest_id, status=normalized_status)
-        runtime_updates: dict[str, Any] = {}
-        current_fingerprint = self._stage_state_fingerprint(snapshot)
+        finished_snapshot = dict(snapshot)
+        finished_snapshot["status"] = normalized_status
+        finished_snapshot["runtime_status"] = normalized_status
+        finished_snapshot["display_status"] = normalized_status
+        finished_snapshot["active_run_id"] = None
+        runtime_updates: dict[str, Any] = {
+            "status": normalized_status,
+            "active_run_id": None,
+            "retry_state": None,
+        }
+        current_fingerprint = self._stage_state_fingerprint(finished_snapshot)
         previous_fingerprint = str(snapshot.get("last_stage_fingerprint") or "").strip() or None
         same_fingerprint_count = int(snapshot.get("same_fingerprint_auto_turn_count") or 0)
         if str(turn_reason or "").strip() == "auto_continue":
@@ -2928,17 +2937,11 @@ class DaemonApp:
                     "continuation_updated_at": utc_now(),
                 }
             )
-            self.quest_service.update_runtime_state(
-                quest_root=self.quest_service._quest_root(quest_id),
-                **runtime_updates,
-            )
-            snapshot = self.quest_service.snapshot(quest_id)
-        else:
-            self.quest_service.update_runtime_state(
-                quest_root=self.quest_service._quest_root(quest_id),
-                **runtime_updates,
-            )
-            snapshot = self.quest_service.snapshot(quest_id)
+        self.quest_service.update_runtime_state(
+            quest_root=self.quest_service._quest_root(quest_id),
+            **runtime_updates,
+        )
+        snapshot = self.quest_service.snapshot(quest_id)
         status = str(snapshot.get("status") or "")
         if status in {"stopped", "paused", "completed", "error"}:
             return

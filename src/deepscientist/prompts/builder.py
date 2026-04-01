@@ -31,6 +31,8 @@ COMPANION_SKILLS = (
     "rebuttal",
 )
 
+CONTINUATION_SKILLS = (*STANDARD_SKILLS, *COMPANION_SKILLS)
+
 STAGE_MEMORY_PLAN = {
     "scout": {
         "quest": ("papers", "knowledge", "decisions"),

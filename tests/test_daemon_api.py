@@ -2764,6 +2764,48 @@ def test_terminal_handlers_create_new_terminal_session(temp_home: Path) -> None:
     assert final_main["status"] == "terminated"
 
 
+def test_terminal_shutdown_after_stop_is_idempotent(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("terminal shutdown quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    ensured = app.handlers.terminal_session_ensure(
+        quest_id,
+        {
+            "source": "pytest",
+            "conversation_id": f"quest:{quest_id}:pytest",
+            "user_id": "user:pytest",
+        },
+    )
+    assert ensured["ok"] is True
+
+    deadline = time.time() + 6
+    while time.time() < deadline:
+        entries, _meta = app.bash_exec_service.read_log_entries(quest_root, "terminal-main", limit=200, order="asc")
+        if any(
+            entry.get("stream") == "partial"
+            and str(quest_root) in str(entry.get("line") or "")
+            and str(entry.get("line") or "").endswith("$ ")
+            for entry in entries
+        ):
+            break
+        time.sleep(0.2)
+    else:
+        raise AssertionError("terminal prompt did not become ready before shutdown test")
+
+    stop_payload = app.handlers.bash_stop(quest_id, "terminal-main", {"reason": "pytest-stop"})
+    assert isinstance(stop_payload, dict)
+    assert stop_payload["success"] is True
+
+    app.bash_exec_service.shutdown()
+
+    final = app.bash_exec_service.wait_for_session(quest_root, "terminal-main", timeout_seconds=10)
+    assert final["status"] == "terminated"
+
+
 def test_terminal_attach_websocket_smoke_supports_live_python_io(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -2826,7 +2868,7 @@ def test_terminal_attach_websocket_smoke_supports_live_python_io(temp_home: Path
             websocket.send(json.dumps({"type": "input", "data": "exit()\n"}))
             _read_until_contains("$ ")
             websocket.send(json.dumps({"type": "input", "data": "nano ds_smoke.txt\n"}))
-            _read_until_contains("GNU nano", timeout=8)
+            _read_until_contains("File: ds_smoke.txt", timeout=8)
             websocket.send(json.dumps({"type": "input", "data": "hello nano"}))
             websocket.send(json.dumps({"type": "input", "data": "\u0018"}))
             _read_until_contains("Save modified buffer", timeout=8)
@@ -4255,6 +4297,123 @@ def test_auto_continue_parks_after_repeated_unchanged_finalize_state(temp_home: 
     assert second_snapshot["continuation_policy"] == "wait_for_user_or_resume"
     assert second_snapshot["continuation_anchor"] == "decision"
     assert second_snapshot["continuation_reason"] == "unchanged_finalize_state"
+
+
+def test_daemon_auto_continue_routes_into_review_companion_skill_after_decision_artifact(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("review continuation quest")
+    quest_id = quest["quest_id"]
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+
+    class ReviewRouteRunner:
+        binary = ""
+
+        def __init__(self, app: DaemonApp) -> None:
+            self.app = app
+            self.requests: list[dict[str, str]] = []
+            self.record_result: dict[str, object] | None = None
+
+        def run(self, request):
+            self.requests.append(
+                {
+                    "run_id": request.run_id,
+                    "message": request.message,
+                    "skill_id": request.skill_id,
+                    "turn_reason": request.turn_reason,
+                }
+            )
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            if len(self.requests) == 1:
+                self.record_result = self.app.artifact_service.record(
+                    request.quest_root,
+                    {
+                        "kind": "decision",
+                        "verdict": "continue",
+                        "action": "continue",
+                        "reason": "The next durable route should be an independent review pass.",
+                        "next_stage": "review",
+                    },
+                    checkpoint=False,
+                )
+            else:
+                self.app.quest_service.mark_completed(request.quest_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text=f"turn:{request.skill_id}",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = ReviewRouteRunner(app)
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Keep going with the paper workflow.", "source": "web-react"})
+    assert payload["ok"] is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        if snapshot["status"] == "completed" and len(runner.requests) >= 2:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("quest did not continue into the requested review companion stage")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert runner.requests[0]["skill_id"] == "write"
+    assert runner.requests[0]["turn_reason"] == "user_message"
+    assert runner.requests[1]["skill_id"] == "review"
+    assert runner.requests[1]["turn_reason"] == "auto_continue"
+    assert runner.requests[1]["message"] == ""
+    assert runner.record_result is not None
+    assert runner.record_result["next_anchor"] == "review"
+    assert runner.record_result["recommended_skill_reads"] == ["review"]
+    assert snapshot["continuation_anchor"] == "review"
+
+
+def test_turn_cleanup_recovers_after_partial_runtime_state_failure(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("partial cleanup failure quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-cleanup-partial-001"
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+    )
+
+    original_update_runtime_state = app.quest_service.update_runtime_state
+    injected_failure = {"raised": False}
+
+    def _flaky_update_runtime_state(*, quest_root: Path, **kwargs):
+        if not injected_failure["raised"] and "last_stage_fingerprint" in kwargs:
+            injected_failure["raised"] = True
+            raise RuntimeError("synthetic fingerprint write failure")
+        return original_update_runtime_state(quest_root=quest_root, **kwargs)
+
+    monkeypatch.setattr(app.quest_service, "update_runtime_state", _flaky_update_runtime_state)
+
+    with pytest.raises(RuntimeError, match="synthetic fingerprint write failure"):
+        app._normalize_status_after_turn(quest_id, turn_reason="user_message")
+
+    app._ensure_turn_cleanup(quest_id, run_id=run_id, turn_reason="user_message")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["active_run_id"] is None
+    assert snapshot["status"] == "active"
+    assert snapshot["last_stage_fingerprint"] is not None
+    assert snapshot["last_stage_fingerprint_at"] is not None
 
 
 def test_daemon_retries_failed_runner_attempt_and_continues_with_retry_context(temp_home: Path) -> None:

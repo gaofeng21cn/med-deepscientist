@@ -4738,10 +4738,10 @@ class QuestService:
             if continuation_anchor is not _UNSET:
                 normalized_anchor = str(continuation_anchor or "").strip() or None
                 if normalized_anchor is not None:
-                    from ..prompts.builder import STANDARD_SKILLS
+                    from ..prompts.builder import CONTINUATION_SKILLS
 
-                    if normalized_anchor not in STANDARD_SKILLS:
-                        allowed = ", ".join(STANDARD_SKILLS)
+                    if normalized_anchor not in CONTINUATION_SKILLS:
+                        allowed = ", ".join(CONTINUATION_SKILLS)
                         raise ValueError(
                             f"Unsupported continuation anchor `{normalized_anchor}`. Allowed values: {allowed}."
                         )

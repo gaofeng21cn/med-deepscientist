@@ -187,7 +187,10 @@ class TerminalRuntime:
         self._write_lock = threading.Lock()
         self._replay_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._stop_lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._stop_requested = False
+        self._stop_force_requested = False
         self._reader_thread: threading.Thread | None = None
         self._process: subprocess.Popen[bytes] | None = None
         self._process_group_id: int | None = None
@@ -334,13 +337,20 @@ class TerminalRuntime:
 
     def stop(self, *, reason: str = "runtime_shutdown", force: bool = False) -> None:
         self._stop_event.set()
-        process = self._process
+        with self._stop_lock:
+            if self._stop_requested and (not force or self._stop_force_requested):
+                return
+            self._stop_requested = True
+            self._stop_force_requested = self._stop_force_requested or force
+            process = self._process
+            process_group_id = self._process_group_id
+            effective_force = self._stop_force_requested
         if process is None:
             return
         terminate_subprocess(
             process,
-            process_group_id=self._process_group_id,
-            force=force,
+            process_group_id=process_group_id,
+            force=effective_force,
             prefer_ctrl_break=True,
             grace_seconds=TERMINAL_STOP_GRACE_SECONDS,
         )
@@ -545,13 +555,6 @@ class TerminalRuntime:
             return log_buffer
         while True:
             self._poll_prompt_events()
-            if self._stop_event.is_set() and process.poll() is None:
-                terminate_subprocess(
-                    process,
-                    process_group_id=self._process_group_id,
-                    prefer_ctrl_break=True,
-                    grace_seconds=TERMINAL_STOP_GRACE_SECONDS,
-                )
             ready, _unused_w, _unused_x = select.select([master_fd], [], [], TERMINAL_RUNTIME_POLL_SECONDS)
             if ready:
                 try:
@@ -582,13 +585,6 @@ class TerminalRuntime:
         if output_stream is None:
             return log_buffer
         while True:
-            if self._stop_event.is_set() and process.poll() is None:
-                terminate_subprocess(
-                    process,
-                    process_group_id=self._process_group_id,
-                    prefer_ctrl_break=True,
-                    grace_seconds=TERMINAL_STOP_GRACE_SECONDS,
-                )
             chunk = output_stream.read(4096)
             self._poll_prompt_events()
             if chunk:
@@ -691,7 +687,6 @@ class TerminalRuntimeManager:
     def shutdown(self) -> None:
         with self._lock:
             runtimes = list(self._runtimes.values())
-            self._runtimes.clear()
             self._tokens.clear()
         for runtime in runtimes:
             runtime.stop(reason="daemon_shutdown", force=False)

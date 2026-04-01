@@ -44,6 +44,7 @@ from ..shared import (
 )
 from ..quest import QuestService
 from ..memory.frontmatter import dump_markdown_document, load_markdown_document
+from ..prompts.builder import CONTINUATION_SKILLS
 from .arxiv import fetch_arxiv_metadata, read_arxiv_content
 from .charts import render_main_experiment_metric_timeline_chart
 from .guidance import build_guidance_for_record, guidance_summary
@@ -241,6 +242,18 @@ class ArtifactService:
         if len(text) <= limit:
             return text
         return text[: max(0, limit - 1)].rstrip() + "…"
+
+    @staticmethod
+    def _decision_continuation_anchor(record: dict[str, Any]) -> str | None:
+        normalized = str(record.get("next_stage") or "").strip().lower() or None
+        if normalized is None:
+            return None
+        if normalized not in CONTINUATION_SKILLS:
+            allowed = ", ".join(CONTINUATION_SKILLS)
+            raise ValueError(
+                f"Unsupported decision next_stage `{normalized}`. Allowed values: {allowed}."
+            )
+        return normalized
 
     def _build_idea_interaction_message(
         self,
@@ -5985,6 +5998,11 @@ class ArtifactService:
         record = self._build_record(quest_root, payload, workspace_root=write_root)
         if semantic_key:
             record["semantic_key"] = semantic_key
+        decision_continuation_anchor = None
+        if record["kind"] == "decision":
+            decision_continuation_anchor = self._decision_continuation_anchor(record)
+            if decision_continuation_anchor is not None:
+                record["next_stage"] = decision_continuation_anchor
         guidance_vm = build_guidance_for_record(record)
         record["guidance_vm"] = guidance_vm
         guidance_text = guidance_summary(guidance_vm) or guidance_for_kind(record["kind"])
@@ -6077,6 +6095,13 @@ class ArtifactService:
             },
         )
         self._touch_quest_updated_at(quest_root)
+        if decision_continuation_anchor is not None:
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                continuation_policy="auto",
+                continuation_anchor=decision_continuation_anchor,
+                continuation_reason=f"decision:{artifact_id}",
+            )
 
         baseline_registry_entry = None
         if record["kind"] == "baseline" and record.get("publish_global"):

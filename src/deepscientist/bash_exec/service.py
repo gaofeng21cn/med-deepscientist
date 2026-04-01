@@ -171,6 +171,15 @@ def _compact_command(command: object, *, max_length: int = 140) -> str:
     return normalized[: max(0, max_length - 3)].rstrip() + "..."
 
 
+def _prepend_pythonpath(env: dict[str, str], path: Path) -> None:
+    resolved = str(path.resolve())
+    existing = [entry for entry in env.get("PYTHONPATH", "").split(os.pathsep) if entry]
+    if resolved in existing:
+        env["PYTHONPATH"] = os.pathsep.join(existing)
+        return
+    env["PYTHONPATH"] = os.pathsep.join([resolved, *existing]) if existing else resolved
+
+
 class BashExecService:
     def __init__(self, home: Path) -> None:
         self.home = home
@@ -774,6 +783,8 @@ class BashExecService:
         env_payload: dict[str, str] | None = None,
     ) -> int:
         monitor_env = os.environ.copy()
+        # Keep the spawned monitor on the same import path as the parent process.
+        _prepend_pythonpath(monitor_env, Path(__file__).resolve().parents[2])
         if env_payload:
             monitor_env["DS_BASH_EXEC_TOOL_ENV"] = json.dumps(env_payload, ensure_ascii=False)
         monitor_log_handle = self.monitor_log_path(quest_root, bash_id).open("a", encoding="utf-8")

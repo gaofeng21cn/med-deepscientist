@@ -448,12 +448,24 @@ def build_guidance_for_record(record: dict[str, Any]) -> dict[str, Any]:
                 source_artifact_id=artifact_id,
                 related_paths=[str(path) for path in related_paths],
             )
+        explicit_next_stage = str(record.get("next_stage") or "").strip() or None
         return _guidance(
             current_anchor="decision",
-            recommended_skill="decision",
+            recommended_skill=explicit_next_stage or "decision",
             recommended_action=action or "continue",
-            summary="A decision was recorded. Follow the chosen route and keep the next outcome durable.",
-            why_now=reason or "The route is already chosen, so the next priority is executing it cleanly and audibly.",
+            summary=(
+                f"A decision was recorded. Continue with `{explicit_next_stage}` and keep the next outcome durable."
+                if explicit_next_stage
+                else "A decision was recorded. Follow the chosen route and keep the next outcome durable."
+            ),
+            why_now=(
+                reason
+                or (
+                    f"The route is already chosen, and the next durable stage is `{explicit_next_stage}`."
+                    if explicit_next_stage
+                    else "The route is already chosen, so the next priority is executing it cleanly and audibly."
+                )
+            ),
             complete_when=[
                 "The next stage starts and writes its first durable output.",
                 "Any new ambiguity is converted into another explicit decision.",
