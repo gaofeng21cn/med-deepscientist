@@ -34,7 +34,7 @@ MedDeepScientist exists to cap that cost.
 ## Relationship to the rest of the stack
 
 - `DeepScientist`: upstream source of runtime capability and future improvements
-- Repository `med-deepscientist`: controlled runtime fork used as the stable execution engine
+- `MedDeepScientist`: controlled runtime fork used as the stable execution engine
 - `MedAutoScience`: medical orchestration layer, policy layer, controller layer, and public entrypoint
 
 For medical workflows, humans and agents should enter through `MedAutoScience`, not through legacy DeepScientist entrypoints directly.
