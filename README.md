@@ -1,6 +1,6 @@
 # MedDeepScientist
 
-MedDeepScientist (`med-deepscientist` 仓库) is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
+MedDeepScientist (`med-deepscientist` repo) is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
 
 It exists to preserve the long-running autonomous runtime that `MedAutoScience` depends on, because upstream changes in prompts, skills, workflow defaults, or runtime surfaces tend to trigger expensive compatibility work for medical workspaces. Freezing a known-good baseline and accepting only audited intake keeps that runtime truth stable while MedAutoScience converges on a narrower runtime protocol.
 
