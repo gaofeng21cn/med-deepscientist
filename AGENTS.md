@@ -23,6 +23,13 @@ The target is a focused runtime layer for `MedAutoScience`, not a large independ
 
 Do not treat upstream intake as the main development stream. Most upstream commits should be ignored. Intake is periodic and value-driven, not a requirement to study every new upstream commit individually.
 
+## Stable Runtime Protocol Guardrail
+
+- The minimal stable runtime protocol is defined in `docs/runtime_protocol.md`.
+- Any intake, fix, refactor, or feature work must not silently break that stable protocol surface.
+- If a change intentionally modifies stable behavior, update `docs/runtime_protocol.md` and add/update targeted regression tests in the same change.
+- Do not rely on undocumented adapter assumptions that exceed the stable surface defined in `docs/runtime_protocol.md`.
+
 ## Public Repository Rules
 
 - Do not commit local workstation-specific absolute paths.

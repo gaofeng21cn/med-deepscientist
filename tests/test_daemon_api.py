@@ -2180,6 +2180,31 @@ def test_router_matches_quest_search_path() -> None:
     assert params["quest_id"] == "q-123456"
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "expected_route", "expected_param_key", "expected_param_value"),
+    [
+        ("GET", "/api/health", "health", None, None),
+        ("POST", "/api/quests", "quest_create", None, None),
+        ("GET", "/api/quests/q-9001", "quest", "quest_id", "q-9001"),
+        ("GET", "/api/quests/q-9001/workflow", "workflow", "quest_id", "q-9001"),
+        ("GET", "/api/quests/q-9001/events", "quest_events", "quest_id", "q-9001"),
+        ("POST", "/api/quests/q-9001/chat", "chat", "quest_id", "q-9001"),
+    ],
+)
+def test_router_matches_minimal_runtime_protocol_routes(
+    method: str,
+    path: str,
+    expected_route: str,
+    expected_param_key: str | None,
+    expected_param_value: str | None,
+) -> None:
+    route_name, params = match_route(method, path)
+
+    assert route_name == expected_route
+    if expected_param_key is not None:
+        assert params[expected_param_key] == expected_param_value
+
+
 def test_quest_create_handler_auto_binds_recent_connector_to_newest_quest(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3289,6 +3314,30 @@ def test_quest_create_fails_fast_when_requested_baseline_cannot_materialize(temp
     assert body["ok"] is False
     assert "requested baseline `missing-baseline`" in str(body["message"])
     assert not (temp_home / "quests" / "quest-should-fail-baseline-bootstrap").exists()
+
+
+def test_quest_create_persists_startup_contract_snapshot_shape(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    startup_contract = {
+        "scope": "full_research",
+        "need_research_paper": False,
+        "launch_mode": "custom",
+        "custom_profile": "continue_existing_state",
+    }
+
+    payload = app.handlers.quest_create(
+        {
+            "goal": "Create a quest with explicit startup contract.",
+            "quest_id": "quest-startup-contract-shape",
+            "startup_contract": startup_contract,
+        }
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["startup_contract"] == startup_contract
 
 
 def test_baseline_delete_handler_clears_registry_and_bound_quests(temp_home: Path) -> None:

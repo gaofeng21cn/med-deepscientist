@@ -503,6 +503,23 @@ def test_prompt_builder_includes_active_user_requirements_for_auto_continue_turn
     assert "(no new user message for this turn; continue from active user requirements and durable state)" in prompt
 
 
+def test_prompt_builder_includes_user_message_turn_driver_contract_fields(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="decision",
+        user_message="Where is the current best metric and what should we do next?",
+        model="gpt-5.4",
+    )
+
+    assert "## Turn Driver" in prompt
+    assert "turn_reason: user_message" in prompt
+    assert "turn_intent: answer_user_question_first" in prompt
+    assert "turn_mode: stage_execution" in prompt
+    assert "direct_user_message_preview: Where is the current best metric and what should we do next?" in prompt
+
+
 def test_prompt_builder_includes_active_interactions(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     quest_root = Path(snapshot["quest_root"])
