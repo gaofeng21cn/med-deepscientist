@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { FadeContent, GlareHover } from '@/components/react-bits'
 import { client } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
+import { resolveLandingConnectorCoachMode } from '@/lib/startResearch'
 import { useOnboardingStore } from '@/lib/stores/onboarding'
 import { useUILanguageStore } from '@/lib/stores/ui-language'
 import { runtimeVersion } from '@/lib/runtime/quest-runtime'
@@ -131,22 +132,13 @@ export default function Hero() {
   }, [])
 
   const connectorCoachMode = useMemo(() => {
-    if (!connectorAvailability?.should_recommend_binding) {
-      return null
-    }
-    if (!connectorAvailability.has_enabled_external_connector) {
-      return 'no_enabled' as const
-    }
-    const hasDeliveryTarget = connectorAvailability.available_connectors.some(
-      (item) => item.enabled && item.has_delivery_target
-    )
-    if (!hasDeliveryTarget) {
-      return 'no_target' as const
-    }
-    return 'recommended' as const
-  }, [connectorAvailability])
+    return resolveLandingConnectorCoachMode({
+      availabilityResolved: connectorAvailabilityResolved,
+      availability: connectorAvailability,
+    })
+  }, [connectorAvailability, connectorAvailabilityResolved])
 
-  const shouldShowConnectorCoach = connectorAvailabilityResolved && connectorCoachMode !== null
+  const shouldShowConnectorCoach = connectorCoachMode !== null
   const shouldShowTutorialCoach = onboardingHydrated && !firstRunHandled && !neverRemind
   const entryCoachOpen =
     !entryCoachDismissed &&

@@ -413,6 +413,7 @@ export interface ConnectorAvailabilitySnapshot {
   has_enabled_external_connector: boolean
   has_bound_external_connector: boolean
   should_recommend_binding: boolean
+  should_prompt_binding: boolean
   preferred_connector_name?: string | null
   preferred_conversation_id?: string | null
   available_connectors: Array<{

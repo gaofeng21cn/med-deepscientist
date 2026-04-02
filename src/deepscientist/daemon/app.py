@@ -415,6 +415,10 @@ class DaemonApp:
             "has_enabled_external_connector": has_enabled_external_connector,
             "has_bound_external_connector": has_bound_external_connector,
             "should_recommend_binding": not has_bound_external_connector,
+            # MedDeepScientist is the runtime layer under MedAutoScience, not the human
+            # front door. Keep connector capability visible, but do not proactively
+            # nag users to bind one on entry surfaces such as landing or Start Research.
+            "should_prompt_binding": False,
             "preferred_connector_name": preferred_connector_name,
             "preferred_conversation_id": preferred_conversation_id,
             "available_connectors": available_connectors,
@@ -533,12 +537,16 @@ class DaemonApp:
                     if isinstance(resume_payload.get("snapshot"), dict)
                     else self.quest_service.snapshot(quest_id)
                 )
-                reason = (
+                reason = str(resume_payload.get("turn_reason") or "").strip() or (
                     "queued_user_messages"
                     if int(snapshot.get("pending_user_message_count") or 0) > 0
                     else "auto_continue"
                 )
-                scheduled = self.schedule_turn(quest_id, reason=reason)
+                scheduled = {
+                    "scheduled": bool(resume_payload.get("scheduled")),
+                    "started": bool(resume_payload.get("started")),
+                    "queued": bool(resume_payload.get("queued")),
+                }
                 event = {
                     "event_id": generate_id("evt"),
                     "type": "quest.runtime_auto_resumed",
@@ -1761,6 +1769,22 @@ class DaemonApp:
             cancelled_pending_user_message_count=0,
             previous_snapshot=previous_snapshot,
         )
+        turn_state = self._refresh_turn_worker_state(quest_id)
+        has_live_turn = bool(turn_state.get("running"))
+        turn_reason = (
+            "queued_user_messages"
+            if int(snapshot.get("pending_user_message_count") or 0) > 0
+            else "auto_continue"
+        )
+        if str(snapshot.get("status") or next_status) == "running" and has_live_turn:
+            scheduled = {
+                "scheduled": True,
+                "started": False,
+                "queued": True,
+                "reason": turn_reason,
+            }
+        else:
+            scheduled = self.schedule_turn(quest_id, reason=turn_reason)
         return {
             "ok": True,
             "quest_id": quest_id,
@@ -1770,6 +1794,8 @@ class DaemonApp:
             "message": summary,
             "event": event,
             "notice": notice,
+            "turn_reason": turn_reason,
+            **scheduled,
         }
 
     def _append_control_event(

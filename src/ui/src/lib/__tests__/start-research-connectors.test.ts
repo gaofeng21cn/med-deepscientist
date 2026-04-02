@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   compileStartResearchPrompt,
   defaultStartResearchTemplate,
+  resolveLandingConnectorCoachMode,
   resolveStartResearchConnectorBindings,
   saveStartResearchTemplate,
   shouldRecommendStartResearchConnectorBinding,
@@ -34,6 +35,7 @@ describe('shouldRecommendStartResearchConnectorBinding', () => {
           has_enabled_external_connector: true,
           has_bound_external_connector: true,
           should_recommend_binding: false,
+          should_prompt_binding: false,
           preferred_connector_name: 'qq',
           preferred_conversation_id: 'qq:direct:user-1',
           available_connectors: [
@@ -63,12 +65,70 @@ describe('shouldRecommendStartResearchConnectorBinding', () => {
           has_enabled_external_connector: false,
           has_bound_external_connector: false,
           should_recommend_binding: true,
+          should_prompt_binding: true,
           preferred_connector_name: null,
           preferred_conversation_id: null,
           available_connectors: [],
         },
       })
     ).toBe(true)
+  })
+
+  it('does not recommend when proactive binding prompts are disabled', () => {
+    expect(
+      shouldRecommendStartResearchConnectorBinding({
+        open: true,
+        availabilityResolved: true,
+        availabilityLoading: false,
+        availabilityError: null,
+        connectorRecommendationHandled: false,
+        availability: {
+          has_enabled_external_connector: false,
+          has_bound_external_connector: false,
+          should_recommend_binding: true,
+          should_prompt_binding: false,
+          preferred_connector_name: null,
+          preferred_conversation_id: null,
+          available_connectors: [],
+        },
+      })
+    ).toBe(false)
+  })
+})
+
+describe('resolveLandingConnectorCoachMode', () => {
+  it('does not open the landing connector coach when proactive prompts are disabled', () => {
+    expect(
+      resolveLandingConnectorCoachMode({
+        availabilityResolved: true,
+        availability: {
+          has_enabled_external_connector: false,
+          has_bound_external_connector: false,
+          should_recommend_binding: true,
+          should_prompt_binding: false,
+          preferred_connector_name: null,
+          preferred_conversation_id: null,
+          available_connectors: [],
+        },
+      })
+    ).toBeNull()
+  })
+
+  it('keeps the landing connector coach mode when prompting is explicitly enabled', () => {
+    expect(
+      resolveLandingConnectorCoachMode({
+        availabilityResolved: true,
+        availability: {
+          has_enabled_external_connector: false,
+          has_bound_external_connector: false,
+          should_recommend_binding: true,
+          should_prompt_binding: true,
+          preferred_connector_name: null,
+          preferred_conversation_id: null,
+          available_connectors: [],
+        },
+      })
+    ).toBe('no_enabled')
   })
 })
 

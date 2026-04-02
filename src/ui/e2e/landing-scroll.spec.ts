@@ -22,6 +22,7 @@ test.describe('landing page scroll', () => {
           has_enabled_external_connector: false,
           has_bound_external_connector: false,
           should_recommend_binding: false,
+          should_prompt_binding: false,
           preferred_connector_name: null,
           preferred_conversation_id: null,
           available_connectors: [],

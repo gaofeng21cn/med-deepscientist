@@ -226,6 +226,8 @@ def test_connector_availability_summary_prefers_enabled_bound_connector(temp_hom
     manager.ensure_files()
     connectors = manager.load_named("connectors")
     connectors["qq"]["enabled"] = True
+    connectors["qq"]["app_id"] = "qq-app"
+    connectors["qq"]["app_secret"] = "qq-secret"
     connectors["qq"]["main_chat_id"] = "user-1"
     write_yaml(manager.path_for("connectors"), connectors)
 
@@ -235,8 +237,23 @@ def test_connector_availability_summary_prefers_enabled_bound_connector(temp_hom
     assert summary["has_enabled_external_connector"] is True
     assert summary["has_bound_external_connector"] is True
     assert summary["should_recommend_binding"] is False
+    assert summary["should_prompt_binding"] is False
     assert summary["preferred_connector_name"] == "qq"
     assert summary["preferred_conversation_id"] == "qq:direct:user-1"
+
+
+def test_connector_availability_summary_disables_proactive_binding_prompts_by_default(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+
+    app = DaemonApp(temp_home)
+    summary = app.handlers.connectors_availability()
+
+    assert summary["has_enabled_external_connector"] is False
+    assert summary["has_bound_external_connector"] is False
+    assert summary["should_recommend_binding"] is True
+    assert summary["should_prompt_binding"] is False
 
 
 def test_system_disabled_connectors_are_hidden_from_statuses_and_availability(temp_home: Path) -> None:

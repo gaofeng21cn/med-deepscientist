@@ -72,6 +72,8 @@ export type StartResearchConnectorChoice = {
   }>
 }
 
+export type LandingConnectorCoachMode = 'no_enabled' | 'no_target' | 'recommended'
+
 export type StartResearchTemplateEntry = StartResearchTemplate & {
   id: string
   updated_at: string
@@ -191,7 +193,25 @@ export function shouldRecommendStartResearchConnectorBinding(input: {
   if (input.availabilityLoading) return false
   if (input.availabilityError) return false
   if (input.connectorRecommendationHandled) return false
+  if (!input.availability?.should_prompt_binding) return false
   return Boolean(input.availability?.should_recommend_binding)
+}
+
+function hasSelectableDeliveryTarget(availability: ConnectorAvailabilitySnapshot) {
+  return availability.available_connectors.some((item) => item.enabled && item.has_delivery_target)
+}
+
+export function resolveLandingConnectorCoachMode(input: {
+  availabilityResolved: boolean
+  availability: ConnectorAvailabilitySnapshot | null
+}): LandingConnectorCoachMode | null {
+  if (!input.availabilityResolved) return null
+  const availability = input.availability
+  if (!availability?.should_prompt_binding) return null
+  if (!availability.should_recommend_binding) return null
+  if (!availability.has_enabled_external_connector) return 'no_enabled'
+  if (!hasSelectableDeliveryTarget(availability)) return 'no_target'
+  return 'recommended'
 }
 
 export function resolveStartResearchConnectorBindings(
