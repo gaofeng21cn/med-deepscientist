@@ -2480,6 +2480,90 @@ class QuestService:
             active_ref = str(lines[0].get("idea_line_id") or "").strip() or None
         return lines, active_ref
 
+    def _paper_closure_evidence_payload(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        roots: list[Path] = []
+        seen_roots: set[str] = set()
+        for candidate in (workspace_root, quest_root):
+            if candidate is None:
+                continue
+            try:
+                key = str(candidate.resolve())
+            except FileNotFoundError:
+                key = str(candidate)
+            if key in seen_roots:
+                continue
+            seen_roots.add(key)
+            roots.append(candidate)
+
+        paper_roots = [root / "paper" for root in roots]
+
+        def _first_existing(paths: list[Path]) -> str | None:
+            for path in paths:
+                if path.exists():
+                    return str(path)
+            return None
+
+        def _normalize_blocking_items(payload: dict[str, Any]) -> list[str]:
+            raw_items = payload.get("blocking_items")
+            if not isinstance(raw_items, list):
+                return []
+            normalized: list[str] = []
+            for item in raw_items:
+                if isinstance(item, dict):
+                    text = (
+                        str(item.get("title") or "").strip()
+                        or str(item.get("message") or "").strip()
+                        or str(item.get("reason") or "").strip()
+                    )
+                else:
+                    text = str(item).strip()
+                if text:
+                    normalized.append(text)
+            return normalized
+
+        review_report_path = _first_existing([paper_root / "review" / "review.md" for paper_root in paper_roots])
+        review_revision_log_path = _first_existing([paper_root / "review" / "revision_log.md" for paper_root in paper_roots])
+        proofing_report_path = _first_existing([paper_root / "proofing" / "proofing_report.md" for paper_root in paper_roots])
+        proofing_language_issues_path = _first_existing(
+            [paper_root / "proofing" / "language_issues.md" for paper_root in paper_roots]
+        )
+        submission_checklist_path = _first_existing(
+            [paper_root / "review" / "submission_checklist.json" for paper_root in paper_roots]
+        )
+        final_claim_ledger_path = _first_existing([paper_root / "final_claim_ledger.md" for paper_root in paper_roots])
+        finalize_resume_packet_path = _first_existing([root / "handoffs" / "finalize_resume_packet.md" for root in roots])
+
+        submission_checklist = (
+            read_json(Path(submission_checklist_path), {})
+            if submission_checklist_path
+            else {}
+        )
+        if not isinstance(submission_checklist, dict):
+            submission_checklist = {}
+        submission_blocking_items = _normalize_blocking_items(submission_checklist)
+
+        return {
+            "review_outputs_ready": bool(review_report_path and review_revision_log_path),
+            "review_report_path": review_report_path,
+            "review_revision_log_path": review_revision_log_path,
+            "proofing_outputs_ready": bool(proofing_report_path and proofing_language_issues_path),
+            "proofing_report_path": proofing_report_path,
+            "proofing_language_issues_path": proofing_language_issues_path,
+            "submission_checklist_ready": bool(submission_checklist_path),
+            "submission_checklist_path": submission_checklist_path,
+            "submission_blocking_item_count": len(submission_blocking_items),
+            "submission_blocking_items": submission_blocking_items,
+            "final_claim_ledger_ready": bool(final_claim_ledger_path),
+            "final_claim_ledger_path": final_claim_ledger_path,
+            "finalize_resume_packet_ready": bool(finalize_resume_packet_path),
+            "finalize_resume_packet_path": finalize_resume_packet_path,
+        }
+
     def _paper_contract_health_payload(
         self,
         *,
@@ -2583,13 +2667,22 @@ class QuestService:
                             }
                         )
 
+        workspace_root = (
+            Path(str((paper_contract or {}).get("workspace_root") or "").strip())
+            if str((paper_contract or {}).get("workspace_root") or "").strip()
+            else None
+        )
         reference_materialization = self._paper_reference_materialization_payload(
             quest_root,
-            workspace_root=((Path(str((paper_contract or {}).get("workspace_root") or "").strip()) if str((paper_contract or {}).get("workspace_root") or "").strip() else None) or None),
+            workspace_root=workspace_root,
         )
         citation_usage = self._paper_citation_usage_payload(
             quest_root,
-            workspace_root=((Path(str((paper_contract or {}).get("workspace_root") or "").strip()) if str((paper_contract or {}).get("workspace_root") or "").strip() else None) or None),
+            workspace_root=workspace_root,
+        )
+        closure_evidence = self._paper_closure_evidence_payload(
+            quest_root,
+            workspace_root=workspace_root,
         )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
@@ -2611,7 +2704,7 @@ class QuestService:
             if isinstance(paper_contract.get("bundle_manifest"), dict)
             else {}
         )
-        submission_checklist_path = str(((paper_contract.get("paths") or {}).get("submission_checklist") or "")).strip()
+        submission_checklist_path = str(closure_evidence.get("submission_checklist_path") or "").strip() or None
         submission_checklist = read_json(Path(submission_checklist_path), {}) if submission_checklist_path else {}
         submission_checklist = submission_checklist if isinstance(submission_checklist, dict) else {}
         overall_status = str(submission_checklist.get("overall_status") or bundle_manifest.get("status") or "").strip().lower()
@@ -2653,6 +2746,16 @@ class QuestService:
         elif bundle_status != "present":
             recommended_next_stage = "write"
             recommended_action = "prepare_bundle"
+        elif not bool(closure_evidence.get("review_outputs_ready")):
+            recommended_next_stage = "review"
+            recommended_action = "run_skeptical_audit"
+        elif (
+            not bool(closure_evidence.get("proofing_outputs_ready"))
+            or not bool(closure_evidence.get("submission_checklist_ready"))
+            or int(closure_evidence.get("submission_blocking_item_count") or 0) > 0
+        ):
+            recommended_next_stage = "write"
+            recommended_action = "finish_proofing_and_submission_checks"
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
@@ -2694,6 +2797,45 @@ class QuestService:
                 "paper draft cites keys absent from references.bib"
                 + (f": {unresolved_preview}" if unresolved_preview else "")
             )
+        if not bool(closure_evidence.get("review_outputs_ready")):
+            blocking_reasons.append(
+                "skeptical review outputs are missing "
+                "(`paper/review/review.md`, `paper/review/revision_log.md`)"
+            )
+        if not bool(closure_evidence.get("proofing_outputs_ready")):
+            blocking_reasons.append(
+                "proofing outputs are missing "
+                "(`paper/proofing/proofing_report.md`, `paper/proofing/language_issues.md`)"
+            )
+        if not bool(closure_evidence.get("submission_checklist_ready")):
+            blocking_reasons.append(
+                "submission packaging checklist is missing "
+                "(`paper/review/submission_checklist.json`)"
+            )
+        elif int(closure_evidence.get("submission_blocking_item_count") or 0) > 0:
+            blocking_reasons.append(
+                "submission packaging checklist still has "
+                f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
+            )
+
+        finalize_ready = (
+            writing_ready
+            and bundle_status == "present"
+            and bool(closure_evidence.get("review_outputs_ready"))
+            and bool(closure_evidence.get("proofing_outputs_ready"))
+            and bool(closure_evidence.get("submission_checklist_ready"))
+            and int(closure_evidence.get("submission_blocking_item_count") or 0) == 0
+        )
+        completion_blocking_reasons = list(blocking_reasons)
+        if not bool(closure_evidence.get("final_claim_ledger_ready")):
+            completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
+        if not bool(closure_evidence.get("finalize_resume_packet_ready")):
+            completion_blocking_reasons.append("finalize handoff packet is missing (`handoffs/finalize_resume_packet.md`)")
+        completion_approval_ready = (
+            finalize_ready
+            and bool(closure_evidence.get("final_claim_ledger_ready"))
+            and bool(closure_evidence.get("finalize_resume_packet_ready"))
+        )
 
         return {
             "paper_line_id": active_line_id,
@@ -2701,7 +2843,7 @@ class QuestService:
             "selected_outline_ref": selected_outline_ref,
             "contract_ok": contract_ok,
             "writing_ready": writing_ready,
-            "finalize_ready": writing_ready and bundle_status == "present",
+            "finalize_ready": finalize_ready,
             "closure_state": closure_state,
             "delivery_state": delivery_state,
             "delivered_at": delivered_at,
@@ -2752,6 +2894,22 @@ class QuestService:
             "unresolved_citation_key_count": int(citation_usage.get("unresolved_citation_key_count") or 0),
             "unresolved_citation_keys": list(citation_usage.get("unresolved_citation_keys") or []),
             "citation_usage_by_section": list(citation_usage.get("citation_usage_by_section") or []),
+            "review_outputs_ready": bool(closure_evidence.get("review_outputs_ready")),
+            "review_report_path": str(closure_evidence.get("review_report_path") or "").strip() or None,
+            "review_revision_log_path": str(closure_evidence.get("review_revision_log_path") or "").strip() or None,
+            "proofing_outputs_ready": bool(closure_evidence.get("proofing_outputs_ready")),
+            "proofing_report_path": str(closure_evidence.get("proofing_report_path") or "").strip() or None,
+            "proofing_language_issues_path": str(closure_evidence.get("proofing_language_issues_path") or "").strip() or None,
+            "submission_checklist_ready": bool(closure_evidence.get("submission_checklist_ready")),
+            "submission_checklist_path": str(closure_evidence.get("submission_checklist_path") or "").strip() or None,
+            "submission_blocking_item_count": int(closure_evidence.get("submission_blocking_item_count") or 0),
+            "submission_blocking_items": list(closure_evidence.get("submission_blocking_items") or []),
+            "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
+            "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
+            "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
+            "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
+            "completion_approval_ready": completion_approval_ready,
+            "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,

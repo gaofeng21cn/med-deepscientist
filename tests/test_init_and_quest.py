@@ -311,7 +311,12 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     )
     write_text(paper_root / "evidence_ledger.md", "# Ledger\n")
     review_root = ensure_dir(paper_root / "review")
+    write_text(review_root / "review.md", "# Review\n\nReady for finalize.\n")
+    write_text(review_root / "revision_log.md", "# Revision Log\n\nNo blocking revisions remain.\n")
     write_json(review_root / "submission_checklist.json", {"blocking_items": []})
+    proofing_root = ensure_dir(paper_root / "proofing")
+    write_text(proofing_root / "proofing_report.md", "# Proofing Report\n\nNo blocking proofing issues.\n")
+    write_text(proofing_root / "language_issues.md", "# Language Issues\n\nNone.\n")
     _write_citation_rich_draft(paper_root)
     _materialize_reference_materials(quest_root, paper_root)
     analysis_manifest_root = ensure_dir(quest_root / ".ds" / "analysis_campaigns")
@@ -608,6 +613,64 @@ def test_snapshot_blocks_paper_with_thin_in_text_citation_usage(temp_home: Path)
     assert health["recommended_action"] == "revise_paper_citations"
     assert "paper draft cites 4 verified references" in " ".join(health["blocking_reasons"])
     assert "at least 20 in-text references are required" in " ".join(health["blocking_reasons"])
+
+
+def test_snapshot_blocks_finalize_without_review_proofing_and_submission_checks(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper finalize gate quest")
+    quest_root = Path(snapshot["quest_root"])
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Finalize Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-finalize-gate",
+            "paper_branch": "paper/finalize-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Finalize Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-02T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/finalize-gate",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["contract_ok"] is True
+    assert health["writing_ready"] is True
+    assert health["review_outputs_ready"] is False
+    assert health["proofing_outputs_ready"] is False
+    assert health["submission_checklist_ready"] is False
+    assert health["finalize_ready"] is False
+    assert health["completion_approval_ready"] is False
+    assert health["recommended_next_stage"] == "review"
+    assert health["recommended_action"] == "run_skeptical_audit"
+    joined = " ".join(health["blocking_reasons"])
+    assert "skeptical review outputs are missing" in joined
+    assert "proofing outputs are missing" in joined
+    assert "submission packaging checklist is missing" in joined
 
 
 def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:

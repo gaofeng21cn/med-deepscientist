@@ -3257,6 +3257,10 @@ class ArtifactService:
             quest_root,
             workspace_root=workspace_root,
         )
+        closure_evidence = self.quest_service._paper_closure_evidence_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
         reference_gate = (
@@ -3303,6 +3307,26 @@ class ArtifactService:
                 "paper draft cites keys absent from references.bib"
                 + (f": {unresolved_preview}" if unresolved_preview else "")
             )
+        if not bool(closure_evidence.get("review_outputs_ready")):
+            blocking_reasons.append(
+                "skeptical review outputs are missing "
+                "(`paper/review/review.md`, `paper/review/revision_log.md`)"
+            )
+        if not bool(closure_evidence.get("proofing_outputs_ready")):
+            blocking_reasons.append(
+                "proofing outputs are missing "
+                "(`paper/proofing/proofing_report.md`, `paper/proofing/language_issues.md`)"
+            )
+        if not bool(closure_evidence.get("submission_checklist_ready")):
+            blocking_reasons.append(
+                "submission packaging checklist is missing "
+                "(`paper/review/submission_checklist.json`)"
+            )
+        elif int(closure_evidence.get("submission_blocking_item_count") or 0) > 0:
+            blocking_reasons.append(
+                "submission packaging checklist still has "
+                f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
+            )
 
         if unmapped_completed_items:
             recommended_next_stage = "write"
@@ -3319,9 +3343,22 @@ class ArtifactService:
         elif not citation_usage_ready:
             recommended_next_stage = "write"
             recommended_action = "revise_paper_citations"
-        else:
+        elif not bundle_manifest_path.exists():
             recommended_next_stage = "write"
-            recommended_action = "continue_writing"
+            recommended_action = "prepare_bundle"
+        elif not bool(closure_evidence.get("review_outputs_ready")):
+            recommended_next_stage = "review"
+            recommended_action = "run_skeptical_audit"
+        elif (
+            not bool(closure_evidence.get("proofing_outputs_ready"))
+            or not bool(closure_evidence.get("submission_checklist_ready"))
+            or int(closure_evidence.get("submission_blocking_item_count") or 0) > 0
+        ):
+            recommended_next_stage = "write"
+            recommended_action = "finish_proofing_and_submission_checks"
+        else:
+            recommended_next_stage = "finalize"
+            recommended_action = "finalize_paper_line"
 
         contract_ok = not unresolved_required_items and not unmapped_completed_items
         writing_ready = contract_ok and normalized_pending_slices == 0 and reference_materialization_ready and citation_usage_ready
@@ -3343,11 +3380,29 @@ class ArtifactService:
             delivery_state = "delivered"
             closure_state = "delivered_continue_research" if "continue" in overall_status else "delivered_parked"
             keep_bundle_fixed_by_default = True
+        finalize_ready = (
+            writing_ready
+            and bundle_present
+            and bool(closure_evidence.get("review_outputs_ready"))
+            and bool(closure_evidence.get("proofing_outputs_ready"))
+            and bool(closure_evidence.get("submission_checklist_ready"))
+            and int(closure_evidence.get("submission_blocking_item_count") or 0) == 0
+        )
+        completion_blocking_reasons = list(blocking_reasons)
+        if not bool(closure_evidence.get("final_claim_ledger_ready")):
+            completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
+        if not bool(closure_evidence.get("finalize_resume_packet_ready")):
+            completion_blocking_reasons.append("finalize handoff packet is missing (`handoffs/finalize_resume_packet.md`)")
+        completion_approval_ready = (
+            finalize_ready
+            and bool(closure_evidence.get("final_claim_ledger_ready"))
+            and bool(closure_evidence.get("finalize_resume_packet_ready"))
+        )
 
         return {
             "contract_ok": contract_ok,
             "writing_ready": writing_ready,
-            "finalize_ready": writing_ready and bundle_present,
+            "finalize_ready": finalize_ready,
             "bundle_present": bundle_present,
             "delivery_state": delivery_state,
             "closure_state": closure_state,
@@ -3383,6 +3438,22 @@ class ArtifactService:
             "unresolved_citation_key_count": int(citation_usage.get("unresolved_citation_key_count") or 0),
             "unresolved_citation_keys": list(citation_usage.get("unresolved_citation_keys") or []),
             "citation_usage_by_section": list(citation_usage.get("citation_usage_by_section") or []),
+            "review_outputs_ready": bool(closure_evidence.get("review_outputs_ready")),
+            "review_report_path": str(closure_evidence.get("review_report_path") or "").strip() or None,
+            "review_revision_log_path": str(closure_evidence.get("review_revision_log_path") or "").strip() or None,
+            "proofing_outputs_ready": bool(closure_evidence.get("proofing_outputs_ready")),
+            "proofing_report_path": str(closure_evidence.get("proofing_report_path") or "").strip() or None,
+            "proofing_language_issues_path": str(closure_evidence.get("proofing_language_issues_path") or "").strip() or None,
+            "submission_checklist_ready": bool(closure_evidence.get("submission_checklist_ready")),
+            "submission_checklist_path": str(closure_evidence.get("submission_checklist_path") or "").strip() or None,
+            "submission_blocking_item_count": int(closure_evidence.get("submission_blocking_item_count") or 0),
+            "submission_blocking_items": list(closure_evidence.get("submission_blocking_items") or []),
+            "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
+            "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
+            "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
+            "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
+            "completion_approval_ready": completion_approval_ready,
+            "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
@@ -10565,6 +10636,76 @@ class ArtifactService:
         expects_reply_resolved = bool(expects_reply) if expects_reply is not None else reply_mode_resolved == "blocking"
         decision_policy = self._decision_policy(quest_root)
         decision_type = self._interaction_decision_type({"reply_schema": reply_schema_resolved})
+        if kind == "decision_request" and decision_type == QUEST_COMPLETION_DECISION_TYPE:
+            snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+            paper_health = (
+                dict(snapshot.get("paper_contract_health") or {})
+                if isinstance(snapshot.get("paper_contract_health"), dict)
+                else {}
+            )
+            paper_gate_enforced = any(
+                bool(paper_health.get(key))
+                for key in (
+                    "selected_outline_ref",
+                    "bundle_present",
+                    "draft_available",
+                    "review_outputs_ready",
+                    "proofing_outputs_ready",
+                    "submission_checklist_ready",
+                )
+            )
+            if paper_gate_enforced and not bool(paper_health.get("completion_approval_ready")):
+                blocking_reasons = [
+                    str(item).strip()
+                    for item in (
+                        paper_health.get("completion_blocking_reasons")
+                        or paper_health.get("blocking_reasons")
+                        or []
+                    )
+                    if str(item).strip()
+                ]
+                guidance = self.quest_service.localized_copy(
+                    quest_root=quest_root,
+                    zh=(
+                        "paper line 还没到可以请求 completion approval 的状态。"
+                        + (f" 当前阻塞：{'; '.join(blocking_reasons[:4])}。" if blocking_reasons else "")
+                        + " 请先补齐缺失的 review/proofing/finalize 产物，再决定是否请求结题批准。"
+                    ),
+                    en=(
+                        "The paper line is not yet ready for completion approval."
+                        + (f" Current blockers: {'; '.join(blocking_reasons[:4])}." if blocking_reasons else "")
+                        + " Finish the missing review/proofing/finalize outputs before asking to complete the quest."
+                    ),
+                )
+                return {
+                    "status": "completion_gate_blocked",
+                    "artifact_id": None,
+                    "interaction_id": None,
+                    "expects_reply": False,
+                    "reply_mode": "none",
+                    "delivered": False,
+                    "delivery_results": [],
+                    "response_phase": response_phase,
+                    "delivery_targets": [],
+                    "delivery_policy": self._delivery_policy(self._connectors_config()),
+                    "preferred_connector": self._preferred_connector(self._connectors_config()),
+                    "connector_hints": connector_hints_resolved,
+                    "normalized_attachments": attachments_resolved,
+                    "attachment_issues": attachment_issues,
+                    "recent_inbound_messages": [],
+                    "delivery_batch": None,
+                    "recent_interaction_records": self.quest_service.latest_artifact_interaction_records(quest_root, limit=10),
+                    "agent_instruction": guidance,
+                    "queued_message_count_before_delivery": 0,
+                    "queued_message_count_after_delivery": 0,
+                    "open_request_count": 0,
+                    "active_request": None,
+                    "default_reply_interaction_id": None,
+                    "decision_policy": decision_policy,
+                    "decision_type": decision_type,
+                    "guidance": guidance,
+                    "blocking_reasons": blocking_reasons,
+                }
         if (
             kind == "decision_request"
             and decision_policy == "autonomous"
