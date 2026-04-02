@@ -67,6 +67,7 @@ from .metrics import (
 from .schemas import ARTIFACT_DIRS, guidance_for_kind, validate_artifact_payload
 
 QUEST_COMPLETION_DECISION_TYPE = "quest_completion_approval"
+EXTERNAL_INPUT_DECISION_TYPE = "external_input_required"
 _COMPLETION_APPROVAL_TERMS = (
     "同意完成",
     "确认完成",
@@ -3252,7 +3253,18 @@ class ArtifactService:
             quest_root,
             workspace_root=workspace_root,
         )
+        citation_usage = self.quest_service._paper_citation_usage_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
+        citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
+        reference_gate = (
+            dict(reference_materialization.get("reference_gate") or {})
+            if isinstance(reference_materialization.get("reference_gate"), dict)
+            else {}
+        )
+        surface_consistency_ok = bool(reference_materialization.get("surface_consistency_ok", True))
         normalized_pending_slices = max(0, int(pending_slices or 0))
         blocking_reasons: list[str] = []
         if unmapped_completed_items:
@@ -3261,10 +3273,36 @@ class ArtifactService:
             blocking_reasons.append("required outline items are still unresolved")
         if normalized_pending_slices > 0:
             blocking_reasons.append("paper-facing supplementary slices are still pending")
+        if not surface_consistency_ok:
+            blocking_reasons.append("quest root and active worktree reference surfaces are inconsistent")
         if not bool(reference_materialization.get("bibliography_ready")):
-            blocking_reasons.append("paper bibliography is missing or empty")
+            blocking_reasons.append(
+                "paper bibliography has "
+                f"{int(reference_materialization.get('bibliography_entry_count') or 0)} entries; "
+                f"at least {int(reference_gate.get('minimum_bibliography_entries') or 0)} verified references are required"
+            )
         if not bool(reference_materialization.get("literature_ready")):
-            blocking_reasons.append("literature records have not been materialized")
+            blocking_reasons.append(
+                "literature materialization is below gate: "
+                f"total={int(reference_materialization.get('literature_record_count') or 0)}, "
+                f"pubmed={int((reference_materialization.get('literature_record_counts') or {}).get('pubmed') or 0)}; "
+                f"requires total>={int(reference_gate.get('minimum_total_literature_records') or 0)}, "
+                f"pubmed>={int(reference_gate.get('minimum_pubmed_records') or 0)}"
+            )
+        if not bool(citation_usage.get("draft_available")):
+            blocking_reasons.append("paper draft file is missing from the active writing workspace")
+        if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("cited_bibliography_ready")):
+            blocking_reasons.append(
+                "paper draft cites "
+                f"{int(citation_usage.get('cited_bibliography_entry_count') or 0)} verified references; "
+                f"at least {int(citation_usage.get('minimum_cited_bibliography_entries') or 0)} in-text references are required"
+            )
+        if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("citation_key_resolution_ok")):
+            unresolved_preview = ", ".join(str(item) for item in (citation_usage.get("unresolved_citation_keys") or [])[:6])
+            blocking_reasons.append(
+                "paper draft cites keys absent from references.bib"
+                + (f": {unresolved_preview}" if unresolved_preview else "")
+            )
 
         if unmapped_completed_items:
             recommended_next_stage = "write"
@@ -3272,15 +3310,21 @@ class ArtifactService:
         elif unresolved_required_items or normalized_pending_slices > 0:
             recommended_next_stage = "analysis-campaign"
             recommended_action = "complete_required_supplementary"
+        elif not surface_consistency_ok:
+            recommended_next_stage = "write"
+            recommended_action = "synchronize_reference_materials"
         elif not reference_materialization_ready:
             recommended_next_stage = "write"
             recommended_action = "materialize_reference_materials"
+        elif not citation_usage_ready:
+            recommended_next_stage = "write"
+            recommended_action = "revise_paper_citations"
         else:
             recommended_next_stage = "write"
             recommended_action = "continue_writing"
 
         contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and normalized_pending_slices == 0 and reference_materialization_ready
+        writing_ready = contract_ok and normalized_pending_slices == 0 and reference_materialization_ready and citation_usage_ready
         overall_status = str(submission_checklist.get("overall_status") or bundle_manifest.get("status") or "").strip().lower()
         delivered_at = str(
             bundle_manifest.get("paper_delivered_to_user_at")
@@ -3324,6 +3368,21 @@ class ArtifactService:
             "literature_record_count": int(reference_materialization.get("literature_record_count") or 0),
             "literature_record_counts": dict(reference_materialization.get("literature_record_counts") or {}),
             "literature_record_paths": list(reference_materialization.get("literature_record_paths") or []),
+            "reference_gate": reference_gate,
+            "surface_consistency_ok": surface_consistency_ok,
+            "surface_counts": list(reference_materialization.get("surface_counts") or []),
+            "citation_usage_ready": citation_usage_ready,
+            "draft_available": bool(citation_usage.get("draft_available")),
+            "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),
+            "draft_unique_citation_count": int(citation_usage.get("draft_unique_citation_count") or 0),
+            "draft_citation_keys": list(citation_usage.get("draft_citation_keys") or []),
+            "cited_bibliography_ready": bool(citation_usage.get("cited_bibliography_ready")),
+            "cited_bibliography_entry_count": int(citation_usage.get("cited_bibliography_entry_count") or 0),
+            "minimum_cited_bibliography_entries": int(citation_usage.get("minimum_cited_bibliography_entries") or 0),
+            "citation_key_resolution_ok": bool(citation_usage.get("citation_key_resolution_ok")),
+            "unresolved_citation_key_count": int(citation_usage.get("unresolved_citation_key_count") or 0),
+            "unresolved_citation_keys": list(citation_usage.get("unresolved_citation_keys") or []),
+            "citation_usage_by_section": list(citation_usage.get("citation_usage_by_section") or []),
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
@@ -6086,6 +6145,7 @@ class ArtifactService:
                 semantic_key=semantic_key,
             )
             if existing is not None:
+                self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
                 existing_record = dict(existing.get("payload") or {})
                 guidance_vm = dict(existing_record.get("guidance_vm") or {}) if isinstance(existing_record.get("guidance_vm"), dict) else {}
                 guidance_text = guidance_summary(guidance_vm) or guidance_for_kind(str(existing_record.get("kind") or payload.get("kind") or "report"))
@@ -6264,6 +6324,8 @@ class ArtifactService:
                     closing_artifact_id=artifact_id,
                 )
 
+        self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
+
         return {
             "ok": True,
             "artifact_id": artifact_id,
@@ -6282,6 +6344,30 @@ class ArtifactService:
             "checkpoint": checkpoint_result,
             "baseline_registry_entry": baseline_registry_entry,
         }
+
+    def _refresh_paper_line_state_if_present(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> None:
+        target_workspace = None
+        if workspace_root is not None and (workspace_root / "paper").exists():
+            target_workspace = workspace_root
+        else:
+            research_state = self.quest_service.read_research_state(quest_root)
+            workspace_mode = str(research_state.get("workspace_mode") or "").strip().lower()
+            current_workspace_root = str(research_state.get("current_workspace_root") or "").strip()
+            if workspace_mode == "paper" and current_workspace_root:
+                candidate = Path(current_workspace_root)
+                if (candidate / "paper").exists():
+                    target_workspace = candidate
+        if target_workspace is None and not (quest_root / "paper").exists():
+            return
+        try:
+            self._write_paper_line_state(quest_root, workspace_root=target_workspace)
+        except Exception:
+            return
 
     def checkpoint(self, quest_root: Path, message: str, *, allow_empty: bool = False) -> dict:
         result = checkpoint_repo(quest_root, message, allow_empty=allow_empty)
@@ -9038,6 +9124,31 @@ class ArtifactService:
                 + "; ".join(problems)
                 + "."
             )
+        citation_usage = self.quest_service._paper_citation_usage_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
+        if not bool(citation_usage.get("citation_usage_ready")):
+            problems = []
+            if not bool(citation_usage.get("draft_available")):
+                problems.append("paper draft file is missing")
+            if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("cited_bibliography_ready")):
+                problems.append(
+                    "paper draft cites "
+                    f"{int(citation_usage.get('cited_bibliography_entry_count') or 0)} verified references; "
+                    f"at least {int(citation_usage.get('minimum_cited_bibliography_entries') or 0)} in-text references are required"
+                )
+            if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("citation_key_resolution_ok")):
+                unresolved_preview = ", ".join(str(item) for item in (citation_usage.get("unresolved_citation_keys") or [])[:6])
+                problems.append(
+                    "paper draft cites keys absent from references.bib"
+                    + (f": {unresolved_preview}" if unresolved_preview else "")
+                )
+            raise ValueError(
+                "submit_paper_bundle blocked because citation usage is incomplete: "
+                + "; ".join(problems)
+                + "."
+            )
 
         manifest_path = self._paper_bundle_manifest_path(quest_root, workspace_root=workspace_root)
         baseline_inventory = self._write_paper_baseline_inventory(quest_root, workspace_root=workspace_root)
@@ -10457,7 +10568,7 @@ class ArtifactService:
         if (
             kind == "decision_request"
             and decision_policy == "autonomous"
-            and decision_type != QUEST_COMPLETION_DECISION_TYPE
+            and decision_type not in {QUEST_COMPLETION_DECISION_TYPE, EXTERNAL_INPUT_DECISION_TYPE}
         ):
             mailbox_payload = {
                 "delivery_batch": None,

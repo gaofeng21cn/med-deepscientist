@@ -68,12 +68,31 @@ def _confirm_local_baseline(artifact: ArtifactService, quest_root: Path, baselin
     )
 
 
-def _materialize_reference_materials(quest_root: Path, paper_root: Path, *, workspace_root: Path | None = None) -> None:
+def _materialize_reference_materials(
+    quest_root: Path,
+    paper_root: Path,
+    *,
+    workspace_root: Path | None = None,
+    count: int = 20,
+) -> None:
     paper_root.mkdir(parents=True, exist_ok=True)
-    (paper_root / "references.bib").write_text(
-        "@article{demo2026, title={Demo Reference}}\n",
-        encoding="utf-8",
-    )
+    entries = []
+    records = []
+    for index in range(1, count + 1):
+        citation_id = f"demo2026{index:02d}"
+        pmid = f"4000{index:04d}"
+        entries.append(f"@article{{{citation_id}, title={{Demo Reference {index}}}}}\n")
+        records.append(
+            json.dumps(
+                {
+                    "record_id": f"pubmed-demo-{index:03d}",
+                    "source": "pubmed",
+                    "title": f"Demo Reference {index}",
+                    "pmid": pmid,
+                }
+            )
+        )
+    bibliography = "".join(entries)
     roots: list[Path] = [quest_root]
     if workspace_root is not None:
         roots.append(workspace_root)
@@ -85,20 +104,34 @@ def _materialize_reference_materials(quest_root: Path, paper_root: Path, *, work
         if key in seen:
             continue
         seen.add(key)
+        (root / "paper").mkdir(parents=True, exist_ok=True)
+        (root / "paper" / "references.bib").write_text(bibliography, encoding="utf-8")
         literature_root = root / "literature" / "pubmed"
         literature_root.mkdir(parents=True, exist_ok=True)
-        (literature_root / "records.jsonl").write_text(
-            json.dumps(
-                {
-                    "record_id": "pubmed-demo-001",
-                    "source": "pubmed",
-                    "title": "Demo Reference",
-                    "pmid": "40000001",
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        (literature_root / "records.jsonl").write_text("\n".join(records) + "\n", encoding="utf-8")
+
+
+def _write_citation_rich_draft(paper_root: Path, *, count: int = 20) -> None:
+    citation_keys = [f"@demo2026{index:02d}" for index in range(1, count + 1)]
+    intro_keys = "; ".join(citation_keys[:10])
+    discussion_keys = "; ".join(citation_keys[10:20])
+    (paper_root / "draft.md").write_text(
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "## Introduction",
+                "",
+                f"Prediction-model evidence anchors the manuscript framing [{intro_keys}].",
+                "",
+                "## Discussion",
+                "",
+                f"The discussion remains attached to the verified citation surface [{discussion_keys}].",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_confirm_baseline_writes_metric_contract_json_and_exposes_path(temp_home: Path) -> None:
@@ -1343,6 +1376,7 @@ def test_artifact_stage_milestones_emit_semantic_connector_messages(temp_home: P
     paper_workspace = quest_service.active_workspace_root(quest_root)
     paper_root = paper_workspace / "paper"
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
+    _write_citation_rich_draft(paper_root)
     (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%semantic\n")
     campaign = artifact.create_analysis_campaign(
         quest_root,
@@ -1943,7 +1977,7 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     paper_workspace = quest_service.active_workspace_root(quest_root)
     paper_root = paper_workspace / "paper"
     paper_root.mkdir(parents=True, exist_ok=True)
-    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    _write_citation_rich_draft(paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
@@ -2020,7 +2054,7 @@ def test_submit_paper_bundle_can_prepare_open_source_when_enabled(temp_home: Pat
     paper_workspace = quest_service.active_workspace_root(quest_root)
     paper_root = paper_workspace / "paper"
     paper_root.mkdir(parents=True, exist_ok=True)
-    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    _write_citation_rich_draft(paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
@@ -2082,7 +2116,7 @@ def test_submit_paper_bundle_blocks_unmapped_completed_analysis(temp_home: Path)
     paper_workspace = quest_service.active_workspace_root(quest_root)
     paper_root = paper_workspace / "paper"
     paper_root.mkdir(parents=True, exist_ok=True)
-    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    _write_citation_rich_draft(paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
@@ -2143,7 +2177,7 @@ def test_submit_paper_bundle_blocks_missing_reference_materialization(temp_home:
     paper_workspace = quest_service.active_workspace_root(quest_root)
     paper_root = paper_workspace / "paper"
     paper_root.mkdir(parents=True, exist_ok=True)
-    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    _write_citation_rich_draft(paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
     write_json(paper_root / "build" / "compile_report.json", {"ok": True})
@@ -2160,6 +2194,81 @@ def test_submit_paper_bundle_blocks_missing_reference_materialization(temp_home:
     assert "reference materialization is incomplete" in str(exc_info.value)
     assert "paper bibliography is missing or empty" in str(exc_info.value)
     assert "literature records have not been materialized" in str(exc_info.value)
+
+
+def test_submit_paper_bundle_blocks_thin_in_text_citation_usage(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("thin in-text citation bundle quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Thin Citation Outline",
+        note="Bundle should be blocked if the draft only cites a few papers.",
+        detailed_outline={
+            "title": "Thin Citation Outline",
+            "research_questions": ["RQ-cite"],
+            "experimental_designs": ["Exp-cite"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use the outline and enforce manuscript-scale citation coverage.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    (paper_root / "draft.md").write_text(
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "## Introduction",
+                "",
+                "Prior diabetes prediction studies motivate a clinically interpretable manuscript "
+                "[@demo202601; @demo202602].",
+                "",
+                "## Discussion",
+                "",
+                "The present work should also be situated against mortality-model and validation literature "
+                "[@demo202603; @demo202604].",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(paper_root / "build" / "compile_report.json", {"ok": True})
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace, count=20)
+
+    with pytest.raises(ValueError) as exc_info:
+        artifact.submit_paper_bundle(
+            quest_root,
+            title="Thin Citation Paper",
+            summary="This should be blocked by the in-text citation gate.",
+            pdf_path="paper/paper.pdf",
+        )
+
+    assert "citation usage is incomplete" in str(exc_info.value)
+    assert "paper draft cites 4 verified references" in str(exc_info.value)
+    assert "at least 20 in-text references are required" in str(exc_info.value)
 
 
 def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home: Path) -> None:
@@ -2205,7 +2314,7 @@ def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home:
         ),
         encoding="utf-8",
     )
-    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    _write_citation_rich_draft(paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
@@ -4231,6 +4340,204 @@ def test_artifact_interact_allows_completion_approval_in_autonomous_mode(temp_ho
     snapshot_after = quest_service.snapshot(quest["quest_id"])
     assert snapshot_after["status"] == "waiting_for_user"
     assert snapshot_after["pending_decisions"]
+
+
+def test_artifact_interact_blocks_completion_approval_for_incomplete_paper_finalize_gate(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create(
+        "autonomous incomplete paper completion approval quest",
+        startup_contract={"decision_policy": "autonomous"},
+    )
+    quest_root = Path(quest["quest_root"])
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Incomplete Finalize Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-incomplete-finalize-gate",
+            "paper_branch": "paper/incomplete-finalize-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Incomplete Finalize Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-02T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/incomplete-finalize-gate",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+    artifact = ArtifactService(temp_home)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest appears complete. May I end it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+    )
+
+    assert request["status"] == "completion_gate_blocked"
+    assert request["reply_mode"] == "none"
+    assert request["interaction_id"] is None
+    assert "skeptical review outputs are missing" in str(request["guidance"])
+    snapshot_after = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_after["status"] != "waiting_for_user"
+    assert not snapshot_after["pending_decisions"]
+
+
+def test_artifact_interact_allows_external_input_request_in_autonomous_mode(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create(
+        "autonomous external-input quest",
+        startup_contract={"decision_policy": "autonomous"},
+    )
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="Please provide the final author block and affiliations.",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "external_input_required"},
+    )
+
+    assert request["status"] == "ok"
+    assert request["reply_mode"] == "blocking"
+    snapshot_after = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_after["status"] == "waiting_for_user"
+    assert snapshot_after["pending_decisions"]
+
+
+def test_paper_decision_record_refreshes_stale_status_and_summary(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper decision sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Decision Sync Outline",
+        detailed_outline={
+            "title": "Decision Sync Outline",
+            "research_questions": ["RQ-sync-decision"],
+            "experimental_designs": ["EXP-sync-decision"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace, count=21)
+    _write_citation_rich_draft(paper_root, count=21)
+
+    stale_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    stale_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "Bibliography Entries: `21`" not in stale_status
+    assert "Bibliography entries: `21`" not in stale_summary
+
+    artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "title": "Refresh paper-line sync after bibliography materialization",
+            "summary": "Paper-line sync should reflect the latest bibliography and citation surface.",
+            "verdict": "good",
+            "action": "continue",
+            "reason": "The paper workspace changed and durable paper-line sync should be refreshed.",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    refreshed_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    refreshed_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "Bibliography Entries: `21`" in refreshed_status
+    assert "Bibliography entries: `21`" in refreshed_summary
+
+
+def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper semantic sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Semantic Sync Outline",
+        detailed_outline={
+            "title": "Semantic Sync Outline",
+            "research_questions": ["RQ-semantic-sync"],
+            "experimental_designs": ["EXP-semantic-sync"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+
+    decision_payload = {
+        "kind": "decision",
+        "title": "Keep waiting at the external metadata gate",
+        "summary": "The paper line is blocked only by external metadata.",
+        "verdict": "blocked",
+        "action": "request_user_decision",
+        "reason": "External metadata is still required before submission-facing continuation.",
+        "semantic_key": "paper-decision-wait-author-metadata",
+    }
+
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace, count=20)
+    _write_citation_rich_draft(paper_root, count=20)
+    first = artifact.record(quest_root, decision_payload, workspace_root=paper_workspace)
+    assert first["ok"] is True
+    assert "Bibliography Entries: `20`" in (quest_root / "status.md").read_text(encoding="utf-8")
+
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace, count=21)
+    _write_citation_rich_draft(paper_root, count=21)
+    second = artifact.record(quest_root, decision_payload, workspace_root=paper_workspace)
+
+    assert second["status"] == "semantically_equivalent"
+    assert "Bibliography Entries: `21`" in (quest_root / "status.md").read_text(encoding="utf-8")
+    assert "Bibliography entries: `21`" in (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
 
 
 def test_bind_source_repairs_lowercased_connector_binding_and_preserves_chat_id_case(temp_home: Path) -> None:
