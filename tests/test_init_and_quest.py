@@ -9,24 +9,52 @@ from deepscientist.cli import _local_ui_url, init_command, pause_command
 from deepscientist.home import ensure_home_layout, repo_root
 from deepscientist.mcp.context import McpContext
 from deepscientist.quest import QuestService
-from deepscientist.shared import ensure_dir, write_json, write_text
+from deepscientist.shared import ensure_dir, write_json, write_text, write_yaml
 from deepscientist.skills import SkillInstaller
 
 
-def _materialize_reference_materials(quest_root: Path, paper_root: Path) -> None:
-    write_text(paper_root / "references.bib", "@article{demo2026, title={Demo Reference}}\n")
-    literature_root = ensure_dir(quest_root / "literature" / "pubmed")
-    write_text(
-        literature_root / "records.jsonl",
-        json.dumps(
-            {
-                "record_id": "pubmed-demo-001",
-                "source": "pubmed",
-                "title": "Demo Reference",
-                "pmid": "40000001",
-            }
+def _materialize_reference_materials(quest_root: Path, paper_root: Path, *, count: int = 20) -> None:
+    entries = []
+    records = []
+    for index in range(1, count + 1):
+        citation_id = f"demo2026{index:02d}"
+        pmid = f"4000{index:04d}"
+        entries.append(f"@article{{{citation_id}, title={{Demo Reference {index}}}}}\n")
+        records.append(
+            json.dumps(
+                {
+                    "record_id": f"pubmed-demo-{index:03d}",
+                    "source": "pubmed",
+                    "title": f"Demo Reference {index}",
+                    "pmid": pmid,
+                }
+            )
         )
-        + "\n",
+    write_text(paper_root / "references.bib", "".join(entries))
+    literature_root = ensure_dir(quest_root / "literature" / "pubmed")
+    write_text(literature_root / "records.jsonl", "\n".join(records) + "\n")
+
+
+def _write_citation_rich_draft(paper_root: Path, *, count: int = 20) -> None:
+    citation_keys = [f"@demo2026{index:02d}" for index in range(1, count + 1)]
+    intro_keys = "; ".join(citation_keys[:10])
+    discussion_keys = "; ".join(citation_keys[10:20])
+    write_text(
+        paper_root / "draft.md",
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "## Introduction",
+                "",
+                f"Prediction-model literature motivates the manuscript framing [{intro_keys}].",
+                "",
+                "## Discussion",
+                "",
+                f"The discussion remains anchored to the verified literature set [{discussion_keys}].",
+                "",
+            ]
+        ),
     )
 
 
@@ -284,7 +312,7 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     write_text(paper_root / "evidence_ledger.md", "# Ledger\n")
     review_root = ensure_dir(paper_root / "review")
     write_json(review_root / "submission_checklist.json", {"blocking_items": []})
-    write_text(paper_root / "draft.md", "# Draft\n")
+    _write_citation_rich_draft(paper_root)
     _materialize_reference_materials(quest_root, paper_root)
     analysis_manifest_root = ensure_dir(quest_root / ".ds" / "analysis_campaigns")
     write_json(
@@ -414,8 +442,191 @@ def test_snapshot_blocks_finalize_when_reference_materialization_is_missing(temp
     assert health["literature_ready"] is False
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "materialize_reference_materials"
-    assert "paper bibliography is missing or empty" in health["blocking_reasons"]
-    assert "literature records have not been materialized" in health["blocking_reasons"]
+    assert "at least 12 verified references are required" in " ".join(health["blocking_reasons"])
+    assert "requires total>=12, pubmed>=6" in " ".join(health["blocking_reasons"])
+
+
+def test_snapshot_blocks_thin_and_drifted_reference_materialization(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper thin reference gate quest")
+    quest_root = Path(snapshot["quest_root"])
+    worktree_root = ensure_dir(quest_root / ".ds" / "worktrees" / "paper-thin")
+    service.update_research_state(quest_root, current_workspace_root=str(worktree_root))
+
+    paper_root = ensure_dir(worktree_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Thin Reference Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-thin-reference-gate",
+            "paper_branch": "paper/thin-reference-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Thin Reference Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-02T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/thin-reference-gate",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    ensure_dir(quest_root / "paper")
+    write_json(
+        quest_root / "paper" / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_text(paper_root / "draft.md", "# Draft\n")
+    write_text(
+        paper_root / "references.bib",
+        "".join(f"@article{{thin2026{index:02d}, title={{Thin Reference {index}}}}}\n" for index in range(1, 5)),
+    )
+    literature_root = ensure_dir(worktree_root / "literature" / "pubmed")
+    write_text(
+        literature_root / "records.jsonl",
+        "\n".join(
+            json.dumps(
+                {
+                    "record_id": f"pubmed-thin-{index:03d}",
+                    "source": "pubmed",
+                    "title": f"Thin Reference {index}",
+                    "pmid": f"4999{index:04d}",
+                }
+            )
+            for index in range(1, 5)
+        )
+        + "\n",
+    )
+    write_text(quest_root / "paper" / "references.bib", "")
+    ensure_dir(quest_root / "literature" / "pubmed")
+    write_text(quest_root / "literature" / "pubmed" / "records.jsonl", "")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["contract_ok"] is True
+    assert health["writing_ready"] is False
+    assert health["finalize_ready"] is False
+    assert health["reference_materialization_ready"] is False
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] in {"materialize_reference_materials", "synchronize_reference_materials"}
+    assert "at least 20 verified references are required" in " ".join(health["blocking_reasons"])
+
+
+def test_snapshot_blocks_paper_with_thin_in_text_citation_usage(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper in-text citation gate quest")
+    quest_root = Path(snapshot["quest_root"])
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Citation Usage Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-citation-usage-gate",
+            "paper_branch": "paper/citation-usage-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Citation Usage Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-02T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/citation-usage-gate",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    write_text(
+        paper_root / "draft.md",
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "## Introduction",
+                "",
+                "Clinical prediction reports should stay transparent and transportability-aware "
+                "[@demo202601; @demo202602].",
+                "",
+                "## Discussion",
+                "",
+                "Diabetes mortality models remain clinically relevant but need honest scope control "
+                "[@demo202603; @demo202604].",
+                "",
+            ]
+        ),
+    )
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["contract_ok"] is True
+    assert health["reference_materialization_ready"] is True
+    assert health["citation_usage_ready"] is False
+    assert health["cited_bibliography_entry_count"] == 4
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "revise_paper_citations"
+    assert "paper draft cites 4 verified references" in " ".join(health["blocking_reasons"])
+    assert "at least 20 in-text references are required" in " ".join(health["blocking_reasons"])
+
+
+def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    service = QuestService(temp_home)
+
+    newer = service.create("newer quest")
+    legacy = service.create("legacy quest")
+
+    legacy_root = Path(legacy["quest_root"])
+    legacy_yaml = service.read_quest_yaml(legacy_root)
+    legacy_yaml["updated_at"] = None
+    write_yaml(legacy_root / "quest.yaml", legacy_yaml)
+
+    items = service.list_quests()
+
+    item_by_id = {item["quest_id"]: item for item in items}
+    assert set(item_by_id) == {newer["quest_id"], legacy["quest_id"]}
+    assert item_by_id[legacy["quest_id"]]["updated_at"] is None
 
 
 def test_auto_generated_quest_ids_initialize_from_existing_numeric_quests(temp_home: Path) -> None:

@@ -1635,6 +1635,114 @@ class QuestService:
             return 0
         return len(re.findall(r"(?m)^\s*@[A-Za-z0-9_-]+\s*\{", text))
 
+    @staticmethod
+    def _bibtex_entry_keys(text: str) -> list[str]:
+        if not text.strip():
+            return []
+        return [
+            match.strip()
+            for match in re.findall(r"(?m)^\s*@[A-Za-z0-9_-]+\s*\{\s*([^,\s]+)\s*,", text)
+            if match.strip()
+        ]
+
+    @staticmethod
+    def _markdown_citation_keys(text: str) -> list[str]:
+        if not text.strip():
+            return []
+        keys: list[str] = []
+        for block in re.findall(r"\[[^\]]*@[^]]+\]", text):
+            for match in re.finditer(r"(?<![A-Za-z0-9_])@([A-Za-z0-9][A-Za-z0-9:_./-]*)", block):
+                key = match.group(1).strip()
+                if key:
+                    keys.append(key)
+        return keys
+
+    @classmethod
+    def _markdown_citation_usage_by_section(cls, text: str) -> list[dict[str, Any]]:
+        sections: dict[str, list[str]] = {"preamble": []}
+        current_section = "preamble"
+        for line in text.splitlines():
+            heading = re.match(r"^##\s+(.*)", line)
+            if heading:
+                current_section = heading.group(1).strip() or "unnamed"
+                sections.setdefault(current_section, [])
+            sections.setdefault(current_section, [])
+            sections[current_section].extend(cls._markdown_citation_keys(line))
+
+        payload: list[dict[str, Any]] = []
+        for section, keys in sections.items():
+            if not keys:
+                continue
+            unique_keys = list(dict.fromkeys(keys))
+            payload.append(
+                {
+                    "section": section,
+                    "citation_count": len(keys),
+                    "unique_citation_count": len(unique_keys),
+                    "citation_keys": unique_keys,
+                }
+            )
+        return payload
+
+    def _paper_reference_gate_payload(self, roots: list[Path]) -> dict[str, Any]:
+        contract: dict[str, Any] = {}
+        contract_path: str | None = None
+        for root in roots:
+            candidate = root / "paper" / "medical_reporting_contract.json"
+            if not candidate.exists():
+                continue
+            payload = read_json(candidate, {})
+            if isinstance(payload, dict) and payload:
+                contract = payload
+                contract_path = str(candidate)
+                break
+
+        requirements: dict[str, Any] = {
+            "minimum_bibliography_entries": 12,
+            "minimum_total_literature_records": 12,
+            "minimum_pubmed_records": 6,
+            "minimum_cited_bibliography_entries": 12,
+            "target_verified_reference_count": 20,
+            "require_surface_sync": True,
+            "publication_profile": str(contract.get("publication_profile") or "").strip() or None,
+            "manuscript_family": str(contract.get("manuscript_family") or "").strip() or None,
+            "reporting_guideline_family": str(contract.get("reporting_guideline_family") or "").strip() or None,
+            "contract_path": contract_path,
+        }
+        manuscript_family = str(contract.get("manuscript_family") or "").strip().lower()
+        reporting_guideline = str(contract.get("reporting_guideline_family") or "").strip().lower()
+        publication_profile = str(contract.get("publication_profile") or "").strip().lower()
+        if (
+            manuscript_family == "prediction_model"
+            or reporting_guideline == "tripod"
+            or publication_profile == "general_medical_journal"
+        ):
+            requirements.update(
+                {
+                    "minimum_bibliography_entries": 20,
+                    "minimum_total_literature_records": 20,
+                    "minimum_pubmed_records": 10,
+                    "minimum_cited_bibliography_entries": 20,
+                    "target_verified_reference_count": 30,
+                }
+            )
+
+        overrides = contract.get("reference_gate")
+        if isinstance(overrides, dict):
+            for key in (
+                "minimum_bibliography_entries",
+                "minimum_total_literature_records",
+                "minimum_pubmed_records",
+                "minimum_cited_bibliography_entries",
+                "target_verified_reference_count",
+            ):
+                if overrides.get(key) is None:
+                    continue
+                requirements[key] = max(0, int(overrides.get(key) or 0))
+            if overrides.get("require_surface_sync") is not None:
+                requirements["require_surface_sync"] = bool(overrides.get("require_surface_sync"))
+        return requirements
+
     def _paper_reference_materialization_payload(
         self,
         quest_root: Path,
@@ -1652,21 +1760,25 @@ class QuestService:
             seen_roots.add(key)
             roots.append(root)
 
+        reference_gate = self._paper_reference_gate_payload(roots)
         references_path = paper_root / "references.bib"
         bibliography_entry_count = 0
+        bibliography_counts_by_root: dict[str, int] = {}
         for root in roots:
             candidate = root / "paper" / "references.bib"
+            entry_count = self._bibtex_entry_count(read_text(candidate, "")) if candidate.exists() else 0
+            bibliography_counts_by_root[str(root)] = entry_count
             if not candidate.exists():
                 continue
-            entry_count = self._bibtex_entry_count(read_text(candidate, ""))
             if entry_count > bibliography_entry_count:
                 bibliography_entry_count = entry_count
                 references_path = candidate
-        bibliography_ready = bibliography_entry_count > 0
+        bibliography_ready = bibliography_entry_count >= int(reference_gate.get("minimum_bibliography_entries") or 0)
 
         literature_record_count = 0
         literature_record_paths: list[str] = []
         literature_record_counts: dict[str, int] = {}
+        literature_record_counts_by_root: dict[str, dict[str, int]] = {}
         for label, relative in (
             ("pubmed", "literature/pubmed/records.jsonl"),
             ("imported", "literature/imported/records.jsonl"),
@@ -1675,9 +1787,11 @@ class QuestService:
             best_count = -1
             for root in roots:
                 candidate = root / relative
+                counts_for_root = literature_record_counts_by_root.setdefault(str(root), {})
+                count = len(read_jsonl(candidate)) if candidate.exists() else 0
+                counts_for_root[label] = count
                 if not candidate.exists():
                     continue
-                count = len(read_jsonl(candidate))
                 if count > best_count:
                     best_count = count
                     best_path = candidate
@@ -1687,8 +1801,43 @@ class QuestService:
             if best_path is not None:
                 literature_record_paths.append(str(best_path))
 
-        literature_ready = literature_record_count > 0
-        reference_materialization_ready = bibliography_ready and literature_ready
+        surface_counts: list[dict[str, Any]] = []
+        for root in roots:
+            bibliography_path = root / "paper" / "references.bib"
+            pubmed_path = root / "literature" / "pubmed" / "records.jsonl"
+            imported_path = root / "literature" / "imported" / "records.jsonl"
+            if not any(path.exists() for path in (bibliography_path, pubmed_path, imported_path)):
+                continue
+            per_root_counts = literature_record_counts_by_root.get(str(root), {})
+            pubmed_count = int(per_root_counts.get("pubmed") or 0)
+            imported_count = int(per_root_counts.get("imported") or 0)
+            surface_counts.append(
+                {
+                    "workspace_root": str(root),
+                    "bibliography_entry_count": int(bibliography_counts_by_root.get(str(root)) or 0),
+                    "literature_record_counts": {
+                        "pubmed": pubmed_count,
+                        "imported": imported_count,
+                    },
+                    "literature_record_count": pubmed_count + imported_count,
+                }
+            )
+        surface_signatures = {
+            (
+                int(item.get("bibliography_entry_count") or 0),
+                int(((item.get("literature_record_counts") or {}).get("pubmed")) or 0),
+                int(((item.get("literature_record_counts") or {}).get("imported")) or 0),
+            )
+            for item in surface_counts
+        }
+        surface_consistency_ok = len(surface_signatures) <= 1 or not bool(reference_gate.get("require_surface_sync"))
+        minimum_total_records = int(reference_gate.get("minimum_total_literature_records") or 0)
+        minimum_pubmed_records = int(reference_gate.get("minimum_pubmed_records") or 0)
+        literature_ready = (
+            literature_record_count >= minimum_total_records
+            and int(literature_record_counts.get("pubmed") or 0) >= minimum_pubmed_records
+        )
+        reference_materialization_ready = bibliography_ready and literature_ready and surface_consistency_ok
         return {
             "reference_materialization_ready": reference_materialization_ready,
             "bibliography_ready": bibliography_ready,
@@ -1698,6 +1847,60 @@ class QuestService:
             "literature_record_count": literature_record_count,
             "literature_record_counts": literature_record_counts,
             "literature_record_paths": literature_record_paths,
+            "reference_gate": reference_gate,
+            "surface_consistency_ok": surface_consistency_ok,
+            "surface_counts": surface_counts,
+        }
+
+    def _paper_citation_usage_payload(
+        self,
+        quest_root: Path,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        resolved_workspace_root = workspace_root or self.active_workspace_root(quest_root)
+        paper_root = self._best_paper_root(quest_root, resolved_workspace_root) or (resolved_workspace_root / "paper")
+        reference_materialization = self._paper_reference_materialization_payload(
+            quest_root,
+            workspace_root=resolved_workspace_root,
+        )
+        reference_gate = (
+            dict(reference_materialization.get("reference_gate") or {})
+            if isinstance(reference_materialization.get("reference_gate"), dict)
+            else {}
+        )
+        draft_path = paper_root / "draft.md"
+        draft_available = draft_path.exists()
+        draft_text = read_text(draft_path, "") if draft_available else ""
+        cited_keys = self._markdown_citation_keys(draft_text)
+        unique_cited_keys = list(dict.fromkeys(cited_keys))
+        references_path = Path(str(reference_materialization.get("references_path") or "").strip() or (paper_root / "references.bib"))
+        bibliography_keys = self._bibtex_entry_keys(read_text(references_path, ""))
+        bibliography_key_set = set(bibliography_keys)
+        cited_bibliography_keys = [key for key in unique_cited_keys if key in bibliography_key_set]
+        cited_bibliography_key_set = set(cited_bibliography_keys)
+        unresolved_citation_keys = [key for key in unique_cited_keys if key not in bibliography_key_set]
+        uncited_bibliography_keys = [key for key in bibliography_keys if key not in cited_bibliography_key_set]
+        minimum_cited_entries = int(reference_gate.get("minimum_cited_bibliography_entries") or 0)
+        cited_bibliography_ready = draft_available and len(cited_bibliography_keys) >= minimum_cited_entries
+        citation_key_resolution_ok = draft_available and not unresolved_citation_keys
+        citation_usage_ready = draft_available and cited_bibliography_ready and citation_key_resolution_ok
+        return {
+            "citation_usage_ready": citation_usage_ready,
+            "draft_available": draft_available,
+            "draft_path": str(draft_path),
+            "draft_citation_count": len(cited_keys),
+            "draft_unique_citation_count": len(unique_cited_keys),
+            "draft_citation_keys": unique_cited_keys,
+            "cited_bibliography_ready": cited_bibliography_ready,
+            "cited_bibliography_entry_count": len(cited_bibliography_keys),
+            "cited_bibliography_keys": cited_bibliography_keys,
+            "minimum_cited_bibliography_entries": minimum_cited_entries,
+            "citation_key_resolution_ok": citation_key_resolution_ok,
+            "unresolved_citation_key_count": len(unresolved_citation_keys),
+            "unresolved_citation_keys": unresolved_citation_keys,
+            "uncited_bibliography_entry_count": len(uncited_bibliography_keys),
+            "uncited_bibliography_keys": uncited_bibliography_keys,
+            "citation_usage_by_section": self._markdown_citation_usage_by_section(draft_text),
         }
 
     def _outline_record_from_paper_root(self, paper_root: Path) -> dict[str, Any]:
@@ -2384,9 +2587,20 @@ class QuestService:
             quest_root,
             workspace_root=((Path(str((paper_contract or {}).get("workspace_root") or "").strip()) if str((paper_contract or {}).get("workspace_root") or "").strip() else None) or None),
         )
+        citation_usage = self._paper_citation_usage_payload(
+            quest_root,
+            workspace_root=((Path(str((paper_contract or {}).get("workspace_root") or "").strip()) if str((paper_contract or {}).get("workspace_root") or "").strip() else None) or None),
+        )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
+        citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
+        reference_gate = (
+            dict(reference_materialization.get("reference_gate") or {})
+            if isinstance(reference_materialization.get("reference_gate"), dict)
+            else {}
+        )
+        surface_consistency_ok = bool(reference_materialization.get("surface_consistency_ok", True))
         contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and not blocking_pending_slices and reference_materialization_ready
+        writing_ready = contract_ok and not blocking_pending_slices and reference_materialization_ready and citation_usage_ready
         draft_path = str((paper_contract.get("paths") or {}).get("draft") or "").strip()
         draft_status = str(active_line.get("draft_status") or "").strip() or ("present" if draft_path else "missing")
         bundle_status = str(active_line.get("bundle_status") or "").strip() or (
@@ -2424,12 +2638,18 @@ class QuestService:
         elif unresolved_required_items or blocking_pending_slices:
             recommended_next_stage = "analysis-campaign"
             recommended_action = "complete_required_supplementary"
+        elif not surface_consistency_ok:
+            recommended_next_stage = "write"
+            recommended_action = "synchronize_reference_materials"
         elif not reference_materialization_ready:
             recommended_next_stage = "write"
             recommended_action = "materialize_reference_materials"
         elif draft_status != "present":
             recommended_next_stage = "write"
             recommended_action = "draft_paper"
+        elif not citation_usage_ready:
+            recommended_next_stage = "write"
+            recommended_action = "revise_paper_citations"
         elif bundle_status != "present":
             recommended_next_stage = "write"
             recommended_action = "prepare_bundle"
@@ -2444,10 +2664,36 @@ class QuestService:
             blocking_reasons.append("required outline items are still unresolved")
         if blocking_pending_slices:
             blocking_reasons.append("main-text supplementary slices are still pending")
+        if not surface_consistency_ok:
+            blocking_reasons.append("quest root and active worktree reference surfaces are inconsistent")
         if not bool(reference_materialization.get("bibliography_ready")):
-            blocking_reasons.append("paper bibliography is missing or empty")
+            blocking_reasons.append(
+                "paper bibliography has "
+                f"{int(reference_materialization.get('bibliography_entry_count') or 0)} entries; "
+                f"at least {int(reference_gate.get('minimum_bibliography_entries') or 0)} verified references are required"
+            )
         if not bool(reference_materialization.get("literature_ready")):
-            blocking_reasons.append("literature records have not been materialized")
+            blocking_reasons.append(
+                "literature materialization is below gate: "
+                f"total={int(reference_materialization.get('literature_record_count') or 0)}, "
+                f"pubmed={int((reference_materialization.get('literature_record_counts') or {}).get('pubmed') or 0)}; "
+                f"requires total>={int(reference_gate.get('minimum_total_literature_records') or 0)}, "
+                f"pubmed>={int(reference_gate.get('minimum_pubmed_records') or 0)}"
+            )
+        if draft_status == "present" and not bool(citation_usage.get("draft_available")):
+            blocking_reasons.append("paper draft file is missing from the active writing workspace")
+        if draft_status == "present" and bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("cited_bibliography_ready")):
+            blocking_reasons.append(
+                "paper draft cites "
+                f"{int(citation_usage.get('cited_bibliography_entry_count') or 0)} verified references; "
+                f"at least {int(citation_usage.get('minimum_cited_bibliography_entries') or 0)} in-text references are required"
+            )
+        if draft_status == "present" and bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("citation_key_resolution_ok")):
+            unresolved_preview = ", ".join(str(item) for item in (citation_usage.get("unresolved_citation_keys") or [])[:6])
+            blocking_reasons.append(
+                "paper draft cites keys absent from references.bib"
+                + (f": {unresolved_preview}" if unresolved_preview else "")
+            )
 
         return {
             "paper_line_id": active_line_id,
@@ -2491,6 +2737,21 @@ class QuestService:
             "literature_record_count": int(reference_materialization.get("literature_record_count") or 0),
             "literature_record_counts": dict(reference_materialization.get("literature_record_counts") or {}),
             "literature_record_paths": list(reference_materialization.get("literature_record_paths") or []),
+            "reference_gate": reference_gate,
+            "surface_consistency_ok": surface_consistency_ok,
+            "surface_counts": list(reference_materialization.get("surface_counts") or []),
+            "citation_usage_ready": citation_usage_ready,
+            "draft_available": bool(citation_usage.get("draft_available")),
+            "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),
+            "draft_unique_citation_count": int(citation_usage.get("draft_unique_citation_count") or 0),
+            "draft_citation_keys": list(citation_usage.get("draft_citation_keys") or []),
+            "cited_bibliography_ready": bool(citation_usage.get("cited_bibliography_ready")),
+            "cited_bibliography_entry_count": int(citation_usage.get("cited_bibliography_entry_count") or 0),
+            "minimum_cited_bibliography_entries": int(citation_usage.get("minimum_cited_bibliography_entries") or 0),
+            "citation_key_resolution_ok": bool(citation_usage.get("citation_key_resolution_ok")),
+            "unresolved_citation_key_count": int(citation_usage.get("unresolved_citation_key_count") or 0),
+            "unresolved_citation_keys": list(citation_usage.get("unresolved_citation_keys") or []),
+            "citation_usage_by_section": list(citation_usage.get("citation_usage_by_section") or []),
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
@@ -2684,7 +2945,11 @@ class QuestService:
         for quest_yaml in sorted(self.quests_root.glob("*/quest.yaml")):
             quest_id = quest_yaml.parent.name
             items.append(self.summary_compact(quest_id))
-        return sorted(items, key=lambda item: item.get("updated_at", ""), reverse=True)
+        return sorted(
+            items,
+            key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+            reverse=True,
+        )
 
     def _path_states(self, paths: list[Path]) -> tuple[tuple[str, tuple[int, int, int] | None], ...]:
         states: list[tuple[str, tuple[int, int, int] | None]] = []
