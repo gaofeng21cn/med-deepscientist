@@ -66,6 +66,8 @@ def test_backend_routes_cover_shared_web_and_tui_surface() -> None:
         ("PUT", "/api/quests/q-001/documents/plan.md", "document_save"),
         ("PUT", "/api/quests/q-001/documents/path::literature/notes.md", "document_save"),
         ("POST", "/api/quests/q-001/chat", "chat"),
+        ("POST", "/api/quests/q-001/artifact/interact", "artifact_interact"),
+        ("POST", "/api/quests/q-001/artifact/complete", "artifact_complete"),
         ("POST", "/api/quests/q-001/commands", "command"),
         ("POST", "/api/quests/q-001/control", "quest_control"),
         ("POST", "/api/quests/q-001/runs", "run_create"),

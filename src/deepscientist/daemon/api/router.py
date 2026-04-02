@@ -78,6 +78,8 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/documents/assets$"), "document_asset_upload"),
     ("PUT", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/documents/(?P<document_id>.+)$"), "document_save"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/chat$"), "chat"),
+    ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/artifact/interact$"), "artifact_interact"),
+    ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/artifact/complete$"), "artifact_complete"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/commands$"), "command"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/control$"), "quest_control"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/runs$"), "run_create"),

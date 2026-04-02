@@ -3679,6 +3679,60 @@ def test_chat_endpoint_persists_client_message_delivery_state(temp_home: Path) -
     assert event["delivery_state"] == "sent"
 
 
+def test_artifact_completion_endpoints_finalize_quest_and_refresh_documents(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("artifact completion api quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    request = app.handlers.artifact_interact(
+        quest_id,
+        {
+            "kind": "decision_request",
+            "message": "002 study-level delivery has been finalized. Approve quest completion.",
+            "reply_mode": "blocking",
+            "deliver_to_bound_conversations": False,
+            "include_recent_inbound_messages": False,
+            "reply_schema": {"decision_type": "quest_completion_approval"},
+        },
+    )
+    interaction_id = str(request.get("interaction_id") or "")
+
+    assert request["status"] == "ok"
+    assert interaction_id
+
+    app.handlers.chat(
+        quest_id,
+        {
+            "text": "同意",
+            "source": "web-react",
+            "reply_to_interaction_id": interaction_id,
+        },
+    )
+
+    completed = app.handlers.artifact_complete(
+        quest_id,
+        {
+            "summary": "Study-level finalized delivery imported into managed runtime and approved for closure.",
+        },
+    )
+
+    assert completed["ok"] is True
+    assert completed["status"] == "completed"
+    assert completed["snapshot"]["status"] == "completed"
+    assert completed["summary_refresh"]["ok"] is True
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json")
+    assert runtime_state["status"] == "completed"
+    status_text = (quest_root / "status.md").read_text(encoding="utf-8")
+    assert "完成" in status_text or "Quest completed." in status_text
+    assert "自动恢复" in status_text or "auto-resume" in status_text
+    summary_text = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "Study-level finalized delivery imported into managed runtime and approved for closure." in summary_text
+
+
 def test_chat_endpoint_passes_user_text_into_codex_prompt(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

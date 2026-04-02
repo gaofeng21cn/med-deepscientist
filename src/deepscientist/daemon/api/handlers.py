@@ -1499,6 +1499,44 @@ npm --prefix src/ui run build</pre>
             **payload,
         }
 
+    def artifact_interact(self, quest_id: str, body: dict) -> dict:
+        quest_root = self.app.quest_service._quest_root(quest_id)
+        return self.app.artifact_service.interact(
+            quest_root,
+            kind=str(body.get("kind") or "progress"),
+            message=str(body.get("message") or ""),
+            response_phase=str(body.get("response_phase") or "ack"),
+            importance=str(body.get("importance") or "info"),
+            deliver_to_bound_conversations=bool(body.get("deliver_to_bound_conversations", True)),
+            include_recent_inbound_messages=bool(body.get("include_recent_inbound_messages", True)),
+            recent_message_limit=int(body.get("recent_message_limit") or 8),
+            attachments=body.get("attachments") if isinstance(body.get("attachments"), list) else None,
+            interaction_id=str(body.get("interaction_id") or "").strip() or None,
+            expects_reply=body.get("expects_reply") if isinstance(body.get("expects_reply"), bool) else None,
+            reply_mode=str(body.get("reply_mode") or "").strip() or None,
+            options=body.get("options") if isinstance(body.get("options"), list) else None,
+            surface_actions=body.get("surface_actions") if isinstance(body.get("surface_actions"), list) else None,
+            connector_hints=body.get("connector_hints") if isinstance(body.get("connector_hints"), dict) else None,
+            allow_free_text=bool(body.get("allow_free_text", True)),
+            reply_schema=body.get("reply_schema") if isinstance(body.get("reply_schema"), dict) else None,
+            reply_to_interaction_id=str(body.get("reply_to_interaction_id") or "").strip() or None,
+            supersede_open_requests=bool(body.get("supersede_open_requests", True)),
+            dedupe_key=str(body.get("dedupe_key") or "").strip() or None,
+            suppress_if_unchanged=body.get("suppress_if_unchanged")
+            if isinstance(body.get("suppress_if_unchanged"), bool)
+            else None,
+            min_interval_seconds=int(body.get("min_interval_seconds"))
+            if body.get("min_interval_seconds") is not None
+            else None,
+        )
+
+    def artifact_complete(self, quest_id: str, body: dict) -> dict:
+        quest_root = self.app.quest_service._quest_root(quest_id)
+        return self.app.artifact_service.complete_quest(
+            quest_root,
+            summary=str(body.get("summary") or ""),
+        )
+
     def command(self, quest_id: str, body: dict) -> dict:
         raw_command = body.get("command", "").strip()
         if not raw_command:

@@ -10859,6 +10859,20 @@ class ArtifactService:
             str(snapshot.get("quest_id") or self._quest_id(quest_root)),
             stop_reason="completed_by_user_approval",
         )
+        status_text = self.quest_service.localized_copy(
+            quest_root=quest_root,
+            zh=(
+                "# Status\n\n"
+                "Quest 已完成。当前研究线已按用户明确同意结束；除非出现新的外部要求，否则不应自动恢复。\n"
+            ),
+            en=(
+                "# Status\n\n"
+                "Quest completed. This research line was closed after explicit user approval and should not "
+                "auto-resume unless a new external request reopens it.\n"
+            ),
+        )
+        write_text(quest_root / "status.md", status_text)
+        summary_refresh = self.refresh_summary(quest_root, reason=completion_summary)
         append_jsonl(
             quest_root / ".ds" / "events.jsonl",
             {
@@ -10882,6 +10896,7 @@ class ArtifactService:
             "approval": approval,
             "decision": decision,
             "snapshot": completed_snapshot,
+            "summary_refresh": summary_refresh,
         }
 
     def recent(self, quest_root: Path, limit: int = 20) -> list[dict]:
