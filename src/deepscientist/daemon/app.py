@@ -1502,6 +1502,26 @@ class DaemonApp:
             )
         return snapshot
 
+    def update_quest_startup_context(
+        self,
+        quest_id: str,
+        *,
+        requested_baseline_ref: dict[str, object] | None = None,
+        startup_contract: dict[str, object] | None = None,
+        requested_baseline_ref_present: bool = False,
+        startup_contract_present: bool = False,
+    ) -> dict:
+        if not requested_baseline_ref_present and not startup_contract_present:
+            raise ValueError("At least one startup-context field is required.")
+        quest_root = self.home / "quests" / quest_id
+        kwargs: dict[str, object] = {}
+        if requested_baseline_ref_present:
+            kwargs["requested_baseline_ref"] = requested_baseline_ref
+        if startup_contract_present:
+            kwargs["startup_contract"] = startup_contract
+        self.quest_service.update_startup_context(quest_root, **kwargs)
+        return self.quest_service.snapshot(quest_id)
+
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:
         self._refresh_turn_worker_state(quest_id)
         with self._turn_lock:

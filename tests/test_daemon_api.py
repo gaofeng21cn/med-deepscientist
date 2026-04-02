@@ -3340,6 +3340,64 @@ def test_quest_create_persists_startup_contract_snapshot_shape(temp_home: Path) 
     assert payload["snapshot"]["startup_contract"] == startup_contract
 
 
+def test_quest_startup_context_handler_updates_existing_snapshot(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "Refresh startup context for an existing quest.",
+        quest_id="quest-startup-context-sync",
+        startup_contract={"scope": "bootstrap_only"},
+    )
+    quest_id = quest["quest_id"]
+
+    route_name, params = match_route("PATCH", f"/api/quests/{quest_id}/startup-context")
+    assert route_name == "quest_startup_context"
+    assert params == {"quest_id": quest_id}
+
+    handler = getattr(app.handlers, "quest_startup_context", None)
+    assert callable(handler)
+
+    payload = handler(
+        quest_id,
+        {
+            "startup_contract": {
+                "scope": "full_research",
+                "launch_mode": "custom",
+                "custom_profile": "continue_existing_state",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["quest_id"] == quest_id
+    assert payload["snapshot"]["startup_contract"] == {
+        "scope": "full_research",
+        "launch_mode": "custom",
+        "custom_profile": "continue_existing_state",
+    }
+
+
+def test_quest_startup_context_handler_rejects_empty_patch(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("Empty startup context patch should fail.")
+    quest_id = quest["quest_id"]
+
+    handler = getattr(app.handlers, "quest_startup_context", None)
+    assert callable(handler)
+
+    payload = handler(quest_id, {})
+
+    assert isinstance(payload, tuple)
+    status_code, body = payload
+    assert status_code == 400
+    assert body["ok"] is False
+    assert "at least one" in str(body["message"]).lower()
+
+
 def test_baseline_delete_handler_clears_registry_and_bound_quests(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -3790,7 +3848,7 @@ def test_chat_endpoint_passes_user_text_into_codex_prompt(temp_home: Path, monke
     assert user_text in prompt_text
 
 
-def test_quest_control_resume_marks_quest_active(temp_home: Path) -> None:
+def test_quest_control_resume_marks_quest_active(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     app = DaemonApp(temp_home)
@@ -3798,6 +3856,16 @@ def test_quest_control_resume_marks_quest_active(temp_home: Path) -> None:
     quest_id = quest["quest_id"]
 
     app.quest_service.set_status(quest_id, "stopped")
+    monkeypatch.setattr(
+        app,
+        "schedule_turn",
+        lambda quest_id, *, reason="user_message": {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        },
+    )
 
     payload = app.handlers.quest_control(quest_id, {"action": "resume", "source": "tui-ink"})
 
@@ -3818,6 +3886,34 @@ def test_quest_control_resume_marks_quest_active(temp_home: Path) -> None:
         and ("恢复运行" in str(item.get("message") or "") or "resumed" in str(item.get("message") or "").lower())
         for item in outbox
     )
+
+
+def test_quest_control_resume_schedules_auto_continue_turn(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume quest schedules turn")
+    quest_id = quest["quest_id"]
+
+    app.quest_service.set_status(quest_id, "paused")
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.handlers.quest_control(quest_id, {"action": "resume", "source": "tui-ink"})
+
+    assert payload["ok"] is True
+    assert payload["snapshot"]["status"] == "active"
+    assert scheduled == [(quest_id, "auto_continue")]
 
 
 def test_quest_control_pause_marks_quest_paused_and_interrupts_runner(temp_home: Path) -> None:

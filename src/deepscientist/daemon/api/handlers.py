@@ -419,6 +419,37 @@ npm --prefix src/ui run build</pre>
             source = str(body.get("source") or "").strip() or "web"
         return self.app.delete_quest(quest_id, source=source)
 
+    def quest_startup_context(self, quest_id: str, body: dict) -> dict | tuple[int, dict]:
+        requested_present = "requested_baseline_ref" in body
+        startup_present = "startup_contract" in body
+        if not requested_present and not startup_present:
+            return 400, {"ok": False, "message": "At least one startup-context field is required."}
+
+        requested_baseline_ref = body.get("requested_baseline_ref") if requested_present else None
+        if requested_present and requested_baseline_ref is not None and not isinstance(requested_baseline_ref, dict):
+            return 400, {"ok": False, "message": "`requested_baseline_ref` must be an object or null."}
+
+        startup_contract = body.get("startup_contract") if startup_present else None
+        if startup_present and startup_contract is not None and not isinstance(startup_contract, dict):
+            return 400, {"ok": False, "message": "`startup_contract` must be an object or null."}
+
+        try:
+            snapshot = self.app.update_quest_startup_context(
+                quest_id,
+                requested_baseline_ref=requested_baseline_ref if requested_present else None,
+                startup_contract=startup_contract if startup_present else None,
+                requested_baseline_ref_present=requested_present,
+                startup_contract_present=startup_present,
+            )
+        except FileNotFoundError:
+            return 404, {"ok": False, "message": f"Unknown quest `{quest_id}`."}
+        except ValueError as exc:
+            return 400, {"ok": False, "message": str(exc)}
+        return {
+            "ok": True,
+            "snapshot": snapshot,
+        }
+
     def quest_settings(self, quest_id: str, body: dict) -> dict | tuple[int, dict]:
         updates = {
             "title": body.get("title") if "title" in body else None,

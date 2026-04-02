@@ -33,6 +33,7 @@ ROUTES: list[tuple[str, re.Pattern[str], str]] = [
     ("DELETE", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)$"), "quest_delete"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/baseline-binding$"), "quest_baseline_binding"),
     ("DELETE", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/baseline-binding$"), "quest_baseline_unbind"),
+    ("PATCH", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/startup-context$"), "quest_startup_context"),
     ("PATCH", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/settings$"), "quest_settings"),
     ("POST", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/bindings$"), "quest_bindings"),
     ("PUT", re.compile(r"^/api/quests/(?P<quest_id>[^/]+)/bindings$"), "quest_bindings"),
