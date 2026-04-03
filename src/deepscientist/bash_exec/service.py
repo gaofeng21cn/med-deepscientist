@@ -727,6 +727,7 @@ class BashExecService:
         kind: str = "exec",
         shell_family: str | None = None,
         shell_name: str | None = None,
+        transport_preference: str | None = None,
     ) -> dict[str, Any]:
         quest_root = context.require_quest_root().resolve()
         session_id = _normalize_string(context.conversation_id) or f"quest:{context.quest_id or quest_root.name}"
@@ -752,6 +753,7 @@ class BashExecService:
             "launch_argv": list(launch_argv or []),
             "shell_family": shell_family,
             "shell_name": shell_name,
+            "transport_preference": transport_preference,
             "workdir": workdir_display,
             "cwd": str(cwd),
             "kind": kind,
@@ -836,6 +838,7 @@ class BashExecService:
             kind="exec",
             shell_family=launch.family,
             shell_name=launch.shell_name,
+            transport_preference="pipe",
         )
         self.terminal_log_path(quest_root, bash_id).touch()
         self.log_path(quest_root, bash_id).touch()

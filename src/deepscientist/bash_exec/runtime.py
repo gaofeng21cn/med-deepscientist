@@ -584,8 +584,12 @@ class TerminalRuntime:
         output_stream = self._output_stream
         if output_stream is None:
             return log_buffer
+        read_chunk = getattr(output_stream, "read1", None)
         while True:
-            chunk = output_stream.read(4096)
+            if callable(read_chunk):
+                chunk = read_chunk(4096)
+            else:
+                chunk = output_stream.read(4096)
             self._poll_prompt_events()
             if chunk:
                 log_buffer = self._consume_text(decoder.decode(chunk), log_buffer)

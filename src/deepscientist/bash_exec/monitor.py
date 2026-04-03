@@ -283,6 +283,9 @@ def run_monitor(session_dir: Path) -> int:
     cwd = Path(str(meta.get("cwd") or meta.get("quest_root") or ".")).expanduser().resolve()
     timeout_seconds = meta.get("timeout_seconds")
     session_kind = str(meta.get("kind") or "exec").strip().lower()
+    transport_preference = str(meta.get("transport_preference") or "").strip().lower()
+    if not transport_preference:
+        transport_preference = "pipe" if session_kind == "exec" else ("pipe" if os.name == "nt" else "pty")
     stop_reason: str | None = None
     seq = int(meta.get("latest_seq") or 0)
     progress_path = session_dir / "progress.json"
@@ -395,7 +398,7 @@ def run_monitor(session_dir: Path) -> int:
             for item in (meta.get("launch_argv") or [])
             if str(item).strip()
         ] or build_exec_shell_launch(command).argv
-        using_pty = os.name != "nt" and pty is not None
+        using_pty = os.name != "nt" and pty is not None and transport_preference == "pty"
         try:
             if not using_pty:
                 raise OSError("pty_unavailable")
@@ -441,9 +444,13 @@ def run_monitor(session_dir: Path) -> int:
         stop_requested = False
         if not using_pty and output_stream is not None:
             def _pipe_reader() -> None:
+                read_chunk = getattr(output_stream, "read1", None)
                 try:
                     while True:
-                        chunk = output_stream.read(4096)
+                        if callable(read_chunk):
+                            chunk = read_chunk(4096)
+                        else:
+                            chunk = output_stream.read(4096)
                         if not chunk:
                             break
                         with pipe_chunks_lock:

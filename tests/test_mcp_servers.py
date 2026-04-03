@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -1602,6 +1603,50 @@ def test_bash_exec_sleep_protocol_supports_sleep_and_existing_session_waits(temp
             )
         )
         assert any("done" in str(item.get("line") or "") for item in read_back["tail"])
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_exec_mode_uses_pipe_transport(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("mcp bash transport quest")
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-bash-transport",
+            active_anchor="experiment",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_bash_exec_server(context)
+
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "bash_exec",
+                {
+                    "command": "printf 'transport-check\\n'",
+                    "mode": "await",
+                    "timeout_seconds": 5,
+                    "comment": {"stage": "experiment", "goal": "transport-contract"},
+                },
+            )
+        )
+
+        assert result["status"] == "completed"
+        assert result["kind"] == "exec"
+        assert result["exit_code"] == 0
+        service = BashExecService(temp_home)
+        meta = read_json(service.meta_path(quest_root, result["bash_id"]), {})
+        assert meta["transport"] == "pipe"
+        if os.name != "nt":
+            assert "transport-check" in (quest_root / result["log_path"]).read_text(encoding="utf-8")
 
     asyncio.run(scenario())
 
