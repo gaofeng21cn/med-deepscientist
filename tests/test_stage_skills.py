@@ -194,6 +194,27 @@ def test_skill_resync_repairs_frontmatter_and_removes_stale_files(temp_home: Pat
     assert not stale_removed_claude.exists()
 
 
+def test_skill_resync_refreshes_existing_worktree_skill_copies(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    installer = SkillInstaller(repo_root(), temp_home)
+    quest = QuestService(temp_home, skill_installer=installer).create("worktree skill resync quest")
+    quest_root = Path(quest["quest_root"])
+
+    worktree_root = quest_root / ".ds" / "worktrees" / "paper-main"
+    figure_skill = worktree_root / ".codex" / "skills" / "deepscientist-figure-polish" / "SKILL.md"
+    figure_skill.parent.mkdir(parents=True, exist_ok=True)
+    figure_skill.write_text("AutoFigure-Edit\nsrc/skills/write/SKILL.md\n", encoding="utf-8")
+
+    installer.sync_quest(quest_root)
+
+    repaired = figure_skill.read_text(encoding="utf-8")
+    assert "AutoFigure-Edit" not in repaired
+    assert "src/skills/" not in repaired
+    assert "Do not append tooling disclosures" in repaired
+    assert "MedAutoScience-controlled programmatic drawing" in repaired
+
+
 def test_paper_reading_stage_skills_use_artifact_arxiv_and_legacy_skill_is_removed() -> None:
     root = repo_root() / "src" / "skills"
     for skill_id in ("baseline", "scout", "idea", "write", "finalize"):
@@ -389,14 +410,31 @@ def test_figure_polish_skill_requires_render_inspect_revise_workflow_and_style_a
     style_asset = repo_root() / "src" / "skills" / "figure-polish" / "assets" / "deepscientist-academic.mplstyle"
 
     assert "render-inspect-revise" in text
-    assert "open the rendered figure yourself" in text
+    assert "open the rendered file yourself" in text
     assert "Do not treat a figure as final" in text
     assert "main message obvious" in text
     assert "color-vision-deficient" in text
-    assert "Publication-grade figure refinement is recommended with AutoFigure-Edit" in text
-    assert "https://github.com/ResearAI/AutoFigure-Edit" in text
-    assert "https://deepscientist" in text
+    assert "Do not append tooling disclosures" in text
+    assert "MedAutoScience-controlled programmatic drawing" in text
     assert style_asset.exists()
+
+
+def test_figure_polish_skill_and_synced_copy_stay_manuscript_safe(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("figure polish sync quest")
+    quest_root = Path(quest["quest_root"])
+
+    source_text = (repo_root() / "src" / "skills" / "figure-polish" / "SKILL.md").read_text(encoding="utf-8")
+    synced_text = (quest_root / ".codex" / "skills" / "deepscientist-figure-polish" / "SKILL.md").read_text(encoding="utf-8")
+
+    for text in (source_text, synced_text):
+        assert "AutoFigure-Edit" not in text
+        assert "https://deepscientist" not in text
+        assert "src/skills/" not in text
+        assert "src/prompts/system.md" not in text
+        assert "Do not append tooling disclosures" in text
+        assert "MedAutoScience-controlled programmatic drawing" in text
 
 
 def test_idea_skill_requires_review_of_prior_ideas_and_experiment_outcomes() -> None:

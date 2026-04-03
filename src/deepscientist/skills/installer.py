@@ -41,28 +41,23 @@ class SkillInstaller:
         }
 
     def sync_quest(self, quest_root: Path) -> dict:
-        prompts_root = ensure_dir(quest_root / ".codex" / "prompts")
-        self._sync_prompt_tree(prompts_root)
-        codex_root = ensure_dir(quest_root / ".codex" / "skills")
-        claude_root = ensure_dir(quest_root / ".claude" / "agents")
-        copied_codex: list[str] = []
-        copied_claude: list[str] = []
-        expected_codex: set[str] = set()
-        expected_claude: set[str] = set()
-        for bundle in self.discover():
-            target = codex_root / f"deepscientist-{bundle.skill_id}"
-            expected_codex.add(target.name)
-            self._sync_bundle_tree(bundle.root, target)
-            copied_codex.append(str(target))
-            claude_target = self._sync_claude_projection(bundle, claude_root)
-            expected_claude.add(claude_target.name)
-            copied_claude.append(str(claude_target))
-        self._prune_bundle_targets(codex_root, expected_codex)
-        self._prune_bundle_targets(claude_root, expected_claude)
+        primary = self._sync_surface(quest_root)
+        worktree_results: list[dict[str, object]] = []
+        for worktree_root in self._quest_worktree_roots(quest_root):
+            synced = self._sync_surface(worktree_root)
+            worktree_results.append(
+                {
+                    "root": str(worktree_root),
+                    "prompts": synced["prompts"],
+                    "codex": synced["codex"],
+                    "claude": synced["claude"],
+                }
+            )
         return {
-            "prompts": [str(path) for path in sorted(prompts_root.rglob("*")) if path.is_file()],
-            "codex": copied_codex,
-            "claude": copied_claude,
+            "prompts": primary["prompts"],
+            "codex": primary["codex"],
+            "claude": primary["claude"],
+            "worktrees": worktree_results,
             "notes": [],
         }
 
@@ -193,6 +188,42 @@ class SkillInstaller:
     def _sync_prompt_tree(self, target_root: Path) -> None:
         source_root = self.repo_root / "src" / "prompts"
         self._sync_bundle_tree(source_root, target_root)
+
+    def _sync_surface(self, root: Path) -> dict[str, list[str]]:
+        prompts_root = ensure_dir(root / ".codex" / "prompts")
+        self._sync_prompt_tree(prompts_root)
+        codex_root = ensure_dir(root / ".codex" / "skills")
+        claude_root = ensure_dir(root / ".claude" / "agents")
+        copied_codex: list[str] = []
+        copied_claude: list[str] = []
+        expected_codex: set[str] = set()
+        expected_claude: set[str] = set()
+        for bundle in self.discover():
+            target = codex_root / f"deepscientist-{bundle.skill_id}"
+            expected_codex.add(target.name)
+            self._sync_bundle_tree(bundle.root, target)
+            copied_codex.append(str(target))
+            claude_target = self._sync_claude_projection(bundle, claude_root)
+            expected_claude.add(claude_target.name)
+            copied_claude.append(str(claude_target))
+        self._prune_bundle_targets(codex_root, expected_codex)
+        self._prune_bundle_targets(claude_root, expected_claude)
+        return {
+            "prompts": [str(path) for path in sorted(prompts_root.rglob("*")) if path.is_file()],
+            "codex": copied_codex,
+            "claude": copied_claude,
+        }
+
+    @staticmethod
+    def _quest_worktree_roots(quest_root: Path) -> list[Path]:
+        roots: list[Path] = []
+        worktrees_root = quest_root / ".ds" / "worktrees"
+        if not worktrees_root.exists():
+            return roots
+        for candidate in sorted(worktrees_root.iterdir()):
+            if candidate.is_dir():
+                roots.append(candidate)
+        return roots
 
     @staticmethod
     def _prune_bundle_targets(root: Path, expected_names: set[str]) -> None:
