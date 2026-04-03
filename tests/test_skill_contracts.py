@@ -192,6 +192,18 @@ def test_system_prompt_keeps_compact_reference_wording_templates() -> None:
     assert "这里有个分叉需要你确认" in text
 
 
+def test_system_prompt_and_write_skill_keep_author_metadata_gaps_non_blocking_when_package_is_auditable() -> None:
+    system_text = _system_prompt_text()
+    write_text = _skill_text("write")
+
+    assert "Missing author list, affiliations, corresponding-author details" in system_text
+    assert "materialize the auditable package first" in system_text
+    assert "do not turn author / title-page / declaration metadata gaps into blocking requests" in system_text
+    assert "must not trigger a blocking request by default" in write_text
+    assert "title-page or declaration metadata and an auditable package already exists" in write_text
+    assert "blocking_items` records remaining submission-readiness blockers; it does not require opening a blocking user interaction" in write_text
+
+
 def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     text = _skill_text("baseline")
 
@@ -418,9 +430,21 @@ def test_write_skill_prefers_flexible_outline_flow_and_bundle_submission() -> No
     assert "running example -> intuition -> formalism" in text
     assert "This paper is organized as follows" in text
     assert "do not attack prior work merely to make the current line look more novel" in text
-    assert "Publication-grade figure refinement is recommended with AutoFigure-Edit" in text
-    assert "https://github.com/ResearAI/AutoFigure-Edit" in text
-    assert "https://deepscientist" in text
+    assert "captions must remain manuscript-native" in text
+    assert "never append tool/vendor/service promotion" in text
+
+
+def test_system_prompt_keeps_decision_actions_enumerated_and_python_env_managed() -> None:
+    text = _system_prompt_text()
+
+    assert "decision_action_rule" in text
+    assert "`request_user_decision`" in text
+    assert "not in a made-up action string" in text
+    assert "managed_python_env_rule" in text
+    assert "`uv run ...`" in text
+    assert "system `pytest`" in text
+    assert "caption_cleanliness_rule" in text
+    assert "AutoFigure-Edit" not in text
 
 
 def test_idea_skill_adds_problem_importance_and_first_principles_memo() -> None:

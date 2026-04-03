@@ -67,7 +67,10 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
     assert "stage-specific execution detail lives in the requested skill" in prompt
     assert "#F3EEE8" in prompt
     assert "plt.rcParams.update" in prompt
-    assert "AutoFigure-Edit" in prompt
+    assert "caption_cleanliness_rule" in prompt
+    assert "decision_action_rule" in prompt
+    assert "managed_python_env_rule" in prompt
+    assert "AutoFigure-Edit" not in prompt
     assert len(prompt.splitlines()) < 1800
     assert len(prompt) < 120000
 
@@ -164,6 +167,21 @@ def test_prompt_builder_includes_shared_interaction_contract(temp_home: Path) ->
     assert "Treat `artifact.interact(...)` as the main long-lived communication thread" in prompt
     assert "Immediately follow any non-empty mailbox poll" in prompt
     assert "1 to 3 concrete options" in prompt
+
+
+def test_prompt_builder_marks_author_metadata_gaps_non_blocking_when_package_is_auditable(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="write",
+        user_message="Continue the paper package and handle missing author metadata correctly.",
+        model="gpt-5.4",
+    )
+
+    assert "Missing author list, affiliations, corresponding-author details" in prompt
+    assert "materialize the auditable package first" in prompt
+    assert "not a blocking external-credential case" in prompt
 
 
 def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) -> None:

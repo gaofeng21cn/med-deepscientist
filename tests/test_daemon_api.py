@@ -405,6 +405,74 @@ def test_quest_session_prewarms_details_and_canvas_projections(temp_home: Path) 
     assert "canvas" in projections
 
 
+def test_quest_session_reports_none_runtime_audit_for_stale_active_run_without_worker(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("session stale run quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id="run-stale-001",
+    )
+
+    payload = app.handlers.quest_session(quest_id)
+
+    assert payload["runtime_audit"] == {
+        "ok": True,
+        "status": "none",
+        "source": "daemon_turn_worker",
+        "active_run_id": "run-stale-001",
+        "worker_running": False,
+        "worker_pending": False,
+        "stop_requested": False,
+    }
+
+
+def test_quest_session_reports_live_runtime_audit_for_active_turn_worker(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("session live worker quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    release = threading.Event()
+
+    worker = threading.Thread(target=lambda: release.wait(timeout=5.0), daemon=True)
+    worker.start()
+    try:
+        with app._turn_lock:
+            app._turn_state[quest_id] = {
+                "running": True,
+                "pending": False,
+                "worker": worker,
+                "stop_requested": False,
+            }
+        app.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            status="running",
+            active_run_id="run-live-001",
+        )
+
+        payload = app.handlers.quest_session(quest_id)
+
+        assert payload["runtime_audit"] == {
+            "ok": True,
+            "status": "live",
+            "source": "daemon_turn_worker",
+            "active_run_id": "run-live-001",
+            "worker_running": True,
+            "worker_pending": False,
+            "stop_requested": False,
+        }
+    finally:
+        release.set()
+        worker.join(timeout=1.0)
+
+
 def test_runtime_state_update_schedules_details_projection_refresh(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,

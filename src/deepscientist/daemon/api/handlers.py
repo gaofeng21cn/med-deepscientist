@@ -505,6 +505,7 @@ npm --prefix src/ui run build</pre>
 
     def quest_session(self, quest_id: str) -> dict:
         snapshot = self.app.quest_service.snapshot_fast(quest_id)
+        runtime_audit = self.app.quest_runtime_audit(quest_id, snapshot=snapshot)
         for kind in ("details", "canvas"):
             try:
                 self.app.quest_service.prime_projection(quest_id, kind)
@@ -514,6 +515,7 @@ npm --prefix src/ui run build</pre>
             "ok": True,
             "quest_id": quest_id,
             "snapshot": snapshot,
+            "runtime_audit": runtime_audit,
             "acp_session": build_session_descriptor(snapshot),
         }
 

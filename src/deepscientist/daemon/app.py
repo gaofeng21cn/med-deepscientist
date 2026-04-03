@@ -1564,6 +1564,23 @@ class DaemonApp:
                 state.pop("worker", None)
             return dict(state)
 
+    def quest_runtime_audit(self, quest_id: str, *, snapshot: dict | None = None) -> dict[str, Any]:
+        resolved_snapshot = dict(snapshot or self.quest_service.snapshot_fast(quest_id))
+        turn_state = self._refresh_turn_worker_state(quest_id)
+        worker_running = bool(turn_state.get("running"))
+        worker_pending = bool(turn_state.get("pending"))
+        stop_requested = bool(turn_state.get("stop_requested"))
+        active_run_id = str(resolved_snapshot.get("active_run_id") or "").strip() or None
+        return {
+            "ok": True,
+            "status": "live" if worker_running else "none",
+            "source": "daemon_turn_worker",
+            "active_run_id": active_run_id,
+            "worker_running": worker_running,
+            "worker_pending": worker_pending,
+            "stop_requested": stop_requested,
+        }
+
     def _reconcile_stale_active_turn(self, quest_id: str, *, snapshot: dict | None = None) -> dict:
         snapshot = dict(snapshot or self.quest_service.snapshot(quest_id))
         active_run_id = str(snapshot.get("active_run_id") or "").strip()
