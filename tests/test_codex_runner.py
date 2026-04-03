@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from deepscientist.runners import CodexRunner, RunRequest
@@ -428,3 +429,202 @@ model_provider = "minimax"
     config_text = (Path(target) / "config.toml").read_text(encoding="utf-8")
     assert 'model_provider = "minimax"' in config_text
     assert 'model = "MiniMax-M2.7"' in config_text
+
+
+def test_codex_runner_prepares_run_scoped_codex_home(temp_home) -> None:  # type: ignore[no-untyped-def]
+    source_home = temp_home / "provider-codex-home"
+    source_home.mkdir(parents=True, exist_ok=True)
+    (source_home / "config.toml").write_text("[profiles.m27]\n", encoding="utf-8")
+    (source_home / "auth.json").write_text('{"provider":"custom"}', encoding="utf-8")
+
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True, exist_ok=True)
+    workspace_root = quest_root / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=object(),  # type: ignore[arg-type]
+        prompt_builder=object(),  # type: ignore[arg-type]
+        artifact_service=object(),  # type: ignore[arg-type]
+    )
+
+    first_target = Path(
+        runner._prepare_project_codex_home(
+            workspace_root,
+            quest_root=quest_root,
+            quest_id="q-001",
+            run_id="run-001",
+            runner_config={"config_dir": str(source_home)},
+        )
+    )
+    second_target = Path(
+        runner._prepare_project_codex_home(
+            workspace_root,
+            quest_root=quest_root,
+            quest_id="q-001",
+            run_id="run-002",
+            runner_config={"config_dir": str(source_home)},
+        )
+    )
+
+    assert first_target == quest_root / ".ds" / "codex_homes" / "run-001"
+    assert second_target == quest_root / ".ds" / "codex_homes" / "run-002"
+    assert first_target != second_target
+    assert not (workspace_root / ".codex").exists()
+
+
+def test_codex_runner_drains_stderr_before_stdout_finishes(monkeypatch, temp_home) -> None:  # type: ignore[no-untyped-def]
+    class _PromptBuilder:
+        def build(self, **_: object) -> str:
+            return "prompt from builder"
+
+    class _Logger:
+        def log(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class _QuestService:
+        def schedule_projection_refresh(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class _ArtifactService:
+        def __init__(self) -> None:
+            self.quest_service = _QuestService()
+
+        def record(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            return {"artifact_id": "artifact-001"}
+
+    class _FakeStdin:
+        def __init__(self) -> None:
+            self.buffer = ""
+
+        def write(self, text: str) -> int:
+            self.buffer += text
+            return len(text)
+
+        def close(self) -> None:
+            return None
+
+    class _FakeStdout:
+        def __init__(self, release_event: threading.Event, stderr_read_started: threading.Event) -> None:
+            self._release_event = release_event
+            self._stderr_read_started = stderr_read_started
+            self._prefix = [
+                json.dumps({"type": "thread.started", "thread_id": "thr-001"}) + "\n",
+                json.dumps({"type": "turn.started"}) + "\n",
+            ]
+            self._suffix = [
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "agent_message",
+                            "id": "item-001",
+                            "text": "done",
+                        },
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn.completed"}) + "\n",
+            ]
+
+        def __iter__(self) -> "_FakeStdout":
+            return self
+
+        def __next__(self) -> str:
+            if self._prefix:
+                return self._prefix.pop(0)
+            if self._suffix:
+                if not self._stderr_read_started.is_set():
+                    self._release_event.wait()
+                return self._suffix.pop(0)
+            raise StopIteration
+
+    class _FakeStderr:
+        def __init__(self, stderr_read_started: threading.Event) -> None:
+            self._stderr_read_started = stderr_read_started
+
+        def read(self) -> str:
+            self._stderr_read_started.set()
+            return "warning\n" * 4096
+
+    class _FakeProcess:
+        def __init__(self) -> None:
+            self.release_event = threading.Event()
+            self.stderr_read_started = threading.Event()
+            self.stdin = _FakeStdin()
+            self.stdout = _FakeStdout(self.release_event, self.stderr_read_started)
+            self.stderr = _FakeStderr(self.stderr_read_started)
+
+        def wait(self) -> int:
+            return 0
+
+        def poll(self) -> None:
+            return None
+
+    fake_process = _FakeProcess()
+
+    monkeypatch.setattr("deepscientist.runners.codex.subprocess.Popen", lambda *args, **kwargs: fake_process)
+    monkeypatch.setattr("deepscientist.runners.codex.export_git_graph", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "deepscientist.runners.codex.normalize_codex_reasoning_effort",
+        lambda reasoning_effort, *, resolved_binary: (str(reasoning_effort), None),
+    )
+
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=_Logger(),  # type: ignore[arg-type]
+        prompt_builder=_PromptBuilder(),  # type: ignore[arg-type]
+        artifact_service=_ArtifactService(),  # type: ignore[arg-type]
+    )
+
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True, exist_ok=True)
+    (quest_root / "quest.yaml").write_text("active_anchor: write\n", encoding="utf-8")
+    request = RunRequest(
+        quest_id="q-001",
+        quest_root=quest_root,
+        worktree_root=quest_root / "workspace",
+        run_id="run-001",
+        skill_id="write",
+        message="continue",
+        model="gpt-5.4",
+        approval_policy="never",
+        sandbox_mode="danger-full-access",
+        reasoning_effort="xhigh",
+        turn_reason="auto_continue",
+        turn_intent="continue_stage",
+        turn_mode="stage_execution",
+    )
+    request.worktree_root.mkdir(parents=True, exist_ok=True)
+
+    result_holder: dict[str, object] = {}
+    error_holder: list[BaseException] = []
+    finished = threading.Event()
+
+    def _run() -> None:
+        try:
+            result_holder["result"] = runner.run(request)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            error_holder.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+
+    try:
+        assert finished.wait(timeout=1.0), "runner blocked waiting for stderr to drain"
+    finally:
+        fake_process.release_event.set()
+        worker.join(timeout=1.0)
+
+    if error_holder:
+        raise error_holder[0]
+
+    result = result_holder["result"]
+    assert getattr(result, "output_text") == "done"

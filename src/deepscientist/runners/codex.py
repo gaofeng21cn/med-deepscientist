@@ -764,6 +764,23 @@ class CodexRunner:
         try:
             process.stdin.write(prompt)
             process.stdin.close()
+            stderr_chunks: list[str] = []
+            stderr_lock = threading.Lock()
+
+            def _drain_stderr() -> None:
+                try:
+                    chunk = process.stderr.read()
+                except Exception as exc:
+                    chunk = f"[stderr read failed: {exc}]"
+                with stderr_lock:
+                    stderr_chunks.append(chunk)
+
+            stderr_thread = threading.Thread(
+                target=_drain_stderr,
+                name=f"codex-stderr-{request.run_id}",
+                daemon=True,
+            )
+            stderr_thread.start()
 
             output_parts: list[str] = []
             final_output_parts: list[str] = []
@@ -829,8 +846,10 @@ class CodexRunner:
                             final_output_parts.append(text.strip())
                 output_parts.extend(message_output_parts)
 
-            stderr_text = process.stderr.read()
             exit_code = process.wait()
+            stderr_thread.join()
+            with stderr_lock:
+                stderr_text = "".join(stderr_chunks)
             summary_text = "\n".join(part.strip() for part in output_parts if part.strip()).strip()
             output_text = (
                 next(
@@ -1019,7 +1038,10 @@ class CodexRunner:
         run_id: str,
         runner_config: dict[str, Any] | None = None,
     ) -> Path:
-        target = ensure_dir(workspace_root / ".codex")
+        target = quest_root / ".ds" / "codex_homes" / run_id
+        if target.exists():
+            shutil.rmtree(target)
+        target = ensure_dir(target)
         resolved_runner_config = runner_config if isinstance(runner_config, dict) else self._load_runner_config()
         configured_home = str(resolved_runner_config.get("config_dir") or os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"))
         profile = str(resolved_runner_config.get("profile") or "").strip()
