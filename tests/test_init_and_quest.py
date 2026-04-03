@@ -754,6 +754,90 @@ def test_snapshot_blocks_finalize_without_review_proofing_and_submission_checks(
     assert "submission packaging checklist is missing" in joined
 
 
+def test_snapshot_keeps_bundle_not_ready_when_submission_checklist_has_blocking_items(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocking checklist quest")
+    quest_root = Path(snapshot["quest_root"])
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Blocking Checklist Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-blocking-checklist",
+            "paper_branch": "paper/blocking-checklist",
+            "selected_outline_ref": "outline-001",
+            "title": "Blocking Checklist Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/blocking-checklist",
+            "selected_outline_ref": "outline-001",
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+
+    review_root = ensure_dir(paper_root / "review")
+    write_text(review_root / "review.md", "# Review\n\nReady except for external declarations.\n")
+    write_text(review_root / "revision_log.md", "# Revision Log\n\nPending author-side declarations.\n")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+            "blocking_items": [
+                {
+                    "id": "author_metadata",
+                    "status": "external_input_required",
+                    "detail": "Final author block is still missing.",
+                }
+            ],
+        },
+    )
+    proofing_root = ensure_dir(paper_root / "proofing")
+    write_text(proofing_root / "proofing_report.md", "# Proofing Report\n\nLayout is clean.\n")
+    write_text(proofing_root / "language_issues.md", "# Language Issues\n\nNone.\n")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["bundle_status"] == "present"
+    assert health["submission_checklist_ready"] is True
+    assert health["submission_blocking_item_count"] == 1
+    assert health["audit_package_ready"] is True
+    assert health["finalize_ready"] is False
+    assert health["closure_state"] == "audit_ready_with_blockers"
+    assert health["delivery_state"] == "audit_ready"
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
+
+
 def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     service = QuestService(temp_home)

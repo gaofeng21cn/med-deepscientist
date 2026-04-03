@@ -3493,24 +3493,31 @@ class ArtifactService:
             or ""
         ).strip() or None
         bundle_present = bundle_manifest_path.exists()
+        review_outputs_ready = bool(closure_evidence.get("review_outputs_ready"))
+        proofing_outputs_ready = bool(closure_evidence.get("proofing_outputs_ready"))
+        submission_checklist_ready = bool(closure_evidence.get("submission_checklist_ready"))
+        submission_blocking_item_count = int(closure_evidence.get("submission_blocking_item_count") or 0)
+        audit_package_ready = (
+            bundle_present
+            and review_outputs_ready
+            and proofing_outputs_ready
+            and submission_checklist_ready
+        )
+        submission_ready_for_delivery = audit_package_ready and submission_blocking_item_count == 0
         delivery_state = "not_ready"
         closure_state = "bundle_not_ready"
         keep_bundle_fixed_by_default = False
-        if bundle_present:
+        if audit_package_ready and submission_blocking_item_count > 0:
+            delivery_state = "audit_ready"
+            closure_state = "audit_ready_with_blockers"
+        elif submission_ready_for_delivery:
             delivery_state = "bundle_ready"
             closure_state = "delivery_ready"
         if delivered_at or "delivered" in overall_status:
             delivery_state = "delivered"
             closure_state = "delivered_continue_research" if "continue" in overall_status else "delivered_parked"
             keep_bundle_fixed_by_default = True
-        finalize_ready = (
-            writing_ready
-            and bundle_present
-            and bool(closure_evidence.get("review_outputs_ready"))
-            and bool(closure_evidence.get("proofing_outputs_ready"))
-            and bool(closure_evidence.get("submission_checklist_ready"))
-            and int(closure_evidence.get("submission_blocking_item_count") or 0) == 0
-        )
+        finalize_ready = writing_ready and submission_ready_for_delivery
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
             completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
@@ -3525,6 +3532,7 @@ class ArtifactService:
         return {
             "contract_ok": contract_ok,
             "writing_ready": writing_ready,
+            "audit_package_ready": audit_package_ready,
             "finalize_ready": finalize_ready,
             "bundle_present": bundle_present,
             "delivery_state": delivery_state,
@@ -3608,6 +3616,7 @@ class ArtifactService:
             f"- Contract: `{self._paper_line_state_label(bool(payload.get('contract_ok')) )}`",
             f"- Reference Materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
             f"- Writing Readiness: `{self._paper_line_state_label(bool(payload.get('writing_ready')) )}`",
+            f"- Audit Package Readiness: `{self._paper_line_state_label(bool(payload.get('audit_package_ready')) )}`",
             f"- Finalize Readiness: `{self._paper_line_state_label(bool(payload.get('finalize_ready')) )}`",
             f"- Draft: `{str(payload.get('draft_status') or 'missing').strip() or 'missing'}`",
             f"- Bundle: `{str(payload.get('bundle_status') or 'missing').strip() or 'missing'}`",
@@ -3640,6 +3649,7 @@ class ArtifactService:
             ),
             "",
             f"- Writing readiness: `{self._paper_line_state_label(bool(payload.get('writing_ready')) )}`",
+            f"- Audit package readiness: `{self._paper_line_state_label(bool(payload.get('audit_package_ready')) )}`",
             f"- Finalize readiness: `{self._paper_line_state_label(bool(payload.get('finalize_ready')) )}`",
             f"- Reference materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
             f"- Bibliography entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
@@ -3746,6 +3756,7 @@ class ArtifactService:
             "open_supplementary_count": pending_slices,
             "contract_ok": bool(health.get("contract_ok")),
             "writing_ready": bool(health.get("writing_ready")),
+            "audit_package_ready": bool(health.get("audit_package_ready")),
             "finalize_ready": bool(health.get("finalize_ready")),
             "closure_state": str(health.get("closure_state") or "").strip() or None,
             "delivery_state": str(health.get("delivery_state") or "").strip() or None,
@@ -5606,6 +5617,7 @@ class ArtifactService:
             "deferred": int(paper_health.get("deferred_claim_count") or 0),
         }
         paper_ready = bool(paper_health.get("writing_ready"))
+        audit_package_ready = bool(paper_health.get("audit_package_ready"))
         bundle_ready = bool(paper_health.get("finalize_ready"))
         closure_state = str(paper_health.get("closure_state") or "").strip() or None
         delivery_state = str(paper_health.get("delivery_state") or "").strip() or None
@@ -5616,6 +5628,7 @@ class ArtifactService:
         brief_summary_zh = (
             f"当前阶段是 `{stage}`。"
             f"{(' 论文线当前状态是 `' + closure_state + '`。' if closure_state else '')}"
+            f"{(' 投稿审计包已经可用。' if audit_package_ready else '')}"
             f"{(' 论文线已达到 bundle-ready。' if bundle_ready and not closure_state else '')}"
             f"{(' 当前是停驻等待新消息，不会继续自动空转。' if continuation_policy == 'wait_for_user_or_resume' else '')}"
             f"{(' 最近主结果：' + latest_run_summary) if latest_run_summary else ''}"
@@ -5623,6 +5636,7 @@ class ArtifactService:
         brief_summary_en = (
             f"Current stage: `{stage}`."
             f"{(' Paper closure state: `' + closure_state + '`.' if closure_state else '')}"
+            f"{(' The audit-ready submission bundle is available.' if audit_package_ready else '')}"
             f"{(' The paper line is bundle-ready.' if bundle_ready and not closure_state else '')}"
             f"{(' The quest is currently parked and will not auto-spin until a new user message or resume.' if continuation_policy == 'wait_for_user_or_resume' else '')}"
             f"{(' Latest run: ' + latest_run_summary) if latest_run_summary else ''}"
@@ -5640,6 +5654,7 @@ class ArtifactService:
             "incumbent_method": scoreboard_payload.get("incumbent_title"),
             "paper_contract_health": {
                 "writing_ready": paper_ready,
+                "audit_package_ready": audit_package_ready,
                 "finalize_ready": bundle_ready,
                 "closure_state": closure_state,
                 "delivery_state": delivery_state,

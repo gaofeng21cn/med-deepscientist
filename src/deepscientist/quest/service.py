@@ -2882,10 +2882,24 @@ class QuestService:
             or submission_checklist.get("paper_delivered_to_user_at")
             or ""
         ).strip() or None
+        review_outputs_ready = bool(closure_evidence.get("review_outputs_ready"))
+        proofing_outputs_ready = bool(closure_evidence.get("proofing_outputs_ready"))
+        submission_checklist_ready = bool(closure_evidence.get("submission_checklist_ready"))
+        submission_blocking_item_count = int(closure_evidence.get("submission_blocking_item_count") or 0)
+        audit_package_ready = (
+            bundle_status == "present"
+            and review_outputs_ready
+            and proofing_outputs_ready
+            and submission_checklist_ready
+        )
+        submission_ready_for_delivery = audit_package_ready and submission_blocking_item_count == 0
         closure_state = "bundle_not_ready"
         delivery_state = "not_ready"
         keep_bundle_fixed_by_default = False
-        if bundle_status == "present":
+        if audit_package_ready and submission_blocking_item_count > 0:
+            closure_state = "audit_ready_with_blockers"
+            delivery_state = "audit_ready"
+        elif submission_ready_for_delivery:
             closure_state = "delivery_ready"
             delivery_state = "bundle_ready"
         if delivered_at or "delivered" in overall_status:
@@ -2965,34 +2979,30 @@ class QuestService:
                 "paper draft cites keys absent from references.bib"
                 + (f": {unresolved_preview}" if unresolved_preview else "")
             )
-        if not bool(closure_evidence.get("review_outputs_ready")):
+        if not review_outputs_ready:
             blocking_reasons.append(
                 "skeptical review outputs are missing "
                 "(`paper/review/review.md`, `paper/review/revision_log.md`)"
             )
-        if not bool(closure_evidence.get("proofing_outputs_ready")):
+        if not proofing_outputs_ready:
             blocking_reasons.append(
                 "proofing outputs are missing "
                 "(`paper/proofing/proofing_report.md`, `paper/proofing/language_issues.md`)"
             )
-        if not bool(closure_evidence.get("submission_checklist_ready")):
+        if not submission_checklist_ready:
             blocking_reasons.append(
                 "submission packaging checklist is missing "
                 "(`paper/review/submission_checklist.json`)"
             )
-        elif int(closure_evidence.get("submission_blocking_item_count") or 0) > 0:
+        elif submission_blocking_item_count > 0:
             blocking_reasons.append(
                 "submission packaging checklist still has "
-                f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
+                f"{submission_blocking_item_count} blocking item(s)"
             )
 
         finalize_ready = (
             writing_ready
-            and bundle_status == "present"
-            and bool(closure_evidence.get("review_outputs_ready"))
-            and bool(closure_evidence.get("proofing_outputs_ready"))
-            and bool(closure_evidence.get("submission_checklist_ready"))
-            and int(closure_evidence.get("submission_blocking_item_count") or 0) == 0
+            and submission_ready_for_delivery
         )
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
@@ -3011,6 +3021,7 @@ class QuestService:
             "selected_outline_ref": selected_outline_ref,
             "contract_ok": contract_ok,
             "writing_ready": writing_ready,
+            "audit_package_ready": audit_package_ready,
             "finalize_ready": finalize_ready,
             "closure_state": closure_state,
             "delivery_state": delivery_state,

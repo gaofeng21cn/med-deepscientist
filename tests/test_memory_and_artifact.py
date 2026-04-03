@@ -2008,8 +2008,8 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
     assert snapshot["continuation_anchor"] == "decision"
     assert snapshot["continuation_reason"] == "paper_bundle_submitted"
-    assert snapshot["paper_contract_health"]["closure_state"] == "delivery_ready"
-    assert snapshot["paper_contract_health"]["delivery_state"] == "bundle_ready"
+    assert snapshot["paper_contract_health"]["closure_state"] == "bundle_not_ready"
+    assert snapshot["paper_contract_health"]["delivery_state"] == "not_ready"
     assert snapshot["paper_evidence"]["item_count"] == 0
     assert snapshot["paper_lines"][0]["paper_line_id"] == result["paper_line_state"]["paper_line_id"]
 
@@ -5142,6 +5142,107 @@ def test_get_quest_state_rehydrates_reference_surface_from_active_paper_worktree
     coverage = read_json(quest_root / "paper" / "reference_coverage_report.json", {})
     assert coverage["record_count"] == 20
     assert coverage["records_by_primary_source"]["pubmed"] == 20
+
+
+def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checklist_has_blockers(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact blocking checklist quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Blocking Checklist Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-blocking-checklist",
+            "paper_branch": "paper/artifact-blocking-checklist",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Blocking Checklist Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-blocking-checklist",
+            "selected_outline_ref": "outline-001",
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text(
+        "# Review\n\nReady except for author-side declarations.\n",
+        encoding="utf-8",
+    )
+    (review_root / "revision_log.md").write_text(
+        "# Revision Log\n\nPending author-side declarations.\n",
+        encoding="utf-8",
+    )
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+            "blocking_items": [
+                {
+                    "id": "ethics_statement",
+                    "status": "missing_submission_surface",
+                    "detail": "Ethics declaration is still missing.",
+                }
+            ],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text(
+        "# Proofing Report\n\nLayout is clean.\n",
+        encoding="utf-8",
+    )
+    (proofing_root / "language_issues.md").write_text(
+        "# Language Issues\n\nNone.\n",
+        encoding="utf-8",
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["bundle_status"] == "present"
+    assert health["submission_checklist_ready"] is True
+    assert health["submission_blocking_item_count"] == 1
+    assert health["audit_package_ready"] is True
+    assert health["finalize_ready"] is False
+    assert health["closure_state"] == "audit_ready_with_blockers"
+    assert health["delivery_state"] == "audit_ready"
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
 
 
 def test_read_quest_documents_accepts_single_name_string(temp_home: Path) -> None:
