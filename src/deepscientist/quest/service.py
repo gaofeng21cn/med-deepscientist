@@ -3529,6 +3529,11 @@ class QuestService:
             for item in (interaction_state.get("open_requests") or [])
             if str(item.get("status") or "") in {"waiting", "answered"}
         ]
+        active_request_ids = {
+            candidate_id
+            for item in open_requests
+            for candidate_id in self._interaction_candidate_ids(item)
+        }
         active_interactions = open_requests[-5:]
         recent_reply_threads = [dict(item) for item in (interaction_state.get("recent_threads") or [])][-5:]
         waiting_interaction_id = self._latest_waiting_interaction_id(open_requests)
@@ -3569,6 +3574,9 @@ class QuestService:
                 )
                 decision_id = str(item.get("id") or path.stem)
                 if is_pending_user:
+                    interaction_ids = self._interaction_candidate_ids(item)
+                    if interaction_ids and not (interaction_ids & active_request_ids):
+                        continue
                     candidate_pending_decisions.append(decision_id)
             artifact_metric = self._latest_metric_from_payload(item)
             if artifact_metric is not None:

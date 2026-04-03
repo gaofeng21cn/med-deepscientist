@@ -4679,6 +4679,45 @@ def test_approval_record_closes_pending_interaction(temp_home: Path) -> None:
     assert not snapshot_after["pending_decisions"]
 
 
+def test_closed_decision_request_does_not_remain_pending_in_snapshot(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("closed decision request snapshot sync")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="Should I keep the old finalize route open?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+    )
+
+    snapshot_waiting = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_waiting["status"] == "waiting_for_user"
+    assert request["interaction_id"] in snapshot_waiting["pending_decisions"]
+
+    follow_up = artifact.interact(
+        quest_root,
+        kind="progress",
+        message="The previous blocking request is obsolete after scope correction.",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        suppress_if_unchanged=False,
+        reply_to_interaction_id=request["interaction_id"],
+    )
+
+    assert follow_up["status"] == "ok"
+
+    snapshot_after = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_after["status"] == "active"
+    assert snapshot_after["waiting_interaction_id"] is None
+    assert not snapshot_after["pending_decisions"]
+    assert not bool((snapshot_after.get("guidance") or {}).get("requires_user_decision"))
+
+
 def test_complete_quest_requires_explicit_user_approval(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
