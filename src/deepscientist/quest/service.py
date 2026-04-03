@@ -2687,6 +2687,9 @@ class QuestService:
                         str(item.get("title") or "").strip()
                         or str(item.get("message") or "").strip()
                         or str(item.get("reason") or "").strip()
+                        or str(item.get("detail") or "").strip()
+                        or str(item.get("id") or "").strip()
+                        or str(item.get("status") or "").strip()
                     )
                 else:
                     text = str(item).strip()
