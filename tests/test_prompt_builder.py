@@ -48,6 +48,9 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
     assert "research_head_branch:" in prompt
     assert "current_workspace_root:" in prompt
     assert "built_in_mcp_namespaces: memory, artifact, bash_exec" in prompt
+    assert "this runner does not mount a `skills` MCP server" in prompt
+    assert "do not call `skills.read_mcp_resource`" in prompt
+    assert "read the relevant quest-local or canonical SKILL.md path with bash_exec" in prompt
     assert "artifact.arxiv(paper_id=..., full_text=False)" in prompt
     assert "artifact.activate_branch(...)" in prompt
     assert "artifact.confirm_baseline(...)" in prompt
@@ -67,6 +70,20 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
     assert "AutoFigure-Edit" in prompt
     assert len(prompt.splitlines()) < 1800
     assert len(prompt) < 120000
+
+
+def test_prompt_builder_enforces_list_argument_for_read_quest_documents(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="decision",
+        user_message="Recover the durable quest documents before deciding.",
+        model="gpt-5.4",
+    )
+
+    assert "quest_documents_argument_rule:" in prompt
+    assert "never pass one comma-separated string like `'brief,plan'`" in prompt
 
 
 def test_prompt_builder_includes_recovery_resume_packet_for_daemon_recovery(temp_home: Path) -> None:

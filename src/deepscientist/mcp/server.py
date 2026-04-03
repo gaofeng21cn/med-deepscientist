@@ -741,7 +741,7 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         annotations=_read_only_tool_annotations(title="Read quest documents"),
     )
     def read_quest_documents(
-        names: list[str] | None = None,
+        names: str | list[str] | None = None,
         mode: str = "excerpt",
         max_lines: int = 12,
         comment: str | dict[str, Any] | None = None,

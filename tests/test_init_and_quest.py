@@ -536,6 +536,87 @@ def test_snapshot_blocks_thin_and_drifted_reference_materialization(temp_home: P
     assert "at least 20 verified references are required" in " ".join(health["blocking_reasons"])
 
 
+def test_snapshot_synchronizes_active_paper_surface_into_quest_root_and_removes_stale_residue(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper surface sync quest")
+    quest_root = Path(snapshot["quest_root"])
+    worktree_root = ensure_dir(quest_root / ".ds" / "worktrees" / "paper-sync")
+    service.update_research_state(quest_root, current_workspace_root=str(worktree_root))
+
+    paper_root = ensure_dir(worktree_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Surface Sync Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-surface-sync",
+            "paper_branch": "paper/surface-sync",
+            "selected_outline_ref": "outline-001",
+            "title": "Surface Sync Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/surface-sync",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=21)
+    write_text(
+        paper_root / "references.bib",
+        "".join(f"@article{{demo2026{index:02d}, title={{Demo Reference {index}}}}}\n" for index in range(1, 22)),
+    )
+    literature_root = ensure_dir(worktree_root / "literature" / "pubmed")
+    write_text(
+        literature_root / "records.jsonl",
+        "\n".join(
+            json.dumps(
+                {
+                    "record_id": f"pubmed-demo-{index:03d}",
+                    "source": "pubmed",
+                    "title": f"Demo Reference {index}",
+                    "pmid": f"4000{index:04d}",
+                }
+            )
+            for index in range(1, 22)
+        )
+        + "\n",
+    )
+
+    root_paper = ensure_dir(quest_root / "paper")
+    write_text(root_paper / "references.bib", "")
+    write_text(root_paper / "stale.md", "stale root residue\n")
+    root_literature = ensure_dir(quest_root / "literature" / "pubmed")
+    write_text(root_literature / "records.jsonl", "")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["reference_materialization_ready"] is True
+    assert "quest root and active worktree reference surfaces are inconsistent" not in health["blocking_reasons"]
+    assert (quest_root / "paper" / "draft.md").exists()
+    assert (quest_root / "paper" / "paper_bundle_manifest.json").exists()
+    assert not (quest_root / "paper" / "stale.md").exists()
+    assert service._bibtex_entry_count((quest_root / "paper" / "references.bib").read_text(encoding="utf-8")) == 21
+    assert len(
+        [line for line in (quest_root / "literature" / "pubmed" / "records.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    ) == 21
+
+
 def test_snapshot_blocks_paper_with_thin_in_text_citation_usage(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

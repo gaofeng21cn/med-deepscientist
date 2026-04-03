@@ -1968,6 +1968,129 @@ class ArtifactService:
             roots.append(ensure_dir(paper_root))
         return roots
 
+    @staticmethod
+    def _reference_coverage_payload(
+        *,
+        pubmed_records: list[Any],
+        imported_records: list[Any],
+    ) -> dict[str, Any]:
+        combined = [item for item in [*pubmed_records, *imported_records] if isinstance(item, dict)]
+
+        def _has_any_key(record: dict[str, Any], keys: tuple[str, ...]) -> bool:
+            for key in keys:
+                value = str(record.get(key) or "").strip()
+                if value:
+                    return True
+            return False
+
+        return {
+            "record_count": len(combined),
+            "records_with_doi": sum(1 for item in combined if _has_any_key(item, ("doi", "DOI"))),
+            "records_with_pmid": sum(1 for item in combined if _has_any_key(item, ("pmid", "PMID"))),
+            "records_by_primary_source": {
+                "pubmed": len([item for item in pubmed_records if isinstance(item, dict)]),
+                "imported": len([item for item in imported_records if isinstance(item, dict)]),
+            },
+            "high_priority_missing": [],
+        }
+
+    def _synchronize_paper_reference_materials(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any] | None:
+        paper_roots = self._paper_active_sync_roots(quest_root, workspace_root=workspace_root)
+        if not paper_roots:
+            return None
+
+        workspace_roots: list[Path] = []
+        seen_workspace_roots: set[str] = set()
+        for paper_root in paper_roots:
+            candidate = paper_root.parent
+            key = str(candidate.resolve(strict=False))
+            if key in seen_workspace_roots:
+                continue
+            seen_workspace_roots.add(key)
+            workspace_roots.append(candidate)
+
+        bibliography_text: str | None = None
+        bibliography_entry_count = -1
+        bibliography_source_path: Path | None = None
+        any_source_exists = False
+        for paper_root in paper_roots:
+            candidate = paper_root / "references.bib"
+            if not candidate.exists():
+                continue
+            any_source_exists = True
+            text = read_text(candidate, "")
+            entry_count = self.quest_service._bibtex_entry_count(text)
+            if entry_count > bibliography_entry_count:
+                bibliography_text = text
+                bibliography_entry_count = entry_count
+                bibliography_source_path = candidate
+
+        literature_text_by_source: dict[str, str | None] = {}
+        literature_records_by_source: dict[str, list[Any]] = {}
+        literature_count_by_source: dict[str, int] = {}
+        for label, relative in (
+            ("pubmed", Path("literature/pubmed/records.jsonl")),
+            ("imported", Path("literature/imported/records.jsonl")),
+        ):
+            best_text: str | None = None
+            best_records: list[Any] = []
+            best_count = -1
+            for root in workspace_roots:
+                candidate = root / relative
+                if not candidate.exists():
+                    continue
+                any_source_exists = True
+                text = read_text(candidate, "")
+                records = read_jsonl(candidate)
+                count = len(records)
+                if count > best_count:
+                    best_text = text
+                    best_records = records
+                    best_count = count
+            literature_text_by_source[label] = best_text
+            literature_records_by_source[label] = best_records
+            literature_count_by_source[label] = max(best_count, 0)
+
+        if not any_source_exists:
+            return None
+
+        for paper_root in paper_roots:
+            if bibliography_text is not None:
+                write_text(paper_root / "references.bib", bibliography_text)
+            write_json(
+                paper_root / "reference_coverage_report.json",
+                self._reference_coverage_payload(
+                    pubmed_records=literature_records_by_source.get("pubmed") or [],
+                    imported_records=literature_records_by_source.get("imported") or [],
+                ),
+            )
+
+        for root in workspace_roots:
+            for label, relative in (
+                ("pubmed", Path("literature/pubmed/records.jsonl")),
+                ("imported", Path("literature/imported/records.jsonl")),
+            ):
+                text = literature_text_by_source.get(label)
+                if text is None:
+                    continue
+                destination = root / relative
+                ensure_dir(destination.parent)
+                write_text(destination, text)
+
+        return {
+            "ok": True,
+            "paper_roots": [str(path) for path in paper_roots],
+            "workspace_roots": [str(path) for path in workspace_roots],
+            "bibliography_source_path": str(bibliography_source_path) if bibliography_source_path else None,
+            "bibliography_entry_count": max(bibliography_entry_count, 0),
+            "literature_record_counts": literature_count_by_source,
+        }
+
     def _paper_sync_roots(self, quest_root: Path) -> list[Path]:
         roots: list[Path] = []
         seen: set[str] = set()
@@ -3591,6 +3714,7 @@ class ArtifactService:
                     for item in (manifest.get("slices") or [])
                     if isinstance(item, dict) and str(item.get("status") or "pending").strip() == "pending"
                 )
+        self._synchronize_paper_reference_materials(quest_root, workspace_root=workspace_root)
         health = self._paper_contract_health_payload(
             quest_root,
             workspace_root=workspace_root,
@@ -5344,6 +5468,7 @@ class ArtifactService:
         if normalized_detail not in {"summary", "full"}:
             raise ValueError("get_paper_contract_health detail must be `summary` or `full`.")
         workspace_root = self.quest_service.active_workspace_root(quest_root)
+        self._synchronize_paper_reference_materials(quest_root, workspace_root=workspace_root)
         paper_contract = self.quest_service._paper_contract_payload(quest_root, workspace_root)
         paper_evidence = self.quest_service._paper_evidence_payload(quest_root, workspace_root)
         analysis_inventory = self.quest_service._analysis_inventory_payload(quest_root, workspace_root)
@@ -5393,6 +5518,10 @@ class ArtifactService:
         normalized_detail = str(detail or "summary").strip().lower() or "summary"
         if normalized_detail not in {"summary", "full"}:
             raise ValueError("get_quest_state detail must be `summary` or `full`.")
+        self._synchronize_paper_reference_materials(
+            quest_root,
+            workspace_root=self.quest_service.active_workspace_root(quest_root),
+        )
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
         payload: dict[str, Any] = {
             "quest_id": snapshot.get("quest_id"),
@@ -5651,14 +5780,15 @@ class ArtifactService:
         self,
         quest_root: Path,
         *,
-        names: list[str] | None = None,
+        names: str | list[str] | None = None,
         mode: str = "excerpt",
         max_lines: int = 12,
     ) -> dict[str, Any]:
         normalized_mode = str(mode or "excerpt").strip().lower() or "excerpt"
         if normalized_mode not in {"excerpt", "full"}:
             raise ValueError("read_quest_documents mode must be `excerpt` or `full`.")
-        requested = [str(item or "").strip().lower() for item in (names or []) if str(item or "").strip()]
+        normalized_names = [names] if isinstance(names, str) else (names or [])
+        requested = [str(item or "").strip().lower() for item in normalized_names if str(item or "").strip()]
         if not requested:
             requested = ["brief", "plan", "status", "summary", "active_user_requirements"]
         document_paths = {
@@ -9180,6 +9310,7 @@ class ArtifactService:
                 + "; ".join(problems)
                 + "."
             )
+        self._synchronize_paper_reference_materials(quest_root, workspace_root=workspace_root)
         reference_materialization = self.quest_service._paper_reference_materialization_payload(
             quest_root,
             workspace_root=workspace_root,

@@ -9,6 +9,7 @@ import subprocess
 import json
 import mimetypes
 import re
+import shutil
 import threading
 import time
 from pathlib import Path, PurePosixPath
@@ -1749,6 +1750,7 @@ class QuestService:
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
         resolved_workspace_root = workspace_root or self.active_workspace_root(quest_root)
+        self.synchronize_active_paper_surface(quest_root, workspace_root=resolved_workspace_root)
         paper_root = self._best_paper_root(quest_root, resolved_workspace_root) or (resolved_workspace_root / "paper")
 
         roots: list[Path] = []
@@ -1850,6 +1852,172 @@ class QuestService:
             "reference_gate": reference_gate,
             "surface_consistency_ok": surface_consistency_ok,
             "surface_counts": surface_counts,
+        }
+
+    @staticmethod
+    def _surface_file_digest(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def _surface_tree_signature(self, root: Path) -> list[tuple[str, int, str]]:
+        if not root.exists() or not root.is_dir():
+            return []
+        signature: list[tuple[str, int, str]] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root).as_posix()
+            signature.append((relative, path.stat().st_size, self._surface_file_digest(path)))
+        return signature
+
+    @staticmethod
+    def _surface_path_is_preserved(relative_path: str, preserved_paths: set[str]) -> bool:
+        normalized = relative_path.strip("/")
+        if not normalized:
+            return False
+        return normalized in preserved_paths or any(item.startswith(f"{normalized}/") for item in preserved_paths)
+
+    def _sync_surface_tree(
+        self,
+        source_root: Path,
+        target_root: Path,
+        *,
+        preserved_paths: set[str] | None = None,
+    ) -> bool:
+        preserved = {item.strip("/") for item in (preserved_paths or set()) if item and item.strip("/")}
+        changed = False
+
+        if not source_root.exists() or not source_root.is_dir():
+            if not target_root.exists():
+                return False
+            for path in sorted(target_root.rglob("*"), key=lambda item: len(item.relative_to(target_root).parts), reverse=True):
+                rel = path.relative_to(target_root).as_posix()
+                if self._surface_path_is_preserved(rel, preserved):
+                    continue
+                if path.is_file() or path.is_symlink():
+                    path.unlink()
+                    changed = True
+                elif path.is_dir():
+                    try:
+                        path.rmdir()
+                        changed = True
+                    except OSError:
+                        continue
+            if target_root.exists() and not any(target_root.iterdir()):
+                target_root.rmdir()
+                changed = True
+            return changed
+
+        ensure_dir(target_root)
+
+        for path in sorted(target_root.rglob("*"), key=lambda item: len(item.relative_to(target_root).parts), reverse=True):
+            rel = path.relative_to(target_root).as_posix()
+            if self._surface_path_is_preserved(rel, preserved):
+                continue
+            source_path = source_root / rel
+            if source_path.exists():
+                continue
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+                changed = True
+            elif path.is_dir():
+                try:
+                    path.rmdir()
+                    changed = True
+                except OSError:
+                    continue
+
+        for source_path in sorted(source_root.rglob("*")):
+            rel = source_path.relative_to(source_root)
+            target_path = target_root / rel
+            if source_path.is_dir():
+                if target_path.exists() and not target_path.is_dir():
+                    if target_path.is_file() or target_path.is_symlink():
+                        target_path.unlink()
+                    else:
+                        shutil.rmtree(target_path)
+                    changed = True
+                if not target_path.exists():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                    changed = True
+                continue
+
+            if target_path.exists() and target_path.is_dir():
+                shutil.rmtree(target_path)
+                changed = True
+            ensure_dir(target_path.parent)
+            if not target_path.exists() or self._surface_file_digest(source_path) != self._surface_file_digest(target_path):
+                shutil.copy2(source_path, target_path)
+                changed = True
+
+        return changed
+
+    def synchronize_active_paper_surface(
+        self,
+        quest_root: Path,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        resolved_workspace_root = (workspace_root or self.active_workspace_root(quest_root)).resolve(strict=False)
+        resolved_quest_root = quest_root.resolve(strict=False)
+        if resolved_workspace_root == resolved_quest_root:
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "quest_root_is_active_workspace",
+                "paper_changed": False,
+                "literature_changed": False,
+            }
+
+        source_paper_root = resolved_workspace_root / "paper"
+        if not source_paper_root.exists() or not source_paper_root.is_dir():
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "active_workspace_has_no_paper_root",
+                "paper_changed": False,
+                "literature_changed": False,
+            }
+        if not any(
+            (source_paper_root / name).exists()
+            for name in ("paper_line_state.json", "draft.md", "paper_bundle_manifest.json", "references.bib", "selected_outline.json")
+        ):
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "active_workspace_is_not_a_paper_line",
+                "paper_changed": False,
+                "literature_changed": False,
+            }
+
+        source_literature_root = resolved_workspace_root / "literature"
+        target_paper_root = resolved_quest_root / "paper"
+        target_literature_root = resolved_quest_root / "literature"
+
+        paper_changed = self._surface_tree_signature(source_paper_root) != self._surface_tree_signature(target_paper_root)
+        literature_changed = self._surface_tree_signature(source_literature_root) != self._surface_tree_signature(target_literature_root)
+
+        if paper_changed:
+            self._sync_surface_tree(
+                source_paper_root,
+                target_paper_root,
+                preserved_paths={"medical_analysis_contract.json", "medical_reporting_contract.json"},
+            )
+        if literature_changed:
+            self._sync_surface_tree(source_literature_root, target_literature_root)
+
+        return {
+            "ok": True,
+            "skipped": False,
+            "paper_changed": paper_changed,
+            "literature_changed": literature_changed,
+            "source_workspace_root": str(resolved_workspace_root),
+            "quest_root": str(resolved_quest_root),
         }
 
     def _paper_citation_usage_payload(
@@ -3501,13 +3669,14 @@ class QuestService:
 
     def _snapshot(self, quest_id: str) -> dict:
         quest_root = self._quest_root(quest_id)
+        workspace_root = self.active_workspace_root(quest_root)
+        self.synchronize_active_paper_surface(quest_root, workspace_root=workspace_root)
         cache_key = f"snapshot:{self._cache_key_for_path(quest_root)}"
         state = self._snapshot_state(quest_root)
         with self._snapshot_cache_lock:
             cached = self._snapshot_cache.get(cache_key)
             if cached and cached.get("state") == state:
                 return copy.deepcopy(cached.get("payload"))
-        workspace_root = self.active_workspace_root(quest_root)
         research_state = self.read_research_state(quest_root)
         quest_yaml = self.read_quest_yaml(quest_root)
         graph_dir = quest_root / "artifacts" / "graphs"

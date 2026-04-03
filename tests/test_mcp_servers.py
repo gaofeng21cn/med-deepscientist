@@ -487,6 +487,23 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         )
         assert docs_excerpt["ok"] is True
         assert docs_excerpt["count"] == 2
+        single_name_excerpt = _unwrap_tool_result(
+            await server.call_tool(
+                "read_quest_documents",
+                {"names": "status", "mode": "excerpt"},
+            )
+        )
+        assert single_name_excerpt["ok"] is True
+        assert single_name_excerpt["count"] == 1
+        assert single_name_excerpt["items"][0]["name"] == "status"
+        comma_name_excerpt = _unwrap_tool_result(
+            await server.call_tool(
+                "read_quest_documents",
+                {"names": "status,summary", "mode": "excerpt"},
+            )
+        )
+        assert comma_name_excerpt["ok"] is True
+        assert comma_name_excerpt["count"] == 0
         convo_context = _unwrap_tool_result(await server.call_tool("get_conversation_context", {"limit": 5}))
         assert convo_context["ok"] is True
         assert convo_context["count"] >= 0

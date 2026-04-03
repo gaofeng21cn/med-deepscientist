@@ -140,11 +140,21 @@ def test_system_prompt_strengthens_bash_exec_only_terminal_contract() -> None:
     assert "All terminal or shell-like command execution must use `bash_exec`." in text
     assert "including `curl`, `python`, `python3`, `bash`, `sh`, `node`, `npm`, `uv`, `git`, `ls`, `cat`, `sed`" in text
     assert "Do not use any direct terminal, subprocess, or implicit shell path outside `bash_exec`." in text
+    assert "This runner does not mount a `skills` MCP server" in text
+    assert "do not call `skills.read_mcp_resource`" in text
+    assert "use `bash_exec` to read the quest-local or canonical `SKILL.md` path" in text
     assert "Common `bash_exec` usage patterns:" in text
     assert "Terminal-command mapping examples:" in text
     assert "bash_exec(command='python -m pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)" in text
     assert "bash_exec(mode='history')" in text
     assert "bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)" in text
+
+
+def test_system_prompt_requires_array_argument_for_read_quest_documents() -> None:
+    text = _system_prompt_text()
+
+    assert "For `artifact.read_quest_documents(...)`, pass `names` as a real JSON array" in text
+    assert "never as one comma-separated string" in text
 
 
 def test_system_prompt_includes_stepwise_mode_operating_manuals() -> None:

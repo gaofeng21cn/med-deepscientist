@@ -4540,6 +4540,28 @@ def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp
     assert "Bibliography entries: `21`" in (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
 
 
+def test_read_quest_documents_accepts_single_string_without_comma_splitting(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("single-name quest docs")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    write_text = (quest_root / "status.md").write_text
+    write_text("# Status\n\nPaper line is active.\n", encoding="utf-8")
+
+    single = artifact.read_quest_documents(quest_root, names="status", mode="excerpt")
+    assert single["ok"] is True
+    assert single["count"] == 1
+    assert single["items"][0]["name"] == "status"
+    assert "Paper line is active." in str(single["items"][0]["content"] or "")
+
+    comma_string = artifact.read_quest_documents(quest_root, names="status,summary", mode="excerpt")
+    assert comma_string["ok"] is True
+    assert comma_string["count"] == 0
+
+
 def test_bind_source_repairs_lowercased_connector_binding_and_preserves_chat_id_case(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -5055,6 +5077,92 @@ def test_get_quest_state_and_global_status_expose_continuation_state(temp_home: 
     assert global_status["global_status"]["continuation_policy"] == "wait_for_user_or_resume"
     assert global_status["global_status"]["current_stage"] == "finalize"
     assert "停驻" in global_status["global_status"]["summary_text"]
+
+
+def test_get_quest_state_rehydrates_reference_surface_from_active_paper_worktree(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("reference surface rehydrate quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    worktree_root = quest_root / ".ds" / "worktrees" / "paper-reference-sync"
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    quest_service.update_research_state(
+        quest_root,
+        workspace_mode="paper",
+        current_workspace_root=str(worktree_root),
+        current_workspace_branch="paper/main",
+    )
+
+    paper_root = worktree_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Reference Surface Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/main",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=worktree_root, count=20)
+
+    (quest_root / "paper").mkdir(parents=True, exist_ok=True)
+    (quest_root / "paper" / "references.bib").write_text("", encoding="utf-8")
+    (quest_root / "literature" / "pubmed").mkdir(parents=True, exist_ok=True)
+    (quest_root / "literature" / "pubmed" / "records.jsonl").write_text("", encoding="utf-8")
+    (quest_root / "literature" / "imported").mkdir(parents=True, exist_ok=True)
+    (quest_root / "literature" / "imported" / "records.jsonl").write_text("", encoding="utf-8")
+
+    state = artifact.get_quest_state(quest_root, detail="summary")
+    health = state["quest_state"]["paper_contract_health"]
+
+    assert health["surface_consistency_ok"] is True
+    assert health["reference_materialization_ready"] is True
+    assert health["recommended_action"] != "synchronize_reference_materials"
+    assert (quest_root / "paper" / "references.bib").read_text(encoding="utf-8").count("@article{") == 20
+    assert len(read_jsonl(quest_root / "literature" / "pubmed" / "records.jsonl")) == 20
+    coverage = read_json(quest_root / "paper" / "reference_coverage_report.json", {})
+    assert coverage["record_count"] == 20
+    assert coverage["records_by_primary_source"]["pubmed"] == 20
+
+
+def test_read_quest_documents_accepts_single_name_string(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("single document read quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    result = artifact.read_quest_documents(
+        quest_root,
+        names="status",
+        mode="full",
+    )
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["items"][0]["name"] == "status"
+    assert result["items"][0]["exists"] is True
+    assert "# Status" in (result["items"][0]["content"] or "")
 
 
 def test_answer_interaction_is_not_suppressed_like_progress(temp_home: Path) -> None:

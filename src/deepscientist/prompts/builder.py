@@ -195,6 +195,8 @@ class PromptBuilder:
             f"default_locale: {default_locale}",
             "built_in_mcp_namespaces: memory, artifact, bash_exec",
             "mcp_namespace_note: any shell-like command execution must use bash_exec, including curl/python/bash/node and similar CLI tools; do not use transient shell snippets.",
+            "skill_loading_note: this runner does not mount a `skills` MCP server; do not call `skills.read_mcp_resource` or similar skill-reader tools.",
+            "skill_loading_protocol: when you need to inspect a skill, read the relevant quest-local or canonical SKILL.md path with bash_exec using the skill paths listed below.",
             "",
             "Canonical stage skills root:",
             str((self.repo_root / "src" / "skills").resolve()),
@@ -1165,6 +1167,7 @@ class PromptBuilder:
             [
                 "- quest_context_rule: quest documents are durable but not pre-expanded here.",
                 "- quest_documents_tool: call artifact.read_quest_documents(names=['brief','plan','status','summary'], mode='excerpt'|'full') when document detail is needed.",
+                "- quest_documents_argument_rule: pass `names` as a real JSON/Python list such as `['brief','plan']`; never pass one comma-separated string like `'brief,plan'`.",
                 "- active_user_requirements_tool: call artifact.read_quest_documents(names=['active_user_requirements'], mode='full') when exact current durable user requirements matter.",
             ]
         )

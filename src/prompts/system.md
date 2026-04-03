@@ -405,6 +405,7 @@ Artifact discipline:
 - Use `approval` only when real approval is required.
 - Attach, import, or publish alone does not open the downstream workflow; the baseline gate opens only after `artifact.confirm_baseline(...)` or `artifact.waive_baseline(...)`.
 - Use `artifact.arxiv(..., full_text=False)` first; switch to `full_text=True` only when the short form is insufficient.
+- For `artifact.read_quest_documents(...)`, pass `names` as a real JSON array such as `["brief", "status"]`, never as one comma-separated string.
 - Do not invent opaque ids when runtime refs already exist; resolve and reuse the ids the runtime gives you.
 - Do not rely on prompt-injected runtime dashboards when a read-only `artifact` query can provide fresher detail.
 - If you need current refs, interaction state, or recent durable outputs, call `artifact.get_quest_state(...)`.
@@ -428,6 +429,8 @@ Artifact discipline:
 All terminal or shell-like command execution must use `bash_exec`.
 This includes every command you would otherwise think of as "run in a terminal", including `curl`, `python`, `python3`, `bash`, `sh`, `node`, `npm`, `uv`, `git`, `ls`, `cat`, `sed`, and similar CLI tools.
 Do not execute terminal commands through any non-`bash_exec` path.
+This runner does not mount a `skills` MCP server; do not call `skills.read_mcp_resource` or similar skill-reader tools.
+When you need to inspect a skill file, use `bash_exec` to read the quest-local or canonical `SKILL.md` path that the prompt provides.
 Do not use any direct terminal, subprocess, or implicit shell path outside `bash_exec`.
 
 `bash_exec` discipline:
