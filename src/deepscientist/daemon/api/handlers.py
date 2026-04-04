@@ -326,7 +326,7 @@ npm --prefix src/ui run build</pre>
             )
         except FileExistsError as exc:
             return 409, {"ok": False, "message": str(exc)}
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return 400, {"ok": False, "message": str(exc)}
         except RuntimeError as exc:
             return 409, {"ok": False, "message": str(exc)}
@@ -449,7 +449,7 @@ npm --prefix src/ui run build</pre>
             )
         except FileNotFoundError:
             return 404, {"ok": False, "message": f"Unknown quest `{quest_id}`."}
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             return 400, {"ok": False, "message": str(exc)}
         return build_quest_startup_context_contract(snapshot)
 

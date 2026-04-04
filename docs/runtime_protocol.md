@@ -189,6 +189,7 @@ Controller-owned extensions are still allowed at the same flat level and must be
 - `review_summary`
 - `controller_first_policy_summary`
 - `automation_ready_summary`
+- `custom_brief`
 - `required_first_anchor`
 - `legacy_code_execution_allowed`
 - `startup_boundary_gate`

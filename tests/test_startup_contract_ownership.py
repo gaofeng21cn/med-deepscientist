@@ -133,3 +133,45 @@ def test_normalize_startup_contract_rejects_invalid_runtime_owned_type() -> None
 
     with pytest.raises(TypeError, match="startup_contract.need_research_paper"):
         module.normalize_startup_contract({"need_research_paper": "yes"})
+
+
+def test_quest_create_rejects_invalid_runtime_owned_startup_contract_type(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+
+    payload = app.handlers.quest_create(
+        {
+            "goal": "Reject invalid startup contract type.",
+            "quest_id": "quest-invalid-startup-contract",
+            "startup_contract": {
+                "need_research_paper": "yes",
+            },
+        }
+    )
+
+    assert isinstance(payload, tuple)
+    status_code, body = payload
+    assert status_code == 400
+    assert body["ok"] is False
+
+
+def test_quest_startup_context_rejects_invalid_runtime_owned_startup_contract_type(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("Reject invalid startup contract patch.")
+
+    payload = app.handlers.quest_startup_context(
+        quest["quest_id"],
+        {
+            "startup_contract": {
+                "schema_version": "4",
+            }
+        },
+    )
+
+    assert isinstance(payload, tuple)
+    status_code, body = payload
+    assert status_code == 400
+    assert body["ok"] is False
