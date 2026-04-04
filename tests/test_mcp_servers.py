@@ -1498,6 +1498,64 @@ def test_bash_exec_mcp_server_supports_detach_read_list_and_kill(temp_home: Path
     asyncio.run(scenario())
 
 
+def test_bash_exec_request_stop_uses_live_monitor_for_exec_sessions(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("mcp bash stop quest")
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-bash-stop",
+            active_anchor="experiment",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        service = BashExecService(temp_home)
+        session = service.start_session(
+            context,
+            command="printf 'alpha\\n'; sleep 30",
+            mode="detach",
+            comment={"stage": "baseline", "goal": "stop-path"},
+        )
+        bash_id = str(session["bash_id"])
+
+        meta: dict[str, object] = {}
+        for _ in range(50):
+            meta = read_json(service.meta_path(quest_root, bash_id), {})
+            if isinstance(meta.get("monitor_pid"), int) and isinstance(meta.get("process_pid"), int):
+                break
+            await asyncio.sleep(0.1)
+        assert isinstance(meta.get("monitor_pid"), int)
+        assert isinstance(meta.get("process_pid"), int)
+
+        def _unexpected_direct_kill(*args, **kwargs):  # noqa: ANN001, ANN002
+            raise AssertionError("request_stop should let the live exec monitor own process termination")
+
+        monkeypatch.setattr("deepscientist.bash_exec.service.terminate_process_ids", _unexpected_direct_kill)
+
+        stopping = service.request_stop(
+            quest_root,
+            bash_id,
+            reason="pytest-stop",
+            user_id="agent:pi",
+            force=True,
+        )
+        assert stopping["bash_id"] == bash_id
+        assert stopping["status"] == "terminating"
+
+        final = service.wait_for_session(quest_root, bash_id, timeout_seconds=10)
+        assert final["status"] == "terminated"
+        assert final["stop_reason"] == "pytest-stop"
+
+    asyncio.run(scenario())
+
+
 def test_bash_exec_sleep_protocol_supports_sleep_and_existing_session_waits(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)

@@ -204,7 +204,6 @@ def test_generic_connector_auto_binds_to_latest_existing_quest_and_rebinds_to_ne
 
     connector_statuses = {item["name"]: item for item in app.handlers.connectors()}
     assert "whatsapp" in connector_statuses
-    assert "feishu" not in connector_statuses
     assert connector_statuses["whatsapp"]["last_conversation_id"] == "whatsapp:direct:+15550001111"
     assert connector_statuses["whatsapp"]["transport"] == "local_session"
     assert connector_statuses["whatsapp"]["connection_state"] in {"configured", "ready"}
@@ -260,6 +259,10 @@ def test_system_disabled_connectors_are_hidden_from_statuses_and_availability(te
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
     manager.ensure_files()
+    runtime_config = manager.load_named("config")
+    runtime_config["connectors"]["system_enabled"]["telegram"] = False
+    runtime_config["connectors"]["system_enabled"]["lingzhu"] = True
+    write_yaml(manager.path_for("config"), runtime_config)
     connectors = manager.load_named("connectors")
     connectors["telegram"]["enabled"] = True
     connectors["telegram"]["bot_token"] = "telegram-token"

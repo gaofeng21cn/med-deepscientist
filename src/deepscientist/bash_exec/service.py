@@ -701,9 +701,10 @@ class BashExecService:
         meta["updated_at"] = utc_now()
         self._write_meta(quest_root, bash_id, meta)
         runtime = self._terminal_runtime_manager.get_runtime(quest_root, bash_id)
+        monitor_pid = meta.get("monitor_pid") if isinstance(meta.get("monitor_pid"), int) else None
         if runtime is not None:
             runtime.stop(reason=request_payload["reason"], force=bool(force))
-        else:
+        elif not is_process_alive(monitor_pid):
             terminate_process_ids(
                 process_pid=meta.get("process_pid") if isinstance(meta.get("process_pid"), int) else None,
                 process_group_id=meta.get("process_group_id") if isinstance(meta.get("process_group_id"), int) else None,

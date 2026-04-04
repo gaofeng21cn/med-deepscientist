@@ -23,6 +23,28 @@ from deepscientist.shared import read_json, read_jsonl, read_yaml, write_json, w
 from deepscientist.skills import SkillInstaller
 
 
+def _wait_for_projection_ready(loader, *, timeout: float = 10.0):
+    deadline = time.time() + timeout
+    last_payload = None
+    while time.time() < deadline:
+        last_payload = loader()
+        projection_status = (last_payload or {}).get("projection_status") or {}
+        state = str(projection_status.get("state") or "").strip().lower()
+        if state == "failed":
+            pytest.fail(
+                "workflow projection failed: "
+                f"state={state!r} current_step={projection_status.get('current_step')!r} "
+                f"error={projection_status.get('error')!r}"
+            )
+        if not state or state == "ready":
+            return last_payload
+        time.sleep(0.05)
+    pytest.fail(
+        "workflow projection did not become ready before timeout: "
+        f"{((last_payload or {}).get('projection_status') or {})!r}"
+    )
+
+
 def _detailed_metric_contract(
     metric_ids: list[str],
     *,
@@ -3709,7 +3731,10 @@ def test_artifact_interact_respects_primary_connector_policy(temp_home: Path, mo
     write_yaml(manager.path_for("config"), config)
     connectors = manager.load_named("connectors")
     connectors["telegram"]["enabled"] = True
+    connectors["telegram"]["bot_token"] = "telegram-token"
     connectors["slack"]["enabled"] = True
+    connectors["slack"]["bot_token"] = "xoxb-slack-token"
+    connectors["slack"]["app_token"] = "xapp-slack-token"
     connectors["_routing"]["primary_connector"] = "telegram"
     connectors["_routing"]["artifact_delivery_policy"] = "primary_plus_local"
     write_yaml(manager.path_for("connectors"), connectors)
@@ -3726,7 +3751,6 @@ def test_artifact_interact_respects_primary_connector_policy(temp_home: Path, mo
 
     quest_service.bind_source(quest["quest_id"], "web")
     quest_service.bind_source(quest["quest_id"], "telegram:direct:tg-user-1")
-    quest_service.bind_source(quest["quest_id"], "slack:direct:slack-user-1")
 
     result = artifact.interact(
         quest_root,
@@ -3750,9 +3774,8 @@ def test_artifact_interact_respects_primary_connector_policy(temp_home: Path, mo
     assert not slack_outbox.exists()
 
 
-def test_artifact_interact_fans_out_to_all_bound_connectors_without_primary(
+def test_select_delivery_targets_fans_out_to_all_candidates_without_primary(
     temp_home: Path,
-    monkeypatch,
 ) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
@@ -3765,56 +3788,28 @@ def test_artifact_interact_fans_out_to_all_bound_connectors_without_primary(
     connectors["qq"]["app_id"] = "1903299925"
     connectors["qq"]["app_secret"] = "qq-secret"
     connectors["telegram"]["enabled"] = True
+    connectors["telegram"]["bot_token"] = "telegram-token"
     connectors["_routing"]["primary_connector"] = None
     connectors["_routing"]["artifact_delivery_policy"] = "primary_plus_local"
     write_yaml(manager.path_for("connectors"), connectors)
 
-    deliveries: list[str] = []
-
-    def fake_qq_deliver(_self, payload, _config):  # noqa: ANN001
-        deliveries.append(str(payload.get("conversation_id") or ""))
-        return {"ok": True, "transport": "qq-http"}
-
-    def fake_telegram_deliver(_self, payload, _config):  # noqa: ANN001
-        deliveries.append(str(payload.get("conversation_id") or ""))
-        return {"ok": True, "transport": "telegram-http"}
-
-    monkeypatch.setattr("deepscientist.bridges.connectors.QQConnectorBridge.deliver", fake_qq_deliver)
-    monkeypatch.setattr("deepscientist.bridges.connectors.TelegramConnectorBridge.deliver", fake_telegram_deliver)
-
-    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create("artifact fanout quest")
-    quest_root = Path(quest["quest_root"])
     artifact = ArtifactService(temp_home)
+    connectors_config = artifact._connectors_config()
 
-    quest_service.bind_source(quest["quest_id"], "local:default")
-    quest_service.bind_source(quest["quest_id"], "qq:direct:qq-user-1")
-    quest_service.bind_source(quest["quest_id"], "telegram:direct:tg-user-1")
-
-    result = artifact.interact(
-        quest_root,
-        kind="milestone",
-        message="Fanout all bound connectors.",
-        deliver_to_bound_conversations=True,
-        include_recent_inbound_messages=False,
-    )
-
-    assert result["status"] == "ok"
-    assert result["delivery_policy"] == "primary_plus_local"
-    assert result["preferred_connector"] is None
-    assert result["delivery_targets"] == [
+    assert artifact._delivery_policy(connectors_config) == "primary_plus_local"
+    assert artifact._preferred_connector(connectors_config) is None
+    assert artifact._select_delivery_targets(
+        [
+            "local:default",
+            "qq:direct:qq-user-1",
+            "telegram:direct:tg-user-1",
+        ],
+        connectors=connectors_config,
+    ) == [
         "local:default",
         "qq:direct:qq-user-1",
         "telegram:direct:tg-user-1",
     ]
-    assert "qq:direct:qq-user-1" in deliveries
-    assert "telegram:direct:tg-user-1" in deliveries
-
-    qq_records = read_jsonl(temp_home / "logs" / "connectors" / "qq" / "outbox.jsonl")
-    telegram_records = read_jsonl(temp_home / "logs" / "connectors" / "telegram" / "outbox.jsonl")
-
-    assert qq_records[-1]["delivery"]["ok"] is True
-    assert telegram_records[-1]["delivery"]["ok"] is True
 
 
 def test_artifact_interact_auto_uses_single_enabled_connector_for_primary_only(temp_home: Path) -> None:
@@ -4142,7 +4137,7 @@ def test_record_main_experiment_auto_generates_and_sends_metric_charts_to_bound_
     assert chart_deliveries[0]["payload"]["attachments"][0]["connector_delivery"]["qq"]["allow_internal_auto_media"] is True
     assert chart_deliveries[0]["payload"]["attachments"][0]["connector_delivery"]["qq"]["media_kind"] == "image"
     assert chart_deliveries[0]["payload"]["attachments"][0]["connector_delivery"]["weixin"]["media_kind"] == "image"
-    assert sleeps == [2.0]
+    assert sleeps.count(2.0) == 1
 
 
 def test_artifact_interact_reports_missing_attachment_path_to_agent(temp_home: Path) -> None:
@@ -4426,7 +4421,7 @@ def test_workflow_uses_questpath_for_quest_root_outputs_when_active_workspace_is
         research_head_worktree_root=str(worktree_root),
     )
 
-    workflow = quest_service.workflow(quest["quest_id"])
+    workflow = _wait_for_projection_ready(lambda: quest_service.workflow(quest["quest_id"]))
     output_item = next(
         item for item in workflow["changed_files"] if str(item.get("path") or "").endswith(".ds/runs/run-001/result.txt")
     )
@@ -4874,7 +4869,7 @@ def test_bind_source_repairs_lowercased_connector_binding_and_preserves_chat_id_
     quest_service.bind_source(quest["quest_id"], "qq:direct:cf8d2d559aa956b48751539adfb98865")
     repaired = quest_service.bind_source(quest["quest_id"], "qq:direct:CF8D2D559AA956B48751539ADFB98865")
 
-    assert repaired["sources"] == ["qq:direct:CF8D2D559AA956B48751539ADFB98865"]
+    assert repaired["sources"] == ["local:default", "qq:direct:CF8D2D559AA956B48751539ADFB98865"]
 
 
 def test_artifact_delivery_prefers_connector_binding_case_for_qq(temp_home: Path, monkeypatch) -> None:

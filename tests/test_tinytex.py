@@ -32,6 +32,7 @@ def test_inspect_latex_runtime_prefers_managed_tinytex(monkeypatch, temp_home: P
 def test_resolve_latex_binary_falls_back_to_path(monkeypatch, temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     monkeypatch.setattr("deepscientist.tinytex.which", lambda binary: f"/usr/bin/{binary}")
+    monkeypatch.setattr("deepscientist.tinytex.tinytex_root_candidates", lambda home=None: [])
 
     match = resolve_latex_binary("pdflatex", temp_home)
 

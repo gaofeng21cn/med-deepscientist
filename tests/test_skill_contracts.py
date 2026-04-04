@@ -145,7 +145,7 @@ def test_system_prompt_strengthens_bash_exec_only_terminal_contract() -> None:
     assert "use `bash_exec` to read the quest-local or canonical `SKILL.md` path" in text
     assert "Common `bash_exec` usage patterns:" in text
     assert "Terminal-command mapping examples:" in text
-    assert "bash_exec(command='python -m pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)" in text
+    assert "bash_exec(command='uv run pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)" in text
     assert "bash_exec(mode='history')" in text
     assert "bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)" in text
 

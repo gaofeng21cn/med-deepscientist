@@ -34,6 +34,9 @@ from deepscientist.runners import RunResult
 from deepscientist.shared import append_jsonl, ensure_dir, generate_id, read_json, read_jsonl, read_yaml, utc_now, write_json, write_yaml
 
 
+_ASYNC_TURN_TIMEOUT_SECONDS = 10.0
+
+
 def _get_json(url: str):
     with urlopen(url) as response:  # noqa: S310
         return json.loads(response.read().decode("utf-8"))
@@ -332,18 +335,46 @@ def _wait_for_json(url: str, *, timeout: float = 10.0) -> dict | list:
     raise TimeoutError(f"Timed out waiting for JSON response from {url}")
 
 
-def _wait_for_projection_ready(loader, *, timeout: float = 5.0):
+def _wait_for(
+    loader,
+    *,
+    predicate,
+    timeout: float = _ASYNC_TURN_TIMEOUT_SECONDS,
+    interval: float = 0.05,
+    failure_message: str,
+    render_last=None,
+):
+    deadline = time.time() + timeout
+    last_value = None
+    while time.time() < deadline:
+        last_value = loader()
+        if predicate(last_value):
+            return last_value
+        time.sleep(interval)
+    details = render_last(last_value) if callable(render_last) else last_value
+    pytest.fail(f"{failure_message}: {details!r}")
+
+
+def _wait_for_projection_ready(loader, *, timeout: float = _ASYNC_TURN_TIMEOUT_SECONDS):
     deadline = time.time() + timeout
     last_payload = None
     while time.time() < deadline:
         last_payload = loader()
-        state = str(((last_payload or {}).get("projection_status") or {}).get("state") or "").strip().lower()
+        projection_status = (last_payload or {}).get("projection_status") or {}
+        state = str(projection_status.get("state") or "").strip().lower()
+        if state == "failed":
+            pytest.fail(
+                "workflow projection failed: "
+                f"state={state!r} current_step={projection_status.get('current_step')!r} "
+                f"error={projection_status.get('error')!r}"
+            )
         if not state or state == "ready":
             return last_payload
         time.sleep(0.05)
-    if last_payload is not None:
-        return last_payload
-    return loader()
+    pytest.fail(
+        "workflow projection did not become ready before timeout: "
+        f"{((last_payload or {}).get('projection_status') or {})!r}"
+    )
 
 
 def test_workflow_projection_returns_placeholder_then_ready(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3221,14 +3252,15 @@ def test_chat_endpoint_schedules_background_runner(temp_home: Path) -> None:
     assert payload["scheduled"] is True
     assert payload["started"] is True
 
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        history = app.quest_service.history(quest_id)
-        if any(item.get("role") == "assistant" and item.get("content") == "Auto reply from background runner." for item in history):
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("assistant reply was not appended after chat submission")
+    _wait_for(
+        lambda: app.quest_service.history(quest_id),
+        predicate=lambda history: any(
+            item.get("role") == "assistant" and item.get("content") == "Auto reply from background runner."
+            for item in history
+        ),
+        failure_message="assistant reply was not appended after chat submission",
+        render_last=lambda history: history[-3:],
+    )
 
     events = app.handlers.quest_events(
         quest_id,
@@ -3248,13 +3280,16 @@ def test_chat_endpoint_schedules_background_runner(temp_home: Path) -> None:
         update["kind"] == "event" and (update.get("data") or {}).get("label") == "run_finished"
         for update in updates
     )
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        if app.quest_service.snapshot(quest_id)["status"] == "active":
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("quest status did not settle back to active after the background turn")
+    _wait_for(
+        lambda: app.quest_service.snapshot(quest_id),
+        predicate=lambda snapshot: snapshot["status"] == "active",
+        failure_message="quest status did not settle back to active after the background turn",
+        render_last=lambda snapshot: {
+            "status": snapshot.get("status"),
+            "active_run_id": snapshot.get("active_run_id"),
+            "pending_user_message_count": snapshot.get("pending_user_message_count"),
+        },
+    )
     assert quest_root.exists()
 
 
@@ -3812,6 +3847,15 @@ def test_qq_inbound_reply_auto_links_to_latest_threaded_interaction(
     assert latest["source"] == conversation_id
     assert latest["content"] == "继续，把数据入口也一起核对。"
     assert latest["reply_to_interaction_id"] == progress["interaction_id"]
+
+    active_requirements = (quest_root / "memory" / "knowledge" / "active-user-requirements.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Latest Added Requirement" in active_requirements
+    assert f"- source: {conversation_id}" in active_requirements
+    assert "继续，把数据入口也一起核对。" in active_requirements
+    assert "## Active Requirement History" in active_requirements
+    assert f"1. [{conversation_id}]" in active_requirements
 
 
 def test_chat_endpoint_persists_client_message_delivery_state(temp_home: Path) -> None:
@@ -5138,44 +5182,48 @@ def test_chat_reply_auto_links_interaction_and_resumes_with_decision_skill(temp_
     initial_payload = app.handlers.chat(quest_id, {"text": "Ask me A or B.", "source": "tui-ink"})
     assert initial_payload["ok"] is True
 
-    interaction_id = None
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        snapshot = app.quest_service.snapshot(quest_id)
-        interactions = snapshot.get("active_interactions") or []
-        if snapshot["status"] == "waiting_for_user" and interactions:
-            interaction_id = interactions[-1]["interaction_id"]
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("decision_request was not persisted as a waiting interaction")
+    waiting_snapshot = _wait_for(
+        lambda: app.quest_service.snapshot(quest_id),
+        predicate=lambda snapshot: snapshot["status"] == "waiting_for_user" and bool(snapshot.get("active_interactions")),
+        failure_message="decision_request was not persisted as a waiting interaction",
+        render_last=lambda snapshot: {
+            "status": snapshot.get("status"),
+            "active_run_id": snapshot.get("active_run_id"),
+            "active_interactions": snapshot.get("active_interactions"),
+            "pending_user_message_count": snapshot.get("pending_user_message_count"),
+        },
+    )
+    interaction_id = waiting_snapshot["active_interactions"][-1]["interaction_id"]
 
     reply_payload = app.handlers.chat(quest_id, {"text": "我选A。", "source": "tui-ink"})
     assert reply_payload["ok"] is True
     assert reply_payload["message"]["reply_to_interaction_id"] == interaction_id
 
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        history = app.quest_service.history(quest_id)
-        if any(item.get("role") == "assistant" and item.get("content") == "收到选择：我选A。" for item in history):
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("assistant follow-up was not appended after the interaction reply")
+    _wait_for(
+        lambda: app.quest_service.history(quest_id),
+        predicate=lambda history: any(
+            item.get("role") == "assistant" and item.get("content") == "收到选择：我选A。"
+            for item in history
+        ),
+        failure_message="assistant follow-up was not appended after the interaction reply",
+        render_last=lambda history: history[-4:],
+    )
 
     history = app.quest_service.history(quest_id)
     reply_record = next(item for item in history if item.get("role") == "user" and item.get("content") == "我选A。")
     assert reply_record["reply_to_interaction_id"] == interaction_id
     assert runner.requests[-1]["skill_id"] == "decision"
 
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        snapshot = app.quest_service.snapshot(quest_id)
-        if snapshot["status"] == "active" and snapshot["active_run_id"] is None:
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("quest did not settle back to active after handling the interaction reply")
+    _wait_for(
+        lambda: app.quest_service.snapshot(quest_id),
+        predicate=lambda snapshot: snapshot["status"] == "active" and snapshot["active_run_id"] is None,
+        failure_message="quest did not settle back to active after handling the interaction reply",
+        render_last=lambda snapshot: {
+            "status": snapshot.get("status"),
+            "active_run_id": snapshot.get("active_run_id"),
+            "pending_user_message_count": snapshot.get("pending_user_message_count"),
+        },
+    )
 
     events = app.quest_service.events(quest_id)["events"]
     assert any(
@@ -5427,29 +5475,32 @@ def test_chat_reply_auto_links_latest_threaded_progress_without_forcing_decision
     initial_payload = app.handlers.chat(quest_id, {"text": "Start the audit.", "source": "tui-ink"})
     assert initial_payload["ok"] is True
 
-    threaded_interaction_id = None
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        snapshot = app.quest_service.snapshot(quest_id)
-        threaded_interaction_id = snapshot.get("default_reply_interaction_id")
-        if threaded_interaction_id:
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("threaded progress interaction was not persisted")
+    threaded_snapshot = _wait_for(
+        lambda: app.quest_service.snapshot(quest_id),
+        predicate=lambda snapshot: bool(snapshot.get("default_reply_interaction_id")),
+        failure_message="threaded progress interaction was not persisted",
+        render_last=lambda snapshot: {
+            "status": snapshot.get("status"),
+            "default_reply_interaction_id": snapshot.get("default_reply_interaction_id"),
+            "active_interactions": snapshot.get("active_interactions"),
+        },
+    )
+    threaded_interaction_id = threaded_snapshot["default_reply_interaction_id"]
 
     reply_payload = app.handlers.chat(quest_id, {"text": "继续，先确认 requirements 和入口脚本。", "source": "web-react"})
     assert reply_payload["ok"] is True
     assert reply_payload["message"]["reply_to_interaction_id"] == threaded_interaction_id
 
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        history = app.quest_service.history(quest_id)
-        if any(item.get("role") == "assistant" and item.get("content") == "继续执行：继续，先确认 requirements 和入口脚本。" for item in history):
-            break
-        time.sleep(0.05)
-    else:
-        raise AssertionError("assistant follow-up was not appended after threaded progress reply")
+    _wait_for(
+        lambda: app.quest_service.history(quest_id),
+        predicate=lambda history: any(
+            item.get("role") == "assistant"
+            and item.get("content") == "继续执行：继续，先确认 requirements 和入口脚本。"
+            for item in history
+        ),
+        failure_message="assistant follow-up was not appended after threaded progress reply",
+        render_last=lambda history: history[-4:],
+    )
 
     assert runner.requests[-1]["skill_id"] != "decision"
 
