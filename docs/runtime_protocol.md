@@ -116,7 +116,8 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - stable output minimum: `ok`, `status`, `snapshot`, `summary_refresh`
   - completion approval semantics:
     - runtime first looks for a blocking completion request whose `reply_schema.decision_type == "quest_completion_approval"`
-    - the replying user message may satisfy approval either by explicit typed `decision_response` or by the legacy explicit-approval text path
+    - the replying user message must carry `reply_to_interaction_id`
+    - the replying user message must carry typed `decision_response = {decision_type: "quest_completion_approval", approved: true}`
 
 - `GET /api/quests/{quest_id}/events`
   - stable output minimum: append-only event stream payload with `events` and cursor metadata

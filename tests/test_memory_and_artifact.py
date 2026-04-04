@@ -5068,7 +5068,7 @@ def test_complete_quest_requires_explicit_user_approval(temp_home: Path) -> None
     quest_service.append_message(
         quest["quest_id"],
         role="user",
-        content="好的",
+        content="同意完成",
         source="web-react",
         reply_to_interaction_id=request["interaction_id"],
     )
@@ -5106,9 +5106,13 @@ def test_complete_quest_marks_quest_completed_after_explicit_user_approval(temp_
     reply = quest_service.append_message(
         quest["quest_id"],
         role="user",
-        content="同意完成",
+        content="structured approval payload",
         source="web-react",
         reply_to_interaction_id=request["interaction_id"],
+        decision_response={
+            "decision_type": "quest_completion_approval",
+            "approved": True,
+        },
     )
 
     result = artifact.complete_quest(quest_root, summary="Research line finished with reviewed deliverables.")
@@ -5119,6 +5123,10 @@ def test_complete_quest_marks_quest_completed_after_explicit_user_approval(temp_
     assert result["snapshot"]["status"] == "completed"
     assert result["approval"]["record"]["source"]["kind"] == "user"
     assert result["decision"]["record"]["action"] == "stop"
+    assert result["approval"]["record"]["decision_response"] == {
+        "decision_type": "quest_completion_approval",
+        "approved": True,
+    }
 
 
 def test_threaded_progress_auto_links_user_reply_without_waiting(temp_home: Path) -> None:

@@ -11745,7 +11745,7 @@ class ArtifactService:
 
         approval_text = str(reply_message.get("content") or "").strip()
         typed_completion_approval = self._typed_completion_approval(reply_message)
-        if typed_completion_approval is None and not self._has_explicit_completion_approval(approval_text):
+        if typed_completion_approval is not True:
             return {
                 "ok": False,
                 "status": "approval_not_explicit",
@@ -11753,18 +11753,9 @@ class ArtifactService:
                 "interaction_id": interaction_id,
                 "approval_message_id": reply_message.get("id"),
                 "message": (
-                    "Quest completion was not approved explicitly. "
-                    "Ask the user to reply with an explicit approval such as `同意完成` or `approve`."
+                    "Quest completion requires a typed decision_response with "
+                    "`decision_type=quest_completion_approval` and `approved=true`."
                 ),
-            }
-        if typed_completion_approval is False:
-            return {
-                "ok": False,
-                "status": "approval_not_explicit",
-                "quest_id": snapshot.get("quest_id"),
-                "interaction_id": interaction_id,
-                "approval_message_id": reply_message.get("id"),
-                "message": "Quest completion was rejected by an explicit typed decision response.",
             }
 
         completion_summary = summary.strip() or self.quest_service.localized_copy(

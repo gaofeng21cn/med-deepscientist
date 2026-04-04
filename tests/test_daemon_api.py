@@ -3872,9 +3872,13 @@ def test_artifact_completion_endpoints_finalize_quest_and_refresh_documents(temp
     app.handlers.chat(
         quest_id,
         {
-            "text": "同意",
+            "text": "typed approval payload",
             "source": "web-react",
             "reply_to_interaction_id": interaction_id,
+            "decision_response": {
+                "decision_type": "quest_completion_approval",
+                "approved": True,
+            },
         },
     )
 

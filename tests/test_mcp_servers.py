@@ -691,9 +691,13 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).append_message(
             quest["quest_id"],
             role="user",
-            content="approve",
+            content="typed approval payload",
             source="tui-ink",
             reply_to_interaction_id=completion_request["interaction_id"],
+            decision_response={
+                "decision_type": "quest_completion_approval",
+                "approved": True,
+            },
         )
         completion_result = _unwrap_tool_result(
             await server.call_tool(
