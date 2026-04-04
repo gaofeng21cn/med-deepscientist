@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import shutil
 import threading
@@ -931,6 +932,314 @@ class ArtifactService:
             return path.resolve().relative_to(quest_root.resolve()).as_posix()
         except ValueError:
             return str(path)
+
+    @staticmethod
+    def _path_is_within(path: Path, root: Path | None) -> bool:
+        if root is None:
+            return False
+        try:
+            path.resolve(strict=False).relative_to(root.resolve(strict=False))
+        except ValueError:
+            return False
+        return True
+
+    @staticmethod
+    def _rewrite_workspace_legacy_parts(path: Path) -> Path:
+        parts = list(path.parts)
+        rewritten: list[str] = []
+        index = 0
+        while index < len(parts):
+            if index + 1 < len(parts) and parts[index] == "ops" and parts[index + 1] == "deepscientist":
+                rewritten.extend(["ops", "med-deepscientist"])
+                index += 2
+                continue
+            rewritten.append(parts[index])
+            index += 1
+        return Path(*rewritten) if rewritten else Path()
+
+    def _paper_live_path_candidates(
+        self,
+        raw_path: object,
+        *,
+        source_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> list[Path]:
+        text = str(raw_path or "").strip()
+        if not text:
+            return []
+        legacy_roots = [Path(item).expanduser().resolve(strict=False) for item in (legacy_workspace_roots or [])]
+        candidate = Path(text).expanduser()
+        resolved: list[Path] = []
+        seen: set[str] = set()
+
+        def add(path: Path) -> None:
+            normalized = path.expanduser().resolve(strict=False)
+            key = str(normalized)
+            if key in seen:
+                return
+            seen.add(key)
+            resolved.append(normalized)
+
+        if candidate.is_absolute():
+            add(candidate)
+            if current_workspace_root is not None:
+                current_root = current_workspace_root.expanduser().resolve(strict=False)
+                try:
+                    relative = candidate.resolve(strict=False).relative_to(current_root)
+                except ValueError:
+                    relative = None
+                if relative is not None:
+                    add(current_root / self._rewrite_workspace_legacy_parts(relative))
+                for legacy_root in legacy_roots:
+                    try:
+                        legacy_relative = candidate.resolve(strict=False).relative_to(legacy_root)
+                    except ValueError:
+                        continue
+                    add(current_root / self._rewrite_workspace_legacy_parts(legacy_relative))
+        else:
+            add(source_root / candidate)
+        return resolved
+
+    def _normalize_paper_live_path(
+        self,
+        raw_path: object,
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+        target_override: Path | None = None,
+    ) -> str | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        if target_override is not None:
+            return os.path.relpath(target_override, target_root).replace(os.sep, "/")
+        candidate_roots = [
+            source_root.resolve(strict=False),
+            target_root.resolve(strict=False),
+            current_workspace_root.expanduser().resolve(strict=False) if current_workspace_root is not None else None,
+        ]
+        for candidate in self._paper_live_path_candidates(
+            text,
+            source_root=source_root,
+            current_workspace_root=current_workspace_root,
+            legacy_workspace_roots=legacy_workspace_roots,
+        ):
+            if candidate.exists() or any(self._path_is_within(candidate, root) for root in candidate_roots if root is not None):
+                return os.path.relpath(candidate, target_root).replace(os.sep, "/")
+        return PurePosixPath(text).as_posix() if not Path(text).is_absolute() else text
+
+    def _normalize_paper_live_path_list(
+        self,
+        values: object,
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for raw in values or [] if isinstance(values, list) else []:
+            text = self._normalize_paper_live_path(
+                raw,
+                source_root=source_root,
+                target_root=target_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+            )
+            if text:
+                normalized.append(text)
+        return normalized
+
+    def _normalize_selected_outline_live_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+        for section in normalized.get("sections") or [] if isinstance(normalized.get("sections"), list) else []:
+            if not isinstance(section, dict):
+                continue
+            rows = section.get("result_table") if isinstance(section.get("result_table"), list) else []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                row["source_paths"] = self._normalize_paper_live_path_list(
+                    row.get("source_paths"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+        return normalized
+
+    def _normalize_paper_evidence_ledger_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+        items = normalized.get("items") if isinstance(normalized.get("items"), list) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item["source_paths"] = self._normalize_paper_live_path_list(
+                item.get("source_paths"),
+                source_root=source_root,
+                target_root=target_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+            )
+        return normalized
+
+    def _normalize_claim_evidence_map_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+        claims = normalized.get("claims") if isinstance(normalized.get("claims"), list) else []
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            items = claim.get("evidence_items") if isinstance(claim.get("evidence_items"), list) else []
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                item["source_paths"] = self._normalize_paper_live_path_list(
+                    item.get("source_paths"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+        return normalized
+
+    def _normalize_paper_baseline_inventory_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+
+        def normalize_entry(entry: object) -> dict[str, Any] | None:
+            if not isinstance(entry, dict):
+                return None
+            resolved = dict(entry)
+            for key in (
+                "baseline_path",
+                "baseline_root_rel_path",
+                "metric_contract_json_path",
+                "metric_contract_json_rel_path",
+            ):
+                if key in resolved:
+                    resolved[key] = self._normalize_paper_live_path(
+                        resolved.get(key),
+                        source_root=source_root,
+                        target_root=target_root,
+                        current_workspace_root=current_workspace_root,
+                        legacy_workspace_roots=legacy_workspace_roots,
+                    )
+            if "evidence_paths" in resolved:
+                resolved["evidence_paths"] = self._normalize_paper_live_path_list(
+                    resolved.get("evidence_paths"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+            return resolved
+
+        canonical = normalize_entry(normalized.get("canonical_baseline_ref"))
+        normalized["canonical_baseline_ref"] = canonical
+        entries = normalized.get("supplementary_baselines") if isinstance(normalized.get("supplementary_baselines"), list) else []
+        normalized["supplementary_baselines"] = [
+            item
+            for item in (normalize_entry(entry) for entry in entries)
+            if isinstance(item, dict)
+        ]
+        return normalized
+
+    def _normalize_paper_bundle_manifest_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        source_root: Path,
+        target_paper_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        target_root = target_paper_root.parent
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+        local_overrides = {
+            "outline_path": target_paper_root / "selected_outline.json",
+            "claim_evidence_map_path": target_paper_root / "claim_evidence_map.json",
+            "evidence_ledger_path": target_paper_root / "evidence_ledger.json",
+            "baseline_inventory_path": target_paper_root / "baseline_inventory.json",
+        }
+        optional_local_overrides = {
+            "experiment_matrix_path": target_paper_root / "paper_experiment_matrix.md",
+            "experiment_matrix_json_path": target_paper_root / "paper_experiment_matrix.json",
+        }
+        for key, path in optional_local_overrides.items():
+            if path.exists():
+                local_overrides[key] = path
+        for key in (
+            "outline_path",
+            "draft_path",
+            "writing_plan_path",
+            "references_path",
+            "claim_evidence_map_path",
+            "evidence_ledger_path",
+            "experiment_matrix_path",
+            "experiment_matrix_json_path",
+            "compile_report_path",
+            "pdf_path",
+            "latex_root_path",
+            "baseline_inventory_path",
+            "open_source_manifest_path",
+            "open_source_cleanup_plan_path",
+        ):
+            if key not in normalized:
+                continue
+            normalized[key] = self._normalize_paper_live_path(
+                normalized.get(key),
+                source_root=source_root,
+                target_root=target_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+                target_override=local_overrides.get(key),
+            )
+        evidence_gate = dict(normalized.get("evidence_gate") or {}) if isinstance(normalized.get("evidence_gate"), dict) else {}
+        if "outline_path" in evidence_gate:
+            evidence_gate["outline_path"] = self._normalize_paper_live_path(
+                evidence_gate.get("outline_path"),
+                source_root=source_root,
+                target_root=target_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+                target_override=target_paper_root / "selected_outline.json",
+            )
+        normalized["evidence_gate"] = evidence_gate
+        return normalized
 
     def _paper_bundle_relative_path(
         self,
@@ -2367,8 +2676,19 @@ class ArtifactService:
             ],
             "updated_at": utc_now(),
         }
-        write_json(self._paper_baseline_inventory_path(quest_root, workspace_root=workspace_root), payload)
-        return payload
+        source_root = quest_root
+        returned: dict[str, Any] | None = None
+        active_root = self._workspace_root_for(quest_root, workspace_root)
+        for paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
+            normalized = self._normalize_paper_baseline_inventory_payload(
+                payload,
+                source_root=source_root,
+                target_root=paper_root.parent,
+            )
+            write_json(paper_root / "baseline_inventory.json", normalized)
+            if paper_root.parent.resolve(strict=False) == active_root.resolve(strict=False):
+                returned = normalized
+        return returned or payload
 
     def _ensure_open_source_prep(
         self,
@@ -2650,51 +2970,64 @@ class ArtifactService:
         record: dict[str, Any],
         *,
         workspace_root: Path | None = None,
+        source_root: Path | None = None,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
     ) -> None:
-        sections = self._normalize_outline_sections(
-            record.get("sections"),
-            experimental_designs=self._normalize_string_list(
-                ((record.get("detailed_outline") or {}) if isinstance(record.get("detailed_outline"), dict) else {}).get(
-                    "experimental_designs"
-                )
-            ),
-        )
-        manifest = {
-            "schema_version": 1,
-            "outline_id": str(record.get("outline_id") or "").strip() or None,
-            "status": str(record.get("status") or "selected").strip() or "selected",
-            "title": str(record.get("title") or "").strip() or None,
-            "note": str(record.get("note") or "").strip() or None,
-            "story": str(record.get("story") or "").strip() or None,
-            "ten_questions": self._normalize_string_list(record.get("ten_questions")),
-            "detailed_outline": (
-                dict(record.get("detailed_outline") or {})
-                if isinstance(record.get("detailed_outline"), dict)
-                else {}
-            ),
-            "evidence_contract": self._normalize_outline_evidence_contract(record.get("evidence_contract")),
-            "section_order": [
-                str(section.get("section_id") or "").strip()
-                for section in sections
-                if str(section.get("section_id") or "").strip()
-            ],
-            "sections": [
-                {
-                    "section_id": str(section.get("section_id") or "").strip() or None,
-                    "title": str(section.get("title") or "").strip() or None,
-                    "paper_role": str(section.get("paper_role") or "main_text").strip() or "main_text",
-                    "claims": self._normalize_string_list(section.get("claims")),
-                    "required_items": self._normalize_string_list(section.get("required_items")),
-                    "optional_items": self._normalize_string_list(section.get("optional_items")),
-                    "status": str(section.get("status") or "planned").strip() or "planned",
-                    "note": str(section.get("note") or "").strip() or None,
-                }
-                for section in sections
-            ],
-            "created_at": str(record.get("created_at") or "").strip() or utc_now(),
-            "updated_at": utc_now(),
-        }
+        normalized_source_root = source_root or workspace_root or quest_root
         for paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
+            normalized_record = self._normalize_selected_outline_live_payload(
+                record,
+                source_root=normalized_source_root,
+                target_root=paper_root.parent,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+            )
+            sections = self._normalize_outline_sections(
+                normalized_record.get("sections"),
+                experimental_designs=self._normalize_string_list(
+                    (
+                        (normalized_record.get("detailed_outline") or {})
+                        if isinstance(normalized_record.get("detailed_outline"), dict)
+                        else {}
+                    ).get("experimental_designs")
+                ),
+            )
+            manifest = {
+                "schema_version": 1,
+                "outline_id": str(normalized_record.get("outline_id") or "").strip() or None,
+                "status": str(normalized_record.get("status") or "selected").strip() or "selected",
+                "title": str(normalized_record.get("title") or "").strip() or None,
+                "note": str(normalized_record.get("note") or "").strip() or None,
+                "story": str(normalized_record.get("story") or "").strip() or None,
+                "ten_questions": self._normalize_string_list(normalized_record.get("ten_questions")),
+                "detailed_outline": (
+                    dict(normalized_record.get("detailed_outline") or {})
+                    if isinstance(normalized_record.get("detailed_outline"), dict)
+                    else {}
+                ),
+                "evidence_contract": self._normalize_outline_evidence_contract(normalized_record.get("evidence_contract")),
+                "section_order": [
+                    str(section.get("section_id") or "").strip()
+                    for section in sections
+                    if str(section.get("section_id") or "").strip()
+                ],
+                "sections": [
+                    {
+                        "section_id": str(section.get("section_id") or "").strip() or None,
+                        "title": str(section.get("title") or "").strip() or None,
+                        "paper_role": str(section.get("paper_role") or "main_text").strip() or "main_text",
+                        "claims": self._normalize_string_list(section.get("claims")),
+                        "required_items": self._normalize_string_list(section.get("required_items")),
+                        "optional_items": self._normalize_string_list(section.get("optional_items")),
+                        "status": str(section.get("status") or "planned").strip() or "planned",
+                        "note": str(section.get("note") or "").strip() or None,
+                    }
+                    for section in sections
+                ],
+                "created_at": str(normalized_record.get("created_at") or "").strip() or utc_now(),
+                "updated_at": utc_now(),
+            }
             outline_root = ensure_dir(paper_root / "outline")
             write_json(outline_root / "manifest.json", manifest)
             sections_root = ensure_dir(outline_root / "sections")
@@ -2854,12 +3187,7 @@ class ArtifactService:
         *,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
-        record = self._read_outline_folder_to_record(quest_root, workspace_root=workspace_root)
-        if not record:
-            return {}
-        for paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
-            write_json(paper_root / "selected_outline.json", record)
-        return record
+        return self._read_outline_folder_to_record(quest_root, workspace_root=workspace_root)
 
     def _read_paper_evidence_ledger(self, quest_root: Path) -> dict[str, Any]:
         candidates: list[tuple[tuple[str, float], dict[str, Any]]] = []
@@ -3018,6 +3346,9 @@ class ArtifactService:
         payload: dict[str, Any],
         *,
         workspace_root: Path | None = None,
+        source_root: Path | None = None,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
     ) -> dict[str, Any]:
         normalized = {
             "schema_version": 1,
@@ -3025,11 +3356,22 @@ class ArtifactService:
             "items": [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)],
             "updated_at": utc_now(),
         }
-        markdown = self._render_paper_evidence_ledger_markdown(normalized)
+        normalized_source_root = source_root or workspace_root or quest_root
+        returned: dict[str, Any] | None = None
+        active_root = self._workspace_root_for(quest_root, workspace_root)
         for paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
-            write_json(paper_root / "evidence_ledger.json", normalized)
-            write_text(paper_root / "evidence_ledger.md", markdown)
-        return normalized
+            root_payload = self._normalize_paper_evidence_ledger_payload(
+                normalized,
+                source_root=normalized_source_root,
+                target_root=paper_root.parent,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+            )
+            write_json(paper_root / "evidence_ledger.json", root_payload)
+            write_text(paper_root / "evidence_ledger.md", self._render_paper_evidence_ledger_markdown(root_payload))
+            if paper_root.parent.resolve(strict=False) == active_root.resolve(strict=False):
+                returned = root_payload
+        return returned or normalized
 
     def _read_selected_outline_for_sync(
         self,
@@ -3045,22 +3387,213 @@ class ArtifactService:
         payload: dict[str, Any],
         *,
         workspace_root: Path | None = None,
+        source_root: Path | None = None,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
     ) -> None:
         outline_id = str(payload.get("outline_id") or "").strip()
-        self._write_outline_folder_from_record(quest_root, payload, workspace_root=workspace_root)
+        self._write_outline_folder_from_record(
+            quest_root,
+            payload,
+            workspace_root=workspace_root,
+            source_root=source_root,
+            current_workspace_root=current_workspace_root,
+            legacy_workspace_roots=legacy_workspace_roots,
+        )
         compiled = self._compile_selected_outline_json(quest_root, workspace_root=workspace_root) or dict(payload)
-        canonical_path = ensure_dir(quest_root / "paper") / "selected_outline.json"
-        write_json(canonical_path, compiled)
+        normalized_source_root = source_root or workspace_root or quest_root
         for paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
             path = paper_root / "selected_outline.json"
-            if path.resolve() == canonical_path.resolve():
-                continue
             existing = read_json(path, {}) if path.exists() else {}
             if path.exists():
                 existing_outline_id = str(existing.get("outline_id") or "").strip() if isinstance(existing, dict) else ""
                 if existing_outline_id and existing_outline_id != outline_id:
                     continue
-            write_json(path, compiled)
+            normalized = self._normalize_selected_outline_live_payload(
+                compiled,
+                source_root=normalized_source_root,
+                target_root=paper_root.parent,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_workspace_roots,
+            )
+            write_json(path, normalized)
+
+    def _read_latest_paper_json_payload(
+        self,
+        paper_roots: list[Path],
+        relative_path: str,
+    ) -> tuple[Path | None, dict[str, Any]]:
+        candidates: list[tuple[tuple[str, float], Path, dict[str, Any]]] = []
+        for paper_root in paper_roots:
+            path = paper_root / relative_path
+            if not path.exists():
+                continue
+            payload = read_json(path, {})
+            if not isinstance(payload, dict) or not payload:
+                continue
+            candidates.append(
+                (
+                    (
+                        str(payload.get("updated_at") or payload.get("created_at") or ""),
+                        path.stat().st_mtime if path.exists() else 0.0,
+                    ),
+                    path,
+                    payload,
+                )
+            )
+        if not candidates:
+            return None, {}
+        candidates.sort(key=lambda item: item[0])
+        _, path, payload = candidates[-1]
+        return path, payload
+
+    def repair_paper_live_paths(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+        current_workspace_root: Path,
+        legacy_workspace_roots: list[Path] | None = None,
+        extra_paper_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        active_workspace_root = self._workspace_root_for(quest_root, workspace_root).resolve(strict=False)
+        effective_workspace_root = (
+            Path(workspace_root).expanduser().resolve(strict=False) if workspace_root is not None else active_workspace_root
+        )
+        current_workspace_root = current_workspace_root.expanduser().resolve(strict=False)
+        legacy_roots = [Path(item).expanduser().resolve(strict=False) for item in (legacy_workspace_roots or [])]
+        default_paper_roots = self._paper_active_sync_roots(quest_root, workspace_root=effective_workspace_root)
+        target_paper_roots = list(default_paper_roots)
+        seen: set[str] = {str(path.resolve(strict=False)) for path in target_paper_roots}
+        for paper_root in extra_paper_roots or []:
+            normalized_root = Path(paper_root).expanduser().resolve(strict=False)
+            key = str(normalized_root)
+            if key in seen:
+                continue
+            seen.add(key)
+            target_paper_roots.append(normalized_root)
+
+        repaired_files: list[str] = []
+
+        selected_source_path, selected_source_payload = self._read_latest_paper_json_payload(
+            default_paper_roots,
+            "selected_outline.json",
+        )
+        if not selected_source_payload:
+            selected_source_path, selected_source_payload = self._read_latest_paper_json_payload(
+                target_paper_roots,
+                "selected_outline.json",
+            )
+        if selected_source_payload:
+            selected_source_root = (
+                selected_source_path.parent.parent.resolve(strict=False) if selected_source_path is not None else active_workspace_root
+            )
+            self._write_selected_outline_sync(
+                quest_root,
+                selected_source_payload,
+                workspace_root=effective_workspace_root,
+                source_root=selected_source_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_roots,
+            )
+            for paper_root in target_paper_roots:
+                path = paper_root / "selected_outline.json"
+                if paper_root in default_paper_roots:
+                    repaired_files.append(str(path))
+                    continue
+                normalized = self._normalize_selected_outline_live_payload(
+                    selected_source_payload,
+                    source_root=selected_source_root,
+                    target_root=paper_root.parent,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_roots,
+                )
+                write_json(path, normalized)
+                repaired_files.append(str(path))
+
+        ledger_source_path, ledger_source_payload = self._read_latest_paper_json_payload(
+            default_paper_roots,
+            "evidence_ledger.json",
+        )
+        if ledger_source_payload:
+            ledger_source_root = (
+                ledger_source_path.parent.parent.resolve(strict=False) if ledger_source_path is not None else active_workspace_root
+            )
+            self._write_paper_evidence_ledger(
+                quest_root,
+                ledger_source_payload,
+                workspace_root=effective_workspace_root,
+                source_root=ledger_source_root,
+                current_workspace_root=current_workspace_root,
+                legacy_workspace_roots=legacy_roots,
+            )
+            for paper_root in default_paper_roots:
+                repaired_files.extend(
+                    [
+                        str(paper_root / "evidence_ledger.json"),
+                        str(paper_root / "evidence_ledger.md"),
+                    ]
+                )
+
+        claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
+            default_paper_roots,
+            "claim_evidence_map.json",
+        )
+        if not claim_map_source_payload:
+            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
+                target_paper_roots,
+                "claim_evidence_map.json",
+            )
+        if claim_map_source_payload:
+            claim_map_source_root = (
+                claim_map_source_path.parent.parent.resolve(strict=False) if claim_map_source_path is not None else active_workspace_root
+            )
+            for paper_root in target_paper_roots:
+                path = paper_root / "claim_evidence_map.json"
+                if paper_root not in default_paper_roots and not path.exists():
+                    continue
+                normalized = self._normalize_claim_evidence_map_payload(
+                    claim_map_source_payload,
+                    source_root=claim_map_source_root,
+                    target_root=paper_root.parent,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_roots,
+                )
+                write_json(path, normalized)
+                repaired_files.append(str(path))
+
+        baseline_inventory = self._write_paper_baseline_inventory(quest_root, workspace_root=effective_workspace_root)
+        if baseline_inventory:
+            for paper_root in default_paper_roots:
+                repaired_files.append(str(paper_root / "baseline_inventory.json"))
+
+        manifest_source_path, manifest_source_payload = self._read_latest_paper_json_payload(
+            default_paper_roots,
+            "paper_bundle_manifest.json",
+        )
+        if manifest_source_payload:
+            manifest_source_root = (
+                manifest_source_path.parent.parent.resolve(strict=False) if manifest_source_path is not None else active_workspace_root
+            )
+            for paper_root in default_paper_roots:
+                normalized = self._normalize_paper_bundle_manifest_payload(
+                    manifest_source_payload,
+                    source_root=manifest_source_root,
+                    target_paper_root=paper_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_roots,
+                )
+                write_json(paper_root / "paper_bundle_manifest.json", normalized)
+                repaired_files.append(str(paper_root / "paper_bundle_manifest.json"))
+
+        return {
+            "ok": True,
+            "quest_root": str(quest_root.resolve(strict=False)),
+            "workspace_root": str(active_workspace_root),
+            "current_workspace_root": str(current_workspace_root),
+            "legacy_workspace_roots": [str(path) for path in legacy_roots],
+            "repaired_files": repaired_files,
+        }
 
     def _outline_status_from_rows(self, section: dict[str, Any]) -> str:
         rows = [dict(item) for item in (section.get("result_table") or []) if isinstance(item, dict)]
@@ -9465,7 +9998,18 @@ class ArtifactService:
             "created_at": utc_now(),
             "updated_at": utc_now(),
         }
-        write_json(manifest_path, manifest)
+        raw_manifest = dict(manifest)
+        active_manifest: dict[str, Any] | None = None
+        for sync_paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
+            normalized_manifest = self._normalize_paper_bundle_manifest_payload(
+                raw_manifest,
+                source_root=workspace_root,
+                target_paper_root=sync_paper_root,
+            )
+            write_json(sync_paper_root / "paper_bundle_manifest.json", normalized_manifest)
+            if sync_paper_root.resolve(strict=False) == paper_root.resolve(strict=False):
+                active_manifest = normalized_manifest
+        manifest = active_manifest or raw_manifest
         paper_line_state = self._write_paper_line_state(
             quest_root,
             workspace_root=workspace_root,

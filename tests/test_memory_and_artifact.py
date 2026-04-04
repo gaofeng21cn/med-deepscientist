@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import time
 from pathlib import Path
@@ -2353,6 +2354,239 @@ def test_submit_paper_bundle_normalizes_latex_root_from_main_tex_path(temp_home:
     assert latex_sources["path"] == "paper/latex"
 
 
+def test_submit_paper_bundle_normalizes_manifest_and_baseline_inventory_paths(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper bundle path normalization quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    _confirm_local_baseline(artifact, quest_root, baseline_id="baseline-path-normalization")
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Bundle Outline",
+        note="Candidate for path normalization.",
+        detailed_outline={
+            "title": "Bundle Outline",
+            "research_questions": ["RQ-paths"],
+            "experimental_designs": ["Exp-paths"],
+            "contributions": ["C-paths"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use this for path normalization.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    assert paper_workspace != quest_root
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    _write_citation_rich_draft(paper_root)
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    write_json(paper_root / "claim_evidence_map.json", {"schema_version": 1, "claims": []})
+    write_json(paper_root / "paper_experiment_matrix.json", {"schema_version": 1, "rows": []})
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(paper_root / "build" / "compile_report.json", {"ok": True})
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
+
+    result = artifact.submit_paper_bundle(
+        quest_root,
+        title="Bundle Paper",
+        summary="Paper bundle keeps internal paths relative.",
+        outline_path=str((paper_root / "selected_outline.json").resolve()),
+        draft_path=str((paper_root / "draft.md").resolve()),
+        writing_plan_path=str((paper_root / "writing_plan.md").resolve()),
+        references_path=str((paper_root / "references.bib").resolve()),
+        claim_evidence_map_path=str((paper_root / "claim_evidence_map.json").resolve()),
+        compile_report_path=str((paper_root / "build" / "compile_report.json").resolve()),
+        pdf_path=str((paper_root / "paper.pdf").resolve()),
+    )
+
+    manifest = read_json(Path(result["manifest_path"]), {})
+    assert manifest["outline_path"] == "paper/selected_outline.json"
+    assert manifest["draft_path"] == "paper/draft.md"
+    assert manifest["writing_plan_path"] == "paper/writing_plan.md"
+    assert manifest["references_path"] == "paper/references.bib"
+    assert manifest["claim_evidence_map_path"] == "paper/claim_evidence_map.json"
+    assert manifest["compile_report_path"] == "paper/build/compile_report.json"
+    assert manifest["pdf_path"] == "paper/paper.pdf"
+    assert manifest["experiment_matrix_json_path"] == "paper/paper_experiment_matrix.json"
+    assert manifest["baseline_inventory_path"] == "paper/baseline_inventory.json"
+    assert manifest["evidence_gate"]["outline_path"] == "paper/selected_outline.json"
+
+    baseline_inventory = read_json(Path(result["baseline_inventory_path"]), {})
+    expected_baseline_root = os.path.relpath(
+        quest_root / "baselines" / "local" / "baseline-path-normalization",
+        paper_workspace,
+    )
+    expected_metric_contract = os.path.relpath(
+        quest_root / "baselines" / "local" / "baseline-path-normalization" / "json" / "metric_contract.json",
+        paper_workspace,
+    )
+    assert baseline_inventory["canonical_baseline_ref"]["baseline_path"] == expected_baseline_root
+    assert baseline_inventory["canonical_baseline_ref"]["metric_contract_json_path"] == expected_metric_contract
+    assert baseline_inventory["canonical_baseline_ref"]["baseline_root_rel_path"] == expected_baseline_root
+    assert baseline_inventory["canonical_baseline_ref"]["metric_contract_json_rel_path"] == expected_metric_contract
+
+
+def test_repair_paper_live_paths_rewrites_legacy_source_paths_per_root(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper live path repair quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Repair Outline",
+        detailed_outline={
+            "title": "Repair Outline",
+            "research_questions": ["RQ-repair"],
+            "experimental_designs": ["Exp-repair"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for live-path repair.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    assert paper_workspace != quest_root
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    current_workspace_root = temp_home / "workspace"
+    legacy_workspace_root = Path("/legacy/workspace")
+    study_csv = current_workspace_root / "studies" / "003-demo" / "artifacts" / "score_table.csv"
+    literature_note = current_workspace_root / "portfolio" / "notes" / "route.md"
+    study_csv.parent.mkdir(parents=True, exist_ok=True)
+    literature_note.parent.mkdir(parents=True, exist_ok=True)
+    study_csv.write_text("score,event\n0,0\n", encoding="utf-8")
+    literature_note.write_text("# Route\n", encoding="utf-8")
+
+    legacy_score_path = str(legacy_workspace_root / study_csv.relative_to(current_workspace_root))
+    legacy_note_path = str(legacy_workspace_root / literature_note.relative_to(current_workspace_root))
+    selected_outline_payload = {
+        "schema_version": 1,
+        "outline_id": "outline-001",
+        "status": "selected",
+        "title": "Repair Outline",
+        "sections": [
+            {
+                "section_id": "results-main",
+                "title": "Results",
+                "paper_role": "main_text",
+                "claims": ["C1"],
+                "required_items": ["RUN-001"],
+                "optional_items": [],
+                "status": "ready",
+                "result_table": [
+                    {
+                        "item_id": "RUN-001",
+                        "title": "Legacy source repair",
+                        "kind": "main_experiment",
+                        "paper_role": "main_text",
+                        "status": "completed",
+                        "claim_links": ["C1"],
+                        "result_summary": "Repair source paths.",
+                        "source_paths": [legacy_score_path, legacy_note_path],
+                    }
+                ],
+            }
+        ],
+        "created_at": "2026-04-04T00:00:00+00:00",
+        "updated_at": "2026-04-04T00:00:00+00:00",
+    }
+    evidence_ledger_payload = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "items": [
+            {
+                "item_id": "RUN-001",
+                "title": "Legacy source repair",
+                "kind": "main_experiment",
+                "paper_role": "main_text",
+                "status": "completed",
+                "section_id": "results-main",
+                "claim_links": ["C1"],
+                "source_paths": [legacy_score_path, legacy_note_path],
+            }
+        ],
+        "updated_at": "2026-04-04T00:00:00+00:00",
+    }
+    claim_map_payload = {
+        "schema_version": 1,
+        "claims": [
+            {
+                "claim_id": "C1",
+                "claim_text": "Repair legacy paper source paths.",
+                "status": "supported",
+                "paper_role": "main_text",
+                "evidence_items": [
+                    {
+                        "item_id": "RUN-001",
+                        "summary": "Legacy source repair",
+                        "source_paths": [legacy_score_path, legacy_note_path],
+                    }
+                ],
+            }
+        ],
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "selected_outline.json", selected_outline_payload)
+        write_json(root / "evidence_ledger.json", evidence_ledger_payload)
+        (root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+        write_json(root / "claim_evidence_map.json", claim_map_payload)
+
+    repaired = artifact.repair_paper_live_paths(
+        quest_root,
+        workspace_root=paper_workspace,
+        current_workspace_root=current_workspace_root,
+        legacy_workspace_roots=[legacy_workspace_root],
+    )
+
+    assert repaired["ok"] is True
+
+    expected_quest_paths = [
+        os.path.relpath(study_csv, quest_root),
+        os.path.relpath(literature_note, quest_root),
+    ]
+    expected_worktree_paths = [
+        os.path.relpath(study_csv, paper_workspace),
+        os.path.relpath(literature_note, paper_workspace),
+    ]
+
+    canonical_selected = read_json(canonical_paper_root / "selected_outline.json", {})
+    worktree_selected = read_json(paper_root / "selected_outline.json", {})
+    canonical_sources = canonical_selected["sections"][0]["result_table"][0]["source_paths"]
+    worktree_sources = worktree_selected["sections"][0]["result_table"][0]["source_paths"]
+    assert canonical_sources == expected_quest_paths
+    assert worktree_sources == expected_worktree_paths
+
+    canonical_ledger = read_json(canonical_paper_root / "evidence_ledger.json", {})
+    worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
+    assert canonical_ledger["items"][0]["source_paths"] == expected_quest_paths
+    assert worktree_ledger["items"][0]["source_paths"] == expected_worktree_paths
+    worktree_ledger_markdown = (paper_root / "evidence_ledger.md").read_text(encoding="utf-8")
+    assert expected_worktree_paths[0] in worktree_ledger_markdown
+    assert legacy_score_path not in worktree_ledger_markdown
+
+    canonical_claim_map = read_json(canonical_paper_root / "claim_evidence_map.json", {})
+    worktree_claim_map = read_json(paper_root / "claim_evidence_map.json", {})
+    assert canonical_claim_map["claims"][0]["evidence_items"][0]["source_paths"] == expected_quest_paths
+    assert worktree_claim_map["claims"][0]["evidence_items"][0]["source_paths"] == expected_worktree_paths
+
+
 def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -2794,12 +3028,81 @@ def test_collect_artifacts_auto_backfills_legacy_quest_without_index(temp_home: 
     )
 
     artifacts = quest_service._collect_artifacts(quest_root)
-    assert len(artifacts) == 1
-    assert artifacts[0]["payload"]["artifact_id"] == "legacy-milestone"
+    milestone_artifacts = [
+        item for item in artifacts if str((item.get("payload") or {}).get("artifact_id") or "") == "legacy-milestone"
+    ]
+    assert len(milestone_artifacts) == 1
 
     projection = read_json(quest_service._artifact_projection_path(quest_root), {})
     assert projection["schema_version"] == 2
     assert projection["state_kind"] == "raw"
+
+
+def test_collect_artifacts_refreshes_legacy_projection_when_workspace_root_drifted(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    artifact = ArtifactService(temp_home)
+    quest = quest_service.create("artifact projection workspace drift quest")
+    quest_root = Path(quest["quest_root"])
+
+    artifact.record(
+        quest_root,
+        {
+            "kind": "milestone",
+            "summary": "Projection should refresh when workspace roots drift.",
+            "message": "Projection should refresh when workspace roots drift.",
+        },
+        checkpoint=False,
+    )
+
+    current_artifacts = quest_service._collect_artifacts(quest_root)
+    milestone_artifacts = [
+        item
+        for item in current_artifacts
+        if str((item.get("payload") or {}).get("summary") or "") == "Projection should refresh when workspace roots drift."
+    ]
+    assert len(milestone_artifacts) == 1
+    artifact_path = Path(str(milestone_artifacts[0]["path"]))
+    legacy_root = Path("/Users/gaofeng/workspace/Yang/无功能垂体瘤/ops/med-deepscientist/runtime/quests") / quest_root.name
+    projection_path = quest_service._artifact_projection_path(quest_root)
+    projection = read_json(projection_path, {})
+    write_json(
+        projection_path,
+        {
+            "schema_version": 2,
+            "generated_at": projection.get("generated_at"),
+            "state_kind": "index",
+            "state": quest_service._artifact_index_collection_state(quest_root),
+            "artifacts": [
+                {
+                    **dict(milestone_artifacts[0]),
+                    "path": str(legacy_root / artifact_path.relative_to(quest_root)),
+                    "workspace_root": str(legacy_root),
+                }
+            ],
+        },
+    )
+
+    refreshed = quest_service._collect_artifacts(quest_root)
+    refreshed_milestones = [
+        item
+        for item in refreshed
+        if str((item.get("payload") or {}).get("summary") or "") == "Projection should refresh when workspace roots drift."
+    ]
+    assert len(refreshed_milestones) == 1
+    assert refreshed_milestones[0]["path"] == str(artifact_path)
+    assert refreshed_milestones[0]["workspace_root"] == str(quest_root)
+
+    rewritten_projection = read_json(projection_path, {})
+    rewritten_milestones = [
+        item
+        for item in rewritten_projection["artifacts"]
+        if str((item.get("payload") or {}).get("summary") or "") == "Projection should refresh when workspace roots drift."
+    ]
+    assert len(rewritten_milestones) == 1
+    assert rewritten_milestones[0]["path"] == str(artifact_path)
+    assert rewritten_milestones[0]["workspace_root"] == str(quest_root)
 
 
 def test_artifact_record_updates_projection_incrementally(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:

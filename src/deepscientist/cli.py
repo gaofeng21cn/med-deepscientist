@@ -116,6 +116,15 @@ def build_parser() -> argparse.ArgumentParser:
     migrate_parser = subparsers.add_parser("migrate")
     migrate_parser.add_argument("target")
 
+    repair_parser = subparsers.add_parser("repair")
+    repair_subparsers = repair_parser.add_subparsers(dest="repair_command", required=True)
+    repair_paper_paths = repair_subparsers.add_parser("paper-live-paths")
+    repair_paper_paths.add_argument("--quest-id", required=True)
+    repair_paper_paths.add_argument("--workspace-root", default=None)
+    repair_paper_paths.add_argument("--current-workspace-root", required=True)
+    repair_paper_paths.add_argument("--legacy-workspace-root", action="append", default=[])
+    repair_paper_paths.add_argument("--extra-paper-root", action="append", default=[])
+
     return parser
 
 
@@ -473,6 +482,30 @@ def migrate_command(home: Path, target: str) -> int:
     return 0
 
 
+def repair_paper_live_paths_command(
+    home: Path,
+    *,
+    quest_id: str,
+    workspace_root: str | None,
+    current_workspace_root: str,
+    legacy_workspace_roots: list[str] | None,
+    extra_paper_roots: list[str] | None,
+) -> int:
+    artifact_service = ArtifactService(home)
+    quest_root = home / "quests" / quest_id
+    if not quest_root.exists():
+        raise FileNotFoundError(f"unknown quest_id: {quest_id}")
+    payload = artifact_service.repair_paper_live_paths(
+        quest_root,
+        workspace_root=Path(workspace_root).expanduser() if workspace_root else None,
+        current_workspace_root=Path(current_workspace_root).expanduser(),
+        legacy_workspace_roots=[Path(item).expanduser() for item in (legacy_workspace_roots or [])],
+        extra_paper_roots=[Path(item).expanduser() for item in (extra_paper_roots or [])],
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -525,6 +558,15 @@ def main(argv: list[str] | None = None) -> int:
         return config_validate_command(home)
     if args.command == "migrate":
         return migrate_command(home, args.target)
+    if args.command == "repair" and args.repair_command == "paper-live-paths":
+        return repair_paper_live_paths_command(
+            home,
+            quest_id=args.quest_id,
+            workspace_root=args.workspace_root,
+            current_workspace_root=args.current_workspace_root,
+            legacy_workspace_roots=args.legacy_workspace_root,
+            extra_paper_roots=args.extra_paper_root,
+        )
     parser.error(f"Unknown command: {args.command}")
     return 1
 

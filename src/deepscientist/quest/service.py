@@ -543,12 +543,19 @@ class QuestService:
         ]
 
     def _artifact_projection_state(self, quest_root: Path) -> tuple[str, Any]:
+        artifact_roots_state = [
+            str(root.resolve())
+            for root in (self._artifact_roots(quest_root) or [quest_root])
+        ]
         index_state = self._artifact_index_collection_state(quest_root)
         if index_state and all(item[1] is not None for item in index_state):
-            return "index", index_state
+            return "index", {"artifact_roots": artifact_roots_state, "collections": index_state}
         if not index_state:
-            return "index", []
-        return "raw", self._json_compatible_state(self._artifact_collection_state(quest_root))
+            return "index", {"artifact_roots": artifact_roots_state, "collections": []}
+        return "raw", {
+            "artifact_roots": artifact_roots_state,
+            "collections": self._json_compatible_state(self._artifact_collection_state(quest_root)),
+        }
 
     def _projection_artifact_item(
         self,
