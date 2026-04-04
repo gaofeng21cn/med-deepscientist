@@ -63,7 +63,8 @@ Default to a fast path when it can establish trust with less work.
 
 Fast path is the default when any of the following is true:
 
-- `requested_baseline_ref` or `confirmed_baseline_ref` already points to the active baseline object
+- `confirmed_baseline_ref` already points to the active baseline object
+- or `requested_baseline_ref` was set at quest-creation time and the runtime already attached/imported that concrete baseline
 - the route is clearly `attach` or `import`
 - the repo entrypoint, dataset or split, and metric contract are already concrete enough to validate cheaply
 - reproduction requires no meaningful code changes and the main uncertainty is only whether the command still runs
@@ -487,6 +488,7 @@ If runtime state already includes `requested_baseline_ref` or a matching `confir
 
 - default to reuse-and-verify, not rediscovery
 - treat a creation-time pre-bound baseline as the active starting point unless you find a concrete incompatibility
+- if `requested_baseline_ref` arrived only through startup-context patch metadata, verify that the baseline was actually attached/confirmed before treating it as active
 - do not rerun broad baseline scouting or full reproduction just because the stage name is `baseline`
 
 For a clearer attach/import/reproduce/repair rubric, read `references/route-selection.md`.
