@@ -19,6 +19,8 @@ Compatibility names currently remain:
 
 ## Start Here
 
+- [Stable Runtime Protocol](../policies/runtime_protocol.md)
+  The authoritative minimal protocol that `MedAutoScience` depends on.
 - [Repository README](../../README.md)
   Project positioning, fork rationale, architecture, and compatibility policy.
 - [Fork Baseline](../medical_fork_baseline.md)

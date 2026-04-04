@@ -25,17 +25,19 @@ Do not treat upstream intake as the main development stream. Most upstream commi
 
 ## Stable Runtime Protocol Guardrail
 
-- The minimal stable runtime protocol is defined in `docs/runtime_protocol.md`.
+- The minimal stable runtime protocol is defined in `docs/policies/runtime_protocol.md`.
 - Any intake, fix, refactor, or feature work must not silently break that stable protocol surface.
-- If a change intentionally modifies stable behavior, update `docs/runtime_protocol.md` and add/update targeted regression tests in the same change.
-- Do not rely on undocumented adapter assumptions that exceed the stable surface defined in `docs/runtime_protocol.md`.
+- If a change intentionally modifies stable behavior, update `docs/policies/runtime_protocol.md` and add/update targeted regression tests in the same change.
+- Do not rely on undocumented adapter assumptions that exceed the stable surface defined in `docs/policies/runtime_protocol.md`.
 
 ## Public Repository Rules
 
 - Do not commit local workstation-specific absolute paths.
 - Do not commit generated artifacts such as `node_modules/`, `dist/`, `.turbo/`, `__pycache__/`, or `.pytest_cache/`.
-- User-facing docs belong in `docs/en/` and `docs/zh/`.
-- Internal planning notes, temporary specs, and one-off implementation checklists should not live under `docs/`.
+- Public docs live under `docs/`.
+- User-facing docs primarily belong in `docs/en/` and `docs/zh/`.
+- Stable runtime rules belong in `docs/policies/`.
+- Internal planning notes, temporary specs, and one-off implementation checklists should not live under tracked `docs/`; keep local-only material under `docs/superpowers/`.
 - When code and docs diverge, prefer the current runtime behavior and tests, then update the docs in the same change.
 
 ## Source Of Truth
@@ -205,11 +207,12 @@ If you add or rename a stage skill:
 
 - Keep public docs clear and task-oriented.
 - Prefer English and Chinese user docs under `docs/en/` and `docs/zh/`.
+- Stable protocol and guardrail docs belong in `docs/policies/`.
 - Maintainer-facing source-of-truth docs live in:
   - `docs/en/ARCHITECTURE.md`
   - `docs/en/DEVELOPMENT.md`
 - Keep docs names stable when they are linked from the UI.
-- If a document is implementation planning rather than user guidance, keep it out of `docs/`.
+- If a document is implementation planning rather than public guidance, keep it out of tracked `docs/` and use local `docs/superpowers/` instead.
 
 ## Working Rules By Subsystem
 

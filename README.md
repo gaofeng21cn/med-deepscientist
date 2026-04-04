@@ -57,7 +57,7 @@ quest runtime / daemon / worktrees
 
 ## What is stable here
 
-The minimal stable runtime surface is defined by [`docs/runtime_protocol.md`](docs/runtime_protocol.md). When this README conflicts with implementation details, treat that protocol spec as authoritative for `MedAutoScience` adapter compatibility.
+The minimal stable runtime surface is defined by [`docs/policies/runtime_protocol.md`](docs/policies/runtime_protocol.md). When this README conflicts with implementation details, treat that protocol spec as authoritative for `MedAutoScience` adapter compatibility.
 
 This repository is responsible for keeping these boundaries explicit and auditable:
 
@@ -150,7 +150,8 @@ See:
 
 ## Documentation
 
-- [Minimal stable runtime protocol](docs/runtime_protocol.md)
+- [Docs index](docs/README.md)
+- [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
 - [English docs index](docs/en/README.md)
 - [中文文档索引](docs/zh/README.md)
 - [Upstream intake workflow](docs/upstream_intake.md)
