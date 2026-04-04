@@ -43,6 +43,10 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - top-level `ok: false`
   - top-level `message`
   - HTTP status may be `400` or `409` for contract/state errors
+- `requested_baseline_ref` create-time semantics:
+  - if supplied and quest creation succeeds, runtime has already attempted baseline materialization plus baseline confirmation
+  - successful create therefore implies the quest snapshot may already carry `baseline_gate=confirmed` and `confirmed_baseline_ref`
+  - if requested baseline materialization fails, quest creation fails with `409` and the quest root must not remain on disk
 
 - `GET /api/quests/{quest_id}`
 - Stable snapshot keys (minimum):
@@ -65,6 +69,10 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - top-level `ok: true`
   - top-level `quest_id`
   - top-level `snapshot` object
+- `requested_baseline_ref` patch-time semantics:
+  - patch only updates durable quest metadata and snapshot echo
+  - patch does not materialize or confirm baselines by itself
+  - successful patch must not be interpreted as baseline attachment or `baseline_gate` promotion
 
 ### 2.4 Quest session and runtime audit
 

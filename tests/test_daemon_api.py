@@ -3447,6 +3447,46 @@ def test_quest_startup_context_handler_updates_existing_snapshot(temp_home: Path
     }
 
 
+def test_quest_startup_context_handler_treats_requested_baseline_ref_as_metadata_only(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    source = app.quest_service.create("source baseline quest")
+    source_root = Path(source["quest_root"])
+    baseline_root = source_root / "baselines" / "local" / "demo-baseline"
+    baseline_root.mkdir(parents=True, exist_ok=True)
+    (baseline_root / "README.md").write_text("# Demo baseline\n", encoding="utf-8")
+    app.artifact_service.confirm_baseline(
+        source_root,
+        baseline_path=str(baseline_root),
+        baseline_id="demo-baseline",
+        summary="Source baseline confirmed",
+    )
+
+    quest = app.quest_service.create("Patch requested baseline metadata only.", quest_id="quest-startup-context-baseline-ref")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    handler = getattr(app.handlers, "quest_startup_context", None)
+    assert callable(handler)
+
+    payload = handler(
+        quest_id,
+        {
+            "requested_baseline_ref": {
+                "baseline_id": "demo-baseline",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["quest_id"] == quest_id
+    assert payload["snapshot"]["requested_baseline_ref"] == {"baseline_id": "demo-baseline"}
+    assert payload["snapshot"]["confirmed_baseline_ref"] is None
+    assert payload["snapshot"]["baseline_gate"] == "pending"
+    assert not (quest_root / "baselines" / "imported" / "demo-baseline").exists()
+
+
 def test_quest_startup_context_handler_rejects_empty_patch(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
