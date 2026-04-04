@@ -268,7 +268,8 @@ type StartResearchContractFields = {
 
 - 从 registry 中选择一个可复用 baseline。
 - 一旦存在，推导出的 `baseline_mode` 会变成 `existing`。
-- 运行时应优先 attach 并 verify 它，而不是从零开始。
+- 在 `POST /api/quests` 创建路径里，运行时应优先 attach 并 verify 它，而不是从零开始。
+- 在 `PATCH /api/quests/{quest_id}/startup-context` 里，同字段只表示 durable requested baseline metadata，不会立即触发 attach/verify。
 
 **`baseline_variant_id`**
 

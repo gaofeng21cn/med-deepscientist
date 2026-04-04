@@ -260,7 +260,8 @@ The dialog submits:
 
 - Selects a reusable baseline from the registry.
 - When present, derived `baseline_mode` becomes `existing`.
-- Runtime should attach and verify this baseline before ordinary downstream work.
+- In `POST /api/quests`, runtime should attach and verify this baseline before ordinary downstream work.
+- In `PATCH /api/quests/{quest_id}/startup-context`, the same field is metadata-only and updates durable requested baseline intent without immediate attach/verify side effects.
 
 **`baseline_variant_id`**
 
