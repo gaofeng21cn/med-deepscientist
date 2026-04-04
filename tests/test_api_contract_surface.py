@@ -28,6 +28,7 @@ def test_backend_routes_cover_shared_web_and_tui_surface() -> None:
         ("DELETE", "/api/connectors/qq/profiles/qq-alpha", "connector_profile_delete"),
         ("POST", "/api/quests/q-001/baseline-binding", "quest_baseline_binding"),
         ("DELETE", "/api/quests/q-001/baseline-binding", "quest_baseline_unbind"),
+        ("PATCH", "/api/quests/q-001/startup-context", "quest_startup_context"),
         ("PATCH", "/api/quests/q-001/settings", "quest_settings"),
         ("POST", "/api/quests/q-001/bindings", "quest_bindings"),
         ("PUT", "/api/quests/q-001/bindings", "quest_bindings"),

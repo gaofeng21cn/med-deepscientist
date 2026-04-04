@@ -11813,8 +11813,24 @@ class ArtifactService:
                 "auto-resume unless a new external request reopens it.\n"
             ),
         )
-        write_text(quest_root / "status.md", status_text)
         summary_refresh = self.refresh_summary(quest_root, reason=completion_summary)
+        write_text(quest_root / "status.md", status_text)
+        summary_text = self.quest_service.localized_copy(
+            quest_root=quest_root,
+            zh=(
+                "# Quest Summary\n\n"
+                f"- Completion status: `completed`\n"
+                f"- Completion summary: {completion_summary}\n"
+                f"- User approval: {approval_excerpt}\n"
+            ),
+            en=(
+                "# Quest Summary\n\n"
+                "- Completion status: `completed`\n"
+                f"- Completion summary: {completion_summary}\n"
+                f"- User approval: {approval_excerpt}\n"
+            ),
+        )
+        write_text(quest_root / "SUMMARY.md", summary_text)
         append_jsonl(
             quest_root / ".ds" / "events.jsonl",
             {

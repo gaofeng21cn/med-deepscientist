@@ -16,6 +16,12 @@ from ...memory import MemoryService
 from ...quest import QuestService
 from ...shared import generate_id, read_json, read_text, resolve_within, run_command, sha256_text, utc_now
 from ...runners import RunRequest
+from ..runtime_contract import (
+    build_artifact_completion_contract,
+    build_quest_control_contract,
+    build_quest_session_contract,
+    build_quest_startup_context_contract,
+)
 
 
 class ApiHandlers:
@@ -445,10 +451,7 @@ npm --prefix src/ui run build</pre>
             return 404, {"ok": False, "message": f"Unknown quest `{quest_id}`."}
         except ValueError as exc:
             return 400, {"ok": False, "message": str(exc)}
-        return {
-            "ok": True,
-            "snapshot": snapshot,
-        }
+        return build_quest_startup_context_contract(snapshot)
 
     def quest_settings(self, quest_id: str, body: dict) -> dict | tuple[int, dict]:
         updates = {
@@ -511,13 +514,12 @@ npm --prefix src/ui run build</pre>
                 self.app.quest_service.prime_projection(quest_id, kind)
             except Exception:
                 continue
-        return {
-            "ok": True,
-            "quest_id": quest_id,
-            "snapshot": snapshot,
-            "runtime_audit": runtime_audit,
-            "acp_session": build_session_descriptor(snapshot),
-        }
+        return build_quest_session_contract(
+            quest_id=quest_id,
+            snapshot=snapshot,
+            runtime_audit=runtime_audit,
+            acp_session=build_session_descriptor(snapshot),
+        )
 
     def quest_events(self, quest_id: str, path: str) -> dict:
         query = self.parse_query(path)
@@ -803,7 +805,7 @@ npm --prefix src/ui run build</pre>
         source = str(body.get("source") or "local-ui").strip() or "local-ui"
         if action not in {"pause", "stop", "resume"}:
             return {"ok": False, "message": "Quest control action must be `pause`, `stop` or `resume`."}
-        return self.app.control_quest(quest_id, action=action, source=source)
+        return build_quest_control_contract(self.app.control_quest(quest_id, action=action, source=source))
 
     def workflow(self, quest_id: str) -> dict:
         payload = self.app.quest_service.workflow(quest_id)
@@ -1565,9 +1567,11 @@ npm --prefix src/ui run build</pre>
 
     def artifact_complete(self, quest_id: str, body: dict) -> dict:
         quest_root = self.app.quest_service._quest_root(quest_id)
-        return self.app.artifact_service.complete_quest(
-            quest_root,
-            summary=str(body.get("summary") or ""),
+        return build_artifact_completion_contract(
+            self.app.artifact_service.complete_quest(
+                quest_root,
+                summary=str(body.get("summary") or ""),
+            )
         )
 
     def command(self, quest_id: str, body: dict) -> dict:

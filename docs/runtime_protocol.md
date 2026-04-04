@@ -55,15 +55,53 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - `requested_baseline_ref`
   - `confirmed_baseline_ref`
 
-### 2.3 Runtime-driving quest APIs
+### 2.3 Startup context patch
+
+- `PATCH /api/quests/{quest_id}/startup-context`
+- Stable request fields:
+  - at least one of `startup_contract` or `requested_baseline_ref`
+  - both fields accept object or `null`
+- Stable success shape:
+  - top-level `ok: true`
+  - top-level `quest_id`
+  - top-level `snapshot` object
+
+### 2.4 Quest session and runtime audit
+
+- `GET /api/quests/{quest_id}/session`
+- Stable output minimum:
+  - top-level `ok: true`
+  - top-level `quest_id`
+  - top-level `snapshot`
+  - top-level `runtime_audit`
+  - top-level `acp_session`
+- Stable `runtime_audit` keys:
+  - `ok`
+  - `status` (`live` or `none`)
+  - `source`
+  - `active_run_id`
+  - `worker_running`
+  - `worker_pending`
+  - `stop_requested`
+
+- `GET /api/quests/{quest_id}/bash/sessions`
+- Stable list entry minimum:
+  - `bash_id`
+  - `status`
+
+### 2.5 Runtime-driving quest APIs
 
 - `POST /api/quests/{quest_id}/control`
   - stable input: `action` (required), `source` (required)
-  - stable output minimum: `ok`, `quest_id`, `status`
+  - stable output minimum: `ok`, `quest_id`, `action`, `status`, `snapshot`
 
 - `POST /api/quests/{quest_id}/chat`
   - stable input: `text` (required), `source` (optional)
   - stable output minimum: `ok`, plus queue/scheduling acknowledgement fields
+
+- `POST /api/quests/{quest_id}/artifact/complete`
+  - stable input: `summary` (required)
+  - stable output minimum: `ok`, `status`, `snapshot`, `summary_refresh`
 
 - `GET /api/quests/{quest_id}/events`
   - stable output minimum: append-only event stream payload with `events` and cursor metadata

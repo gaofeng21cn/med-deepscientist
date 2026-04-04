@@ -87,6 +87,7 @@ from ..connector.weixin_support import (
     update_weixin_replay_cursor,
 )
 from .api import ApiHandlers, match_route
+from .runtime_contract import build_quest_runtime_audit_contract
 from .sessions import SessionStore
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
@@ -1571,15 +1572,12 @@ class DaemonApp:
         worker_pending = bool(turn_state.get("pending"))
         stop_requested = bool(turn_state.get("stop_requested"))
         active_run_id = str(resolved_snapshot.get("active_run_id") or "").strip() or None
-        return {
-            "ok": True,
-            "status": "live" if worker_running else "none",
-            "source": "daemon_turn_worker",
-            "active_run_id": active_run_id,
-            "worker_running": worker_running,
-            "worker_pending": worker_pending,
-            "stop_requested": stop_requested,
-        }
+        return build_quest_runtime_audit_contract(
+            active_run_id=active_run_id,
+            worker_running=worker_running,
+            worker_pending=worker_pending,
+            stop_requested=stop_requested,
+        )
 
     def _reconcile_stale_active_turn(self, quest_id: str, *, snapshot: dict | None = None) -> dict:
         snapshot = dict(snapshot or self.quest_service.snapshot(quest_id))
