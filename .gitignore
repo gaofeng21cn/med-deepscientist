@@ -53,3 +53,6 @@ dist.bak.*/
 /tmp-*.png
 /Codex
 docs/superpowers/
+.omx/
+
+.codex/
