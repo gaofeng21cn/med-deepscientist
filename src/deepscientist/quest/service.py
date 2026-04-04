@@ -3980,6 +3980,7 @@ class QuestService:
         run_id: str | None = None,
         skill_id: str | None = None,
         reply_to_interaction_id: str | None = None,
+        decision_response: dict[str, Any] | None = None,
         client_message_id: str | None = None,
     ) -> dict:
         quest_root = self._quest_root(quest_id)
@@ -4000,6 +4001,8 @@ class QuestService:
             record["skill_id"] = skill_id
         if client_message_id:
             record["client_message_id"] = str(client_message_id)
+        if isinstance(decision_response, dict) and decision_response:
+            record["decision_response"] = dict(decision_response)
         if role == "user":
             record["delivery_state"] = "sent"
         interaction_state_path = quest_root / ".ds" / "interaction_state.json"

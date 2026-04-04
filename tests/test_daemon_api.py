@@ -3899,6 +3899,59 @@ def test_artifact_completion_endpoints_finalize_quest_and_refresh_documents(temp
     assert "Study-level finalized delivery imported into managed runtime and approved for closure." in summary_text
 
 
+def test_artifact_completion_accepts_typed_decision_response_without_lexicon_match(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("artifact completion typed approval quest")
+    quest_id = quest["quest_id"]
+
+    request = app.handlers.artifact_interact(
+        quest_id,
+        {
+            "kind": "decision_request",
+            "message": "Need explicit typed quest completion approval.",
+            "reply_mode": "blocking",
+            "deliver_to_bound_conversations": False,
+            "include_recent_inbound_messages": False,
+            "reply_schema": {"decision_type": "quest_completion_approval"},
+        },
+    )
+    interaction_id = str(request.get("interaction_id") or "")
+    assert request["status"] == "ok"
+    assert interaction_id
+
+    reply_payload = app.handlers.chat(
+        quest_id,
+        {
+            "text": "structured approval payload",
+            "source": "web-react",
+            "reply_to_interaction_id": interaction_id,
+            "decision_response": {
+                "decision_type": "quest_completion_approval",
+                "approved": True,
+            },
+        },
+    )
+
+    assert reply_payload["ok"] is True
+    assert reply_payload["message"]["reply_to_interaction_id"] == interaction_id
+    assert reply_payload["message"]["decision_response"] == {
+        "decision_type": "quest_completion_approval",
+        "approved": True,
+    }
+
+    completed = app.handlers.artifact_complete(
+        quest_id,
+        {
+            "summary": "Typed completion approval closed the quest.",
+        },
+    )
+
+    assert completed["ok"] is True
+    assert completed["status"] == "completed"
+
+
 def test_chat_endpoint_passes_user_text_into_codex_prompt(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

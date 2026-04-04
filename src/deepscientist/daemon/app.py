@@ -1306,6 +1306,7 @@ class DaemonApp:
         source: str,
         attachments: list[dict[str, object]] | None = None,
         reply_to_interaction_id: str | None = None,
+        decision_response: dict[str, object] | None = None,
         client_message_id: str | None = None,
     ) -> dict:
         previous_snapshot = self.quest_service.snapshot(quest_id)
@@ -1317,6 +1318,7 @@ class DaemonApp:
             source=source,
             attachments=[dict(item) for item in (attachments or []) if isinstance(item, dict)],
             reply_to_interaction_id=reply_to_interaction_id,
+            decision_response=dict(decision_response) if isinstance(decision_response, dict) else None,
             client_message_id=client_message_id,
         )
         snapshot = self.quest_service.snapshot(quest_id)

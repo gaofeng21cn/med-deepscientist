@@ -105,11 +105,18 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
 
 - `POST /api/quests/{quest_id}/chat`
   - stable input: `text` (required), `source` (optional)
+  - optional typed decision input:
+    - `reply_to_interaction_id`
+    - `decision_response` object
+    - for quest completion approval, `decision_response` may carry `{decision_type: "quest_completion_approval", approved: true|false}`
   - stable output minimum: `ok`, plus queue/scheduling acknowledgement fields
 
 - `POST /api/quests/{quest_id}/artifact/complete`
   - stable input: `summary` (required)
   - stable output minimum: `ok`, `status`, `snapshot`, `summary_refresh`
+  - completion approval semantics:
+    - runtime first looks for a blocking completion request whose `reply_schema.decision_type == "quest_completion_approval"`
+    - the replying user message may satisfy approval either by explicit typed `decision_response` or by the legacy explicit-approval text path
 
 - `GET /api/quests/{quest_id}/events`
   - stable output minimum: append-only event stream payload with `events` and cursor metadata

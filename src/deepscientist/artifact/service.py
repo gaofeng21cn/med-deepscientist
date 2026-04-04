@@ -11744,7 +11744,8 @@ class ArtifactService:
             }
 
         approval_text = str(reply_message.get("content") or "").strip()
-        if not self._has_explicit_completion_approval(approval_text):
+        typed_completion_approval = self._typed_completion_approval(reply_message)
+        if typed_completion_approval is None and not self._has_explicit_completion_approval(approval_text):
             return {
                 "ok": False,
                 "status": "approval_not_explicit",
@@ -11755,6 +11756,15 @@ class ArtifactService:
                     "Quest completion was not approved explicitly. "
                     "Ask the user to reply with an explicit approval such as `同意完成` or `approve`."
                 ),
+            }
+        if typed_completion_approval is False:
+            return {
+                "ok": False,
+                "status": "approval_not_explicit",
+                "quest_id": snapshot.get("quest_id"),
+                "interaction_id": interaction_id,
+                "approval_message_id": reply_message.get("id"),
+                "message": "Quest completion was rejected by an explicit typed decision response.",
             }
 
         completion_summary = summary.strip() or self.quest_service.localized_copy(
@@ -11772,6 +11782,9 @@ class ArtifactService:
                 "reply_to_interaction_id": interaction_id,
                 "approval_message_id": reply_message.get("id"),
                 "approval_message_text": approval_text,
+                "decision_response": dict(reply_message.get("decision_response") or {})
+                if isinstance(reply_message.get("decision_response"), dict)
+                else None,
                 "source": {
                     "kind": "user",
                     "surface": str(reply_message.get("source") or "local"),
@@ -12379,6 +12392,18 @@ class ArtifactService:
         if any(term in normalized for term in _NON_ASCII_COMPLETION_APPROVAL_TERMS):
             return True
         return any(re.search(rf"\b{re.escape(term)}\b", normalized) for term in _ASCII_COMPLETION_APPROVAL_TERMS)
+
+    @staticmethod
+    def _typed_completion_approval(message: dict[str, Any]) -> bool | None:
+        decision_response = message.get("decision_response")
+        if not isinstance(decision_response, dict):
+            return None
+        if str(decision_response.get("decision_type") or "").strip() != QUEST_COMPLETION_DECISION_TYPE:
+            return None
+        approved = decision_response.get("approved")
+        if isinstance(approved, bool):
+            return approved
+        return None
 
     def _update_interaction_state(
         self,

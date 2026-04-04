@@ -1526,6 +1526,7 @@ npm --prefix src/ui run build</pre>
             text=text,
             source=source,
             reply_to_interaction_id=body.get("reply_to_interaction_id"),
+            decision_response=body.get("decision_response") if isinstance(body.get("decision_response"), dict) else None,
             client_message_id=body.get("client_message_id"),
         )
         return {
