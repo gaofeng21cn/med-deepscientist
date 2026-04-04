@@ -10,6 +10,7 @@ from ..memory import MemoryService
 from ..memory.frontmatter import load_markdown_document
 from ..quest import QuestService
 from ..registries import BaselineRegistry
+from ..startup_contract import runtime_owned_startup_contract
 from ..shared import read_json, read_text, read_yaml
 
 STANDARD_SKILLS = (
@@ -110,7 +111,9 @@ def classify_turn_intent(user_message: str) -> str:
 def gate_stage_skill(snapshot: dict, candidate_skill: str) -> str:
     skill = str(candidate_skill or "").strip()
     baseline_gate = str(snapshot.get("baseline_gate") or "pending").strip().lower() or "pending"
-    startup_contract = snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else {}
+    startup_contract = runtime_owned_startup_contract(
+        snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+    )
     custom_profile = str(startup_contract.get("custom_profile") or "").strip()
     raw_need_research_paper = startup_contract.get("need_research_paper")
     need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
@@ -795,74 +798,82 @@ class PromptBuilder:
 
     @staticmethod
     def _need_research_paper(snapshot: dict) -> bool:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = startup_contract.get("need_research_paper")
-            if isinstance(value, bool):
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = startup_contract.get("need_research_paper")
+        if isinstance(value, bool):
+            return value
         return True
 
     @staticmethod
     def _decision_policy(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("decision_policy") or "").strip().lower()
-            if value in {"autonomous", "user_gated"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("decision_policy") or "").strip().lower()
+        if value in {"autonomous", "user_gated"}:
+            return value
         return "user_gated"
 
     @staticmethod
     def _launch_mode(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("launch_mode") or "").strip().lower()
-            if value in {"standard", "custom"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("launch_mode") or "").strip().lower()
+        if value in {"standard", "custom"}:
+            return value
         return "standard"
 
     @staticmethod
     def _standard_profile(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("standard_profile") or "").strip().lower()
-            if value in {"canonical_research_graph", "optimization_task"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("standard_profile") or "").strip().lower()
+        if value in {"canonical_research_graph", "optimization_task"}:
+            return value
         return "canonical_research_graph"
 
     @staticmethod
     def _custom_profile(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("custom_profile") or "").strip().lower()
-            if value in {"continue_existing_state", "review_audit", "revision_rebuttal", "freeform"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("custom_profile") or "").strip().lower()
+        if value in {"continue_existing_state", "review_audit", "revision_rebuttal", "freeform"}:
+            return value
         return "freeform"
 
     @staticmethod
     def _baseline_execution_policy(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("baseline_execution_policy") or "").strip().lower()
-            if value in {"auto", "must_reproduce_or_verify", "reuse_existing_only", "skip_unless_blocking"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("baseline_execution_policy") or "").strip().lower()
+        if value in {"auto", "must_reproduce_or_verify", "reuse_existing_only", "skip_unless_blocking"}:
+            return value
         return "auto"
 
     @staticmethod
     def _review_followup_policy(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("review_followup_policy") or "").strip().lower()
-            if value in {"audit_only", "auto_execute_followups", "user_gated_followups"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("review_followup_policy") or "").strip().lower()
+        if value in {"audit_only", "auto_execute_followups", "user_gated_followups"}:
+            return value
         return "audit_only"
 
     @staticmethod
     def _manuscript_edit_mode(snapshot: dict) -> str:
-        startup_contract = snapshot.get("startup_contract")
-        if isinstance(startup_contract, dict):
-            value = str(startup_contract.get("manuscript_edit_mode") or "").strip().lower()
-            if value in {"none", "copy_ready_text", "latex_required"}:
-                return value
+        startup_contract = runtime_owned_startup_contract(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+        value = str(startup_contract.get("manuscript_edit_mode") or "").strip().lower()
+        if value in {"none", "copy_ready_text", "latex_required"}:
+            return value
         return "none"
 
     def _research_delivery_policy_block(self, snapshot: dict) -> str:
@@ -893,7 +904,7 @@ class PromptBuilder:
             lines.extend(
                 [
                     "- custom_launch_rule: do not force the canonical full-research path when the custom startup contract is narrower.",
-                    "- custom_context_rule: treat `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` as active runtime context rather than decorative metadata.",
+                    "- custom_context_rule: treat `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` as controller-provided startup context; preserve and honor them in prompt context without promoting them into runtime-owned core policy keys.",
                 ]
             )
             if custom_profile == "continue_existing_state":

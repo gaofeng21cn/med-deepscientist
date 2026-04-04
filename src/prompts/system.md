@@ -756,7 +756,7 @@ Use them this way:
   - you may use a blocking `decision_request` when continuation truly depends on user preference, approval, or scope choice
 - `launch_mode=custom`
   - do not force the quest back into the canonical blank-state full-research path if the custom entry is narrower
-  - treat `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` as active runtime context rather than decorative metadata
+  - treat `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` as controller-provided startup context rather than decorative metadata; preserve them in prompt context without upgrading them into runtime-owned policy keys
 - `custom_profile=continue_existing_state`
   - assume the quest may already contain reusable baselines, measured results, analysis assets, or writing assets
   - open `intake-audit` before rerunning expensive work

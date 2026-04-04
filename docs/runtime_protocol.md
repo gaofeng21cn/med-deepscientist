@@ -161,8 +161,45 @@ Stable guarantees:
   - `review_followup_policy`
   - `manuscript_edit_mode`
   - `decision_policy`
+- the runtime-owned stable subset is:
+  - `schema_version`
+  - `user_language`
+  - `need_research_paper`
+  - `decision_policy`
+  - `launch_mode`
+  - `standard_profile`
+  - `custom_profile`
+  - `baseline_execution_policy`
+  - `review_followup_policy`
+  - `manuscript_edit_mode`
 
-Keys not interpreted by runtime logic are treated as opaque metadata and must not break quest creation.
+Controller-owned extensions are still allowed at the same flat level and must be durably persisted plus echoed back in snapshots. The authoritative stable extension set currently includes:
+
+- `research_intensity`
+- `scope`
+- `baseline_mode`
+- `resource_policy`
+- `time_budget_hours`
+- `git_strategy`
+- `runtime_constraints`
+- `objectives`
+- `baseline_urls`
+- `paper_urls`
+- `entry_state_summary`
+- `review_summary`
+- `controller_first_policy_summary`
+- `automation_ready_summary`
+- `required_first_anchor`
+- `legacy_code_execution_allowed`
+- `startup_boundary_gate`
+- `runtime_reentry_gate`
+- `journal_shortlist`
+- `medical_analysis_contract_summary`
+- `medical_reporting_contract_summary`
+- `reporting_guideline_family`
+- `submission_targets`
+
+For these controller-owned extensions, the runtime contract only guarantees durable persistence and stable snapshot roundtrip by default. They are not promoted into the runtime-owned core semantic subset unless this spec is explicitly updated.
 
 ## 5. Stable Turn Contract
 

@@ -30,6 +30,7 @@ from ..home import repo_root
 from ..registries import BaselineRegistry
 from ..shared import append_jsonl, ensure_dir, generate_id, iter_jsonl, read_json, read_jsonl, read_jsonl_tail, read_text, read_yaml, resolve_within, run_command, sha256_text, slugify, utc_now, write_json, write_text, write_yaml
 from ..skills import SkillInstaller
+from ..startup_contract import normalize_startup_contract
 from ..web_search import extract_web_search_payload
 from .layout import (
     QUEST_DIRECTORIES,
@@ -3263,7 +3264,7 @@ class QuestService:
                 runner,
                 title=title,
                 requested_baseline_ref=dict(requested_baseline_ref) if isinstance(requested_baseline_ref, dict) else None,
-                startup_contract=dict(startup_contract) if isinstance(startup_contract, dict) else None,
+                startup_contract=normalize_startup_contract(startup_contract),
             ),
         )
         write_text(quest_root / "brief.md", initial_brief(goal))
@@ -4387,7 +4388,7 @@ class QuestService:
                 changed = True
 
         if startup_contract is not _UNSET:
-            normalized_contract = dict(startup_contract) if isinstance(startup_contract, dict) else None
+            normalized_contract = normalize_startup_contract(startup_contract if isinstance(startup_contract, dict) else None)
             if quest_data.get("startup_contract") != normalized_contract:
                 quest_data["startup_contract"] = normalized_contract
                 changed = True
