@@ -4565,6 +4565,18 @@ class QuestService:
     def node_traces(self, quest_id: str, *, selection_type: str | None = None) -> dict:
         quest_root = self._quest_root(quest_id)
         workflow = self.workflow(quest_id)
+        projection_status = workflow.get("projection_status") if isinstance(workflow, dict) else {}
+        projection_state = (
+            str(projection_status.get("state") or "").strip().lower()
+            if isinstance(projection_status, dict)
+            else ""
+        )
+        if not list(workflow.get("entries") or []) and projection_state and projection_state != "ready":
+            workflow = self._build_details_projection_payload(
+                quest_root,
+                source_signature=self._projection_source_signature(quest_root, "details"),
+                update_progress=lambda *_args, **_kwargs: None,
+            )
         snapshot = self.snapshot(quest_id)
         payload = QuestNodeTraceManager(quest_root).materialize(
             quest_id=quest_id,

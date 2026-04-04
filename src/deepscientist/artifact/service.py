@@ -11982,7 +11982,29 @@ class ArtifactService:
             for item in self._connector_bound_conversations(quest_id)
             if conversation_identity_key(item) in authoritative_keys
         ]
-        return self._dedupe_targets([*sources, *connector_sources])
+        connector_by_identity = {
+            conversation_identity_key(item): str(item).strip()
+            for item in connector_sources
+            if str(item).strip()
+        }
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for item in sources:
+            identity = conversation_identity_key(item)
+            target = connector_by_identity.get(identity, item)
+            normalized_target = str(target).strip()
+            if not normalized_target or identity in seen:
+                continue
+            seen.add(identity)
+            ordered.append(normalized_target)
+        for item in connector_sources:
+            normalized_target = str(item).strip()
+            identity = conversation_identity_key(normalized_target)
+            if not normalized_target or identity in seen:
+                continue
+            seen.add(identity)
+            ordered.append(normalized_target)
+        return ordered
 
     def _connector_bound_conversations(self, quest_id: str) -> list[str]:
         root = self.home / "logs" / "connectors"
@@ -11997,9 +12019,9 @@ class ArtifactService:
                     continue
                 if str(binding.get("quest_id") or "").strip() != quest_id:
                     continue
-                normalized = self._normalize_conversation_id(str(conversation_id))
-                if normalized:
-                    targets.append(normalized)
+                raw_target = str(conversation_id).strip()
+                if raw_target:
+                    targets.append(raw_target)
         return targets
 
     def _connectors_config(self) -> dict[str, Any]:

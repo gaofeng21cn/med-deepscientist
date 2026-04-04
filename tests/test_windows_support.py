@@ -92,3 +92,26 @@ def test_process_session_popen_kwargs_windows(monkeypatch) -> None:
 
     assert kwargs["creationflags"] == 1536
     assert kwargs["startupinfo"].dwFlags == 1
+
+
+def test_terminate_process_ids_falls_back_to_group_members_when_killpg_is_not_permitted(monkeypatch) -> None:
+    class FakeCompletedProcess:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stdout = "101\n102\n"
+
+    kill_calls: list[tuple[int, int]] = []
+
+    monkeypatch.setattr(process_control.os, "killpg", lambda *_args, **_kwargs: (_ for _ in ()).throw(PermissionError("denied")))
+    monkeypatch.setattr(process_control.os, "kill", lambda pid, sig: kill_calls.append((pid, int(sig))))
+    monkeypatch.setattr(process_control.subprocess, "run", lambda *args, **kwargs: FakeCompletedProcess())
+
+    process_control.terminate_process_ids(
+        process_pid=101,
+        process_group_id=555,
+        force=True,
+    )
+
+    assert kill_calls == [
+        (101, int(process_control.signal.SIGKILL)),
+    ]

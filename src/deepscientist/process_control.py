@@ -58,6 +58,64 @@ def is_process_alive(pid: object) -> bool:
     return True
 
 
+def _signal_posix_process_group_or_pid(
+    *,
+    process_pid: int | None,
+    process_group_id: int | None,
+    sig: signal.Signals,
+) -> None:
+    if isinstance(process_group_id, int) and process_group_id > 0:
+        try:
+            os.killpg(process_group_id, sig)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            for member_pid in _list_posix_process_group_members(process_group_id):
+                try:
+                    os.kill(member_pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    continue
+                else:
+                    return
+            if not isinstance(process_pid, int) or process_pid <= 0:
+                raise
+        else:
+            return
+    if isinstance(process_pid, int) and process_pid > 0:
+        try:
+            os.kill(process_pid, sig)
+        except ProcessLookupError:
+            return
+
+
+def _list_posix_process_group_members(process_group_id: int) -> list[int]:
+    if process_group_id <= 0:
+        return []
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "pid=", "-g", str(process_group_id)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return []
+    if result.returncode != 0:
+        return []
+    members: list[int] = []
+    for raw_line in result.stdout.splitlines():
+        raw_pid = raw_line.strip()
+        if not raw_pid:
+            continue
+        try:
+            pid = int(raw_pid)
+        except ValueError:
+            continue
+        if pid > 0:
+            members.append(pid)
+    return members
+
+
 def terminate_process_ids(
     *,
     process_pid: int | None,
@@ -76,17 +134,11 @@ def terminate_process_ids(
                 except OSError:
                     pass
         return
-    if isinstance(process_group_id, int) and process_group_id > 0:
-        try:
-            os.killpg(process_group_id, signal.SIGKILL if force else signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        return
-    if isinstance(process_pid, int) and process_pid > 0:
-        try:
-            os.kill(process_pid, signal.SIGKILL if force else signal.SIGTERM)
-        except ProcessLookupError:
-            return
+    _signal_posix_process_group_or_pid(
+        process_pid=process_pid,
+        process_group_id=process_group_id,
+        sig=signal.SIGKILL if force else signal.SIGTERM,
+    )
 
 
 def terminate_subprocess(
@@ -132,16 +184,14 @@ def terminate_subprocess(
             return
         return
 
-    if isinstance(process_group_id, int) and process_group_id > 0:
-        try:
-            os.killpg(process_group_id, signal.SIGKILL if force else signal.SIGTERM)
-        except ProcessLookupError:
-            return
-    else:
-        try:
-            process.kill() if force else process.terminate()
-        except OSError:
-            return
+    try:
+        _signal_posix_process_group_or_pid(
+            process_pid=process.pid,
+            process_group_id=process_group_id,
+            sig=signal.SIGKILL if force else signal.SIGTERM,
+        )
+    except OSError:
+        return
     if force:
         return
     deadline = time.monotonic() + max(grace_seconds, 0.1)
@@ -149,13 +199,12 @@ def terminate_subprocess(
         if process.poll() is not None:
             return
         time.sleep(0.05)
-    if isinstance(process_group_id, int) and process_group_id > 0:
+    if process.poll() is None:
         try:
-            os.killpg(process_group_id, signal.SIGKILL)
-        except ProcessLookupError:
-            return
-    elif process.poll() is None:
-        try:
-            process.kill()
+            _signal_posix_process_group_or_pid(
+                process_pid=process.pid,
+                process_group_id=process_group_id,
+                sig=signal.SIGKILL,
+            )
         except OSError:
             return

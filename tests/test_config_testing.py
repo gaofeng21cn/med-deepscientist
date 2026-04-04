@@ -363,9 +363,16 @@ def test_config_save_reloads_system_connector_visibility(temp_home: Path) -> Non
     manager.ensure_files()
     app = DaemonApp(temp_home)
 
+    structured = manager.load_named("config")
+    structured["connectors"]["system_enabled"]["telegram"] = False
+
+    disable_payload = app.handlers.config_save("config", {"structured": structured})
+
+    assert disable_payload["ok"] is True
+    assert disable_payload["runtime_reload"]["ok"] is True
+    assert "telegram" not in disable_payload["runtime_reload"]["system_enabled_connectors"]
     assert "telegram" not in {item["name"] for item in app.handlers.connectors()}
 
-    structured = manager.load_named("config")
     structured["connectors"]["system_enabled"]["telegram"] = True
 
     payload = app.handlers.config_save("config", {"structured": structured})

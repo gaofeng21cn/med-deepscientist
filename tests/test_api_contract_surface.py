@@ -243,12 +243,13 @@ def test_web_workspace_keeps_streaming_operational_views_and_tool_effect_surface
     assert "window.setTimeout" in acp_source
     assert "client.workflow(targetQuestId)" in acp_source
     assert "ensureViewData" in acp_source
-    assert "view === 'details' || view === 'memory'" in acp_source
+    assert "async (view: QuestWorkspaceDataView" in acp_source
+    assert "detailsEnabledRef.current = true" in acp_source
     assert "insertHistoryItemChronologically" in acp_source
     assert "previous_run_id" in acp_source
     assert "collectSealedAssistantRunIds(initialUpdates)" in acp_source
     assert "item.label === 'run_failed'" in acp_source
-    assert "void ensureViewData(view)" in workspace_surface_source
+    assert "void ensureViewData('details')" in workspace_surface_source
     assert "onOpenStageSelection={onOpenStageSelection}" in workspace_surface_source
     assert "QuestMemorySurface" in workspace_surface_source
     assert "updateView('memory')" in workspace_surface_source
@@ -338,7 +339,7 @@ def test_local_quest_workspace_uses_real_canvas_and_details_tabs() -> None:
         "openQuestWorkspaceTab('settings')",
         "title: getQuestWorkspaceTitle(view, stageSelection)",
         "return getQuestWorkspaceTabView(resolvedTab)",
-        "view={resolvedQuestWorkspaceView}",
+        "view={getQuestWorkspaceTabView(tab)}",
     ]
     for fragment in expected_workspace_fragments:
         assert fragment in workspace_source, f"Quest workspace tabs should include: {fragment}"
@@ -347,7 +348,9 @@ def test_local_quest_workspace_uses_real_canvas_and_details_tabs() -> None:
         "view: controlledView",
         "onViewChange",
         "const view = controlledView ?? uncontrolledView",
-        "view === 'canvas' ? (",
+        "const detailLikeView = view === 'details' || view === 'memory'",
+        "workspaceLayerClass(view === 'canvas')",
+        "workspaceLayerClass(view === 'details')",
         "view === 'terminal' ? (",
         "view === 'settings' ? (",
         "view === 'stage' ? (",

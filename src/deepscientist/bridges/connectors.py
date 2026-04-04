@@ -1021,7 +1021,7 @@ class WeixinConnectorBridge(BaseConnectorBridge):
     @classmethod
     def _retry_delays_for_item(cls, item: dict[str, Any], exc: Exception) -> tuple[float, ...]:
         message = str(exc or "").strip().lower()
-        if "ret=-2" in message and cls._item_type(item) in {4, 5}:
+        if "ret=-2" in message and cls._item_type(item) in {1, 4, 5}:
             return cls._MEDIA_SEND_RETRY_DELAYS_SECONDS
         return ()
 

@@ -1338,12 +1338,7 @@ class DaemonApp:
         turn_state = self._refresh_turn_worker_state(quest_id)
         has_live_turn = bool(turn_state.get("running"))
         if runtime_status == "running" and has_live_turn:
-            scheduled = {
-                "scheduled": True,
-                "started": False,
-                "queued": True,
-                "reason": "queued_for_artifact_interact",
-            }
+            scheduled = self.schedule_turn(quest_id, reason="queued_for_artifact_interact")
         else:
             scheduled = self.schedule_turn(quest_id, reason="user_message")
         return {
@@ -2649,8 +2644,9 @@ class DaemonApp:
             state = dict(self._turn_state.get(quest_id) or {})
         if state.get("stop_requested"):
             return True
-        snapshot = self.quest_service.snapshot(quest_id)
-        return str(snapshot.get("runtime_status") or snapshot.get("status") or "").strip() in {"paused", "stopped"}
+        quest_root = self.quest_service._quest_root(quest_id)
+        runtime_state = self.quest_service._read_runtime_state(quest_root)
+        return str(runtime_state.get("status") or runtime_state.get("display_status") or "").strip() in {"paused", "stopped"}
 
     def _retry_delay_seconds(self, retry_policy: dict[str, Any], *, attempt_index: int) -> float:
         if attempt_index <= 1:
@@ -2747,9 +2743,16 @@ class DaemonApp:
         previous_output_text: str,
         stderr_text: str,
     ) -> dict[str, Any]:
-        snapshot = self.quest_service.snapshot(quest_id)
-        quest_root = Path(snapshot["quest_root"])
-        workspace_root = Path(str(snapshot.get("current_workspace_root") or snapshot.get("quest_root") or quest_root))
+        compact_snapshot = self.quest_service.snapshot_fast(quest_id)
+        quest_root = Path(str(compact_snapshot.get("quest_root") or self.quest_service._quest_root(quest_id)))
+        workspace_root = Path(
+            str(
+                compact_snapshot.get("current_workspace_root")
+                or compact_snapshot.get("active_workspace_root")
+                or compact_snapshot.get("quest_root")
+                or quest_root
+            )
+        )
         run_events_window: deque[dict[str, Any]] = deque(maxlen=120)
         for event in iter_jsonl(quest_root / ".ds" / "events.jsonl"):
             if str(event.get("run_id") or "").strip() != failed_run_id:
@@ -2801,7 +2804,7 @@ class DaemonApp:
         ]
 
         recent_artifacts: list[str] = []
-        for item in (snapshot.get("recent_artifacts") or [])[-3:]:
+        for item in self.quest_service._collect_artifacts(quest_root)[-3:]:
             if not isinstance(item, dict):
                 continue
             payload = item.get("payload") or {}
@@ -2830,7 +2833,7 @@ class DaemonApp:
             "recent_messages": recent_messages[-6:],
             "tool_progress": tool_progress[-8:],
             "workspace_summary": {
-                "branch": str(snapshot.get("branch") or "").strip(),
+                "branch": str(compact_snapshot.get("branch") or "").strip(),
                 "git_status": git_status_lines,
                 "bash_sessions": bash_session_summaries,
             },
@@ -2939,17 +2942,18 @@ class DaemonApp:
         )
 
     def _ensure_turn_cleanup(self, quest_id: str, *, run_id: str, turn_reason: str) -> None:
-        snapshot = self.quest_service.snapshot(quest_id)
-        if str(snapshot.get("active_run_id") or "").strip() != str(run_id or "").strip():
+        quest_root = self.quest_service._quest_root(quest_id)
+        runtime_state = self.quest_service._read_runtime_state(quest_root)
+        if str(runtime_state.get("active_run_id") or "").strip() != str(run_id or "").strip():
             return
         try:
             self._normalize_status_after_turn(quest_id, turn_reason=turn_reason)
             return
         except Exception as exc:
-            current_status = str(snapshot.get("status") or snapshot.get("display_status") or "active").strip() or "active"
+            runtime_state = self.quest_service._read_runtime_state(quest_root)
+            current_status = str(runtime_state.get("status") or runtime_state.get("display_status") or "active").strip() or "active"
             normalized_status = "active" if current_status == "running" else current_status
             self.quest_service.mark_turn_finished(quest_id, status=normalized_status)
-            quest_root = self.quest_service._quest_root(quest_id)
             append_jsonl(
                 quest_root / ".ds" / "events.jsonl",
                 {
