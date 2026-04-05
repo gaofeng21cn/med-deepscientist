@@ -125,3 +125,81 @@ Round 1 is complete for the stability target. Remaining upstream items keep thei
 Round 1 intake is complete and already merged to `main`.
 
 Treat `1865fa5` as a separate feature-evaluation intake only when it shows clear runtime value relative to ongoing `MedAutoScience -> MedDeepScientist` compatibility work.
+
+## Follow-up: verification credibility repair (2026-04-05)
+
+The intake line later needed one narrow follow-up on branch `fix/mainline-verification-credibility-repair-20260405` before the next merge-back to `main`.
+
+### Credibility blocker
+
+Fresh full-suite verification became non-credible because `tests/test_weixin_connector.py::test_upload_local_media_to_weixin_encodes_aes_key_like_openclaw`
+patched `deepscientist.connector.weixin_support.os.urandom`. That patch reached the shared process-global `os` module, so suite ordering could exhaust a short iterator and produce flaky evidence outside the target code path.
+
+### Repair shape
+
+Commit `1ee5d05` (`Prevent flaky verification evidence from depending on process-global randomness patches`) keeps the runtime behavior narrow:
+
+- adds module-local `_random_hex()` and `_random_bytes()` seams in `src/deepscientist/connector/weixin_support.py`
+- uses those seams only for `upload_local_media_to_weixin()` filekey and AES key generation
+- leaves other `os.urandom()` call sites unchanged
+- updates the regression test to patch the new module-local seams and assert `os.urandom` itself remains untouched
+
+This keeps the repair local to the determinism seam that the regression test actually needs instead of mutating shared runtime state.
+
+### Closeout gate for this fix branch
+
+Do not merge or clean up the fix worktree until all of the following are recorded:
+
+1. **Fresh full green**
+   - run `uv run pytest -q` from a clean fix worktree
+   - capture the exact command and pass result in the closeout report
+2. **Narrow-scope review**
+   - confirm only `upload_local_media_to_weixin()` switched to module-local randomness seams
+   - confirm the test no longer monkeypatches `os.urandom`
+3. **Merge-back**
+   - fast-forward or merge `fix/mainline-verification-credibility-repair-20260405` back into `main`
+   - record the resulting merge or fast-forward commit sha in the report
+4. **Cleanup**
+   - remove the temporary fix worktree only after merge-back succeeds
+   - remove any OMX team worker worktrees created for the closeout once their state is no longer needed
+5. **Report update**
+   - include the fresh pytest evidence, the narrow-scope review verdict, and the final merge/cleanup outcome in the closeout note
+
+Until that full-green gate is met, treat this branch as an in-progress verification repair rather than a completed merge candidate.
+
+### Current checkpoint guidance
+
+#### 1. Submit / review recommendation
+
+- Review the runtime repair at `1ee5d05` as the material credibility fix.
+- Treat `fed6393` as the current documentation checkpoint for closeout guidance.
+- Treat `b9d52e3` as an intermediate worker checkpoint that is already subsumed by `fed6393`; it does not need separate merge-back handling.
+- Relative to local `main`, this fix branch also carries `d35c1c8` and `3016124`, so the final reviewer should acknowledge that the merge-back is effectively `main -> origin/main -> credibility repair -> closeout note`, not only a single-commit hotfix.
+
+#### 2. Cleanup boundary
+
+- **Before merge-back:** keep the fix worktree, worker worktrees, and mailbox/state artifacts intact so the fresh verification evidence stays inspectable.
+- **After merge-back:** remove the fix worktree and OMX team worker worktrees.
+- Preserve tracked repository history (`1ee5d05`, `fed6393`, and any final merge commit) and discard only temporary team-runtime state, detached worker checkpoints, and worktree directories.
+
+#### 3. Report landing points
+
+The final closeout report should land in three places:
+
+1. merge or PR summary for the final integration step
+2. this intake audit file (`docs/upstream_intake_round_2026_04_01.md`) as the durable maintainer note
+3. team task result / leader summary with exact verification command output references
+
+Minimum report payload:
+
+- fresh `uv run pytest -q` evidence
+- narrow-scope review verdict for the Weixin randomness seam
+- exact commit(s) merged
+- cleanup actions performed
+- any residual caveats if cleanup or merge ordering differed from plan
+
+#### 4. Remaining risks
+
+- `worker-1` still owns the only authoritative fresh full-suite proof; until that lands, this branch remains a candidate rather than a finished closeout.
+- `worker-2` still owns the independent narrow-scope / no-side-effect verdict; this note documents the expected review target but does not replace that review lane.
+- Merging from local `main` without noticing its two-commit gap versus `origin/main` could misdescribe the true integration surface.
