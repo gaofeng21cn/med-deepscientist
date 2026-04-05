@@ -52,6 +52,14 @@ def _random_wechat_uin() -> str:
     return base64.b64encode(str(value).encode("utf-8")).decode("ascii")
 
 
+def _random_hex(size: int) -> str:
+    return os.urandom(size).hex()
+
+
+def _random_bytes(size: int) -> bytes:
+    return os.urandom(size)
+
+
 def _json_request(
     url: str,
     *,
@@ -529,8 +537,8 @@ def upload_local_media_to_weixin(
     raw_size = len(plaintext)
     raw_md5 = hashlib.md5(plaintext).hexdigest()
     file_size = weixin_aes_ecb_padded_size(raw_size)
-    filekey = os.urandom(16).hex()
-    aes_key = os.urandom(16)
+    filekey = _random_hex(16)
+    aes_key = _random_bytes(16)
     upload_url_response = get_weixin_upload_url(
         base_url=base_url,
         token=token,

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import os
 import time
 from pathlib import Path
 
 import pytest
 
+from deepscientist.connector import weixin_support
 from deepscientist.channels.weixin_ilink import WeixinIlinkService
 from deepscientist.home import ensure_home_layout
 from deepscientist.shared import ensure_dir, read_json
@@ -251,11 +253,9 @@ def test_upload_local_media_to_weixin_encodes_aes_key_like_openclaw(
         lambda **kwargs: {"download_param": "download-param-1", "ciphertext_size": 32},
     )
 
-    random_values = iter([b"\x01" * 16, b"\x02" * 16])
-    monkeypatch.setattr(
-        "deepscientist.connector.weixin_support.os.urandom",
-        lambda size: next(random_values),
-    )
+    original_urandom = os.urandom
+    monkeypatch.setattr(weixin_support, "_random_hex", lambda size: "01" * size)
+    monkeypatch.setattr(weixin_support, "_random_bytes", lambda size: b"\x02" * size)
 
     uploaded = upload_local_media_to_weixin(
         file_path=payload_path,
@@ -269,6 +269,7 @@ def test_upload_local_media_to_weixin_encodes_aes_key_like_openclaw(
     expected_hex = "02" * 16
     expected_b64 = base64.b64encode(expected_hex.encode("ascii")).decode("ascii")
 
+    assert os.urandom is original_urandom
     assert uploaded["aes_key_hex"] == expected_hex
     assert uploaded["aes_key_base64"] == expected_b64
 
