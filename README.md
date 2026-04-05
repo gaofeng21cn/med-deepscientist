@@ -14,16 +14,6 @@ This repository is not a hostile rewrite of DeepScientist. It is a thin, audited
 - keeps the runtime behavior stable while `MedAutoScience` converges on a narrower runtime protocol
 
 
-## Agent Contract Layers
-
-<!-- AGENT-CONTRACT-BASELINE:START -->
-- The root `AGENTS.md` is the repository-native contract for direct sessions that enter from the repository root, including Codex App and plain Codex sessions; the project truth contract lives separately.
-- The project truth contract lives at `contracts/project-truth/AGENTS.md`.
-- When the repository is launched through OMX project-scope installation, `.codex/AGENTS.md` augments the root contract rather than replacing it.
-- `.omx/local/AGENTS.local.md` is reserved for optional machine-specific private overlays and must stay untracked.
-- `.omx/` and `.codex/` are local tooling state and must stay untracked.
-<!-- AGENT-CONTRACT-BASELINE:END -->
-
 ## Why this fork exists
 
 Upstream DeepScientist is strong at exactly the capability we want to keep:
