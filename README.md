@@ -14,14 +14,14 @@ This repository is not a hostile rewrite of DeepScientist. It is a thin, audited
 - keeps the runtime behavior stable while `MedAutoScience` converges on a narrower runtime protocol
 
 
-## Agent 合同分层
+## Agent Contract Layers
 
 <!-- AGENT-CONTRACT-BASELINE:START -->
-- 根目录 `AGENTS.md` 仅用于本仓库开发环境中的 Codex/OMX 协作，不单独承载项目真相合同
-- 项目真相合同位于 `contracts/project-truth/AGENTS.md`
-- OMX project-scope 编排层位于 `.codex/AGENTS.md`，只供 OMX / CODEX_HOME 会话加载
-- 可选本机私有覆盖层约定为 `.omx/local/AGENTS.local.md`，保持未跟踪
-- 本地工具运行态目录 `.omx/` 与 `.codex/` 必须保持未跟踪，不进入版本库
+- The root `AGENTS.md` is the repository-native contract for direct sessions that enter from the repository root, including Codex App and plain Codex sessions; the project truth contract lives separately.
+- The project truth contract lives at `contracts/project-truth/AGENTS.md`.
+- When the repository is launched through OMX project-scope installation, `.codex/AGENTS.md` augments the root contract rather than replacing it.
+- `.omx/local/AGENTS.local.md` is reserved for optional machine-specific private overlays and must stay untracked.
+- `.omx/` and `.codex/` are local tooling state and must stay untracked.
 <!-- AGENT-CONTRACT-BASELINE:END -->
 
 ## Why this fork exists
@@ -164,7 +164,7 @@ See:
 - [Docs index](docs/README.md)
 - [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
 - [English docs index](docs/en/README.md)
-- [中文文档索引](docs/zh/README.md)
+- [Chinese docs index](docs/zh/README.md)
 - [Upstream intake workflow](docs/upstream_intake.md)
 - [Fork baseline and audit log](docs/medical_fork_baseline.md)
 - [Maintainer architecture reference](docs/en/90_ARCHITECTURE.md)
