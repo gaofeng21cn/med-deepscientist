@@ -271,6 +271,8 @@ def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) ->
     assert "paper_contract_health: blocked" in prompt
     assert "paper_health_counts: unresolved_required=1, unmapped_completed=0, blocking_pending=1" in prompt
     assert "paper_recommended_next_stage: analysis-campaign" in prompt
+    assert "paper_recommendation_scope: paper_line_local_only" in prompt
+    assert "paper_global_stage_authority: publication_gate" in prompt
     assert "paper_health_tool:" in prompt
 
 

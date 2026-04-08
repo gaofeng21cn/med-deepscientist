@@ -2446,6 +2446,8 @@ class DaemonApp:
                 "delivery_state": str(paper_health.get("delivery_state") or "").strip() or None,
                 "recommended_next_stage": str(paper_health.get("recommended_next_stage") or "").strip() or None,
                 "recommended_action": str(paper_health.get("recommended_action") or "").strip() or None,
+                "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
+                "global_stage_authority": str(paper_health.get("global_stage_authority") or "").strip() or None,
                 "blocking_reasons": list(paper_health.get("blocking_reasons") or []),
                 "keep_bundle_fixed_by_default": bool(paper_health.get("keep_bundle_fixed_by_default")),
             },

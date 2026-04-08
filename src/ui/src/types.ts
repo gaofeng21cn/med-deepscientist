@@ -180,6 +180,9 @@ export interface QuestSummary {
     blocking_reasons?: string[]
     recommended_next_stage?: string | null
     recommended_action?: string | null
+    recommendation_scope?: string | null
+    global_stage_authority?: string | null
+    global_stage_rule?: string | null
     unresolved_required_items?: Array<{
       section_id?: string | null
       section_title?: string | null

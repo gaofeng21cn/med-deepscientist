@@ -3025,6 +3025,9 @@ class QuestService:
             and bool(closure_evidence.get("final_claim_ledger_ready"))
             and bool(closure_evidence.get("finalize_resume_packet_ready"))
         )
+        recommendation_scope = "paper_line_local_only"
+        global_stage_authority = "publication_gate"
+        global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
 
         return {
             "paper_line_id": active_line_id,
@@ -3103,6 +3106,9 @@ class QuestService:
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
+            "recommendation_scope": recommendation_scope,
+            "global_stage_authority": global_stage_authority,
+            "global_stage_rule": global_stage_rule,
             "unresolved_required_items": unresolved_required_items[:12],
             "unmapped_completed_items": unmapped_completed_items[:12],
             "blocking_pending_slices": blocking_pending_slices[:12],

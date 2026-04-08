@@ -4061,6 +4061,9 @@ class ArtifactService:
             and bool(closure_evidence.get("final_claim_ledger_ready"))
             and bool(closure_evidence.get("finalize_resume_packet_ready"))
         )
+        recommendation_scope = "paper_line_local_only"
+        global_stage_authority = "publication_gate"
+        global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
 
         return {
             "contract_ok": contract_ok,
@@ -4121,6 +4124,9 @@ class ArtifactService:
             "blocking_reasons": blocking_reasons,
             "recommended_next_stage": recommended_next_stage,
             "recommended_action": recommended_action,
+            "recommendation_scope": recommendation_scope,
+            "global_stage_authority": global_stage_authority,
+            "global_stage_rule": global_stage_rule,
             "unresolved_required_items": unresolved_required_items[:12],
             "unmapped_completed_items": unmapped_completed_items[:12],
         }
@@ -4160,6 +4166,8 @@ class ArtifactService:
             f"- Literature Records: `{int(payload.get('literature_record_count') or 0)}`",
             f"- Recommended Next Stage: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}`",
             f"- Recommended Action: `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            f"- Recommendation Scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
+            f"- Global Stage Authority: `{str(payload.get('global_stage_authority') or 'none').strip() or 'none'}`",
             "",
             "## Blocking Reasons",
             "",
@@ -4188,6 +4196,7 @@ class ArtifactService:
             f"- Bibliography entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
             f"- Literature records: `{int(payload.get('literature_record_count') or 0)}`",
             f"- Next step: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}` / `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            f"- Recommendation scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
             "",
             "## Current Blockers",
             "",
@@ -4300,6 +4309,9 @@ class ArtifactService:
             "blocking_reasons": list(health.get("blocking_reasons") or []),
             "recommended_next_stage": str(health.get("recommended_next_stage") or "").strip() or None,
             "recommended_action": str(health.get("recommended_action") or "").strip() or None,
+            "recommendation_scope": str(health.get("recommendation_scope") or "").strip() or None,
+            "global_stage_authority": str(health.get("global_stage_authority") or "").strip() or None,
+            "global_stage_rule": str(health.get("global_stage_rule") or "").strip() or None,
             "draft_status": "present" if draft_path.exists() else "missing",
             "bundle_status": "present" if bundle_path.exists() else "missing",
             "reference_materialization_ready": bool(health.get("reference_materialization_ready")),
@@ -4809,6 +4821,8 @@ class ArtifactService:
                 "blocking_reasons": list(paper_health.get("blocking_reasons") or []),
                 "recommended_next_stage": str(paper_health.get("recommended_next_stage") or "").strip() or None,
                 "recommended_action": str(paper_health.get("recommended_action") or "").strip() or None,
+                "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
+                "global_stage_authority": str(paper_health.get("global_stage_authority") or "").strip() or None,
                 "writing_ready": bool(paper_health.get("writing_ready")),
                 "finalize_ready": bool(paper_health.get("finalize_ready")),
                 "keep_bundle_fixed_by_default": bool(paper_health.get("keep_bundle_fixed_by_default")),
@@ -6195,6 +6209,8 @@ class ArtifactService:
                 "keep_bundle_fixed_by_default": bool(paper_health.get("keep_bundle_fixed_by_default")),
                 "recommended_next_stage": next_stage,
                 "recommended_action": next_action,
+                "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
+                "global_stage_authority": str(paper_health.get("global_stage_authority") or "").strip() or None,
             },
             "claim_boundary": claim_boundary,
             "pending_user_message_count": int(snapshot.get("pending_user_message_count") or 0),

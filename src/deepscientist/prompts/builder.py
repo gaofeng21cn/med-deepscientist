@@ -1243,6 +1243,9 @@ class PromptBuilder:
                     f"- paper_health_counts: unresolved_required={int(paper_contract_health.get('unresolved_required_count') or 0)}, unmapped_completed={int(paper_contract_health.get('unmapped_completed_count') or 0)}, blocking_pending={int(paper_contract_health.get('blocking_open_supplementary_count') or 0)}",
                     f"- paper_recommended_next_stage: {str(paper_contract_health.get('recommended_next_stage') or 'none')}",
                     f"- paper_recommended_action: {str(paper_contract_health.get('recommended_action') or 'none')}",
+                    f"- paper_recommendation_scope: {str(paper_contract_health.get('recommendation_scope') or 'none')}",
+                    f"- paper_global_stage_authority: {str(paper_contract_health.get('global_stage_authority') or 'none')}",
+                    f"- paper_global_stage_rule: {str(paper_contract_health.get('global_stage_rule') or 'none')}",
                     f"- paper_primary_blocker: {primary_blocker}",
                     "- paper_health_tool: call artifact.get_paper_contract_health(detail='full') before paper-facing write/finalize work when the exact blocking items matter.",
                     "- paper_outline_tool: call artifact.list_paper_outlines(...) when outline inventory or a valid outline_id is needed.",
@@ -1250,7 +1253,7 @@ class PromptBuilder:
                 ]
             )
             lines.append(
-                "- paper_contract_rule: if the paper state is blocked, do not stabilize draft prose as if the paper were settled; follow the recommended paper action first."
+                "- paper_contract_rule: if the paper state is blocked, do not stabilize draft prose as if the paper were settled; treat paper-line next-step hints as local-only until the publication gate authorizes write."
             )
         return "\n".join(lines)
 

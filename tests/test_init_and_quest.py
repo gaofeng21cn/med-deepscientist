@@ -384,6 +384,11 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     assert refreshed["paper_contract_health"]["contract_ok"] is True
     assert refreshed["paper_contract_health"]["writing_ready"] is True
     assert refreshed["paper_contract_health"]["recommended_next_stage"] == "finalize"
+    assert refreshed["paper_contract_health"]["recommendation_scope"] == "paper_line_local_only"
+    assert refreshed["paper_contract_health"]["global_stage_authority"] == "publication_gate"
+    assert refreshed["paper_contract_health"]["global_stage_rule"] == (
+        "paper-line recommendations are subordinate until publication gate allows write"
+    )
     assert refreshed["paper_lines"][0]["paper_line_id"] == "paper-line-001"
     assert refreshed["active_paper_line_ref"] == "paper-line-001"
     assert refreshed["analysis_inventory"]["campaign_count"] == 1
@@ -447,6 +452,11 @@ def test_snapshot_blocks_finalize_when_reference_materialization_is_missing(temp
     assert health["literature_ready"] is False
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "materialize_reference_materials"
+    assert health["recommendation_scope"] == "paper_line_local_only"
+    assert health["global_stage_authority"] == "publication_gate"
+    assert health["global_stage_rule"] == (
+        "paper-line recommendations are subordinate until publication gate allows write"
+    )
     assert "at least 12 verified references are required" in " ".join(health["blocking_reasons"])
     assert "requires total>=12, pubmed>=6" in " ".join(health["blocking_reasons"])
 

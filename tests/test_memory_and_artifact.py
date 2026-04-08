@@ -5382,6 +5382,8 @@ def test_get_quest_state_and_global_status_expose_continuation_state(temp_home: 
     assert global_status["ok"] is True
     assert global_status["global_status"]["continuation_policy"] == "wait_for_user_or_resume"
     assert global_status["global_status"]["current_stage"] == "finalize"
+    assert global_status["global_status"]["paper_contract_health"]["recommendation_scope"] == "paper_line_local_only"
+    assert global_status["global_status"]["paper_contract_health"]["global_stage_authority"] == "publication_gate"
     assert "停驻" in global_status["global_status"]["summary_text"]
 
 
@@ -5548,6 +5550,11 @@ def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checkl
     assert health["delivery_state"] == "audit_ready"
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert health["recommendation_scope"] == "paper_line_local_only"
+    assert health["global_stage_authority"] == "publication_gate"
+    assert health["global_stage_rule"] == (
+        "paper-line recommendations are subordinate until publication gate allows write"
+    )
     assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
 
 
