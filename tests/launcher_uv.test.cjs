@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const { __internal } = require('../bin/ds.js');
 
@@ -232,7 +233,7 @@ test('resolveHome uses ./DeepScientist under the current working directory when 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-here-'));
   process.chdir(tempDir);
   try {
-    assert.equal(__internal.resolveHome(['--here']), path.join(tempDir, 'DeepScientist'));
+    assert.equal(__internal.resolveHome(['--here']), path.join(process.cwd(), 'DeepScientist'));
   } finally {
     process.chdir(originalCwd);
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -320,4 +321,49 @@ test('repairLegacyPathWrappers rewrites old install wrappers to the current npm 
     }
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('launcher --status emits complete JSON when stdout is captured', async (t) => {
+  const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-status-home-'));
+  const nestedHome = path.join(homeRoot, 'managed-home', 'runtime-home');
+  const runtimeRoot = path.join(nestedHome, 'runtime');
+  fs.mkdirSync(runtimeRoot, { recursive: true });
+
+  const daemonId = 'daemon-status-json';
+  t.after(() => fs.rmSync(homeRoot, { recursive: true, force: true }));
+
+  fs.writeFileSync(
+    path.join(runtimeRoot, 'daemon.json'),
+    JSON.stringify(
+      {
+        pid: 43210,
+        host: '127.0.0.1',
+        port: 65530,
+        url: 'http://127.0.0.1:65530',
+        bind_url: 'http://127.0.0.1:65530',
+        log_path: path.join(nestedHome, 'runtime', 'logs', `${'z'.repeat(240)}.log`),
+        started_at: '2026-04-08T00:00:00.000Z',
+        home: nestedHome,
+        daemon_id: daemonId,
+        note: 'long-status-payload-' + 'q'.repeat(480),
+      },
+      null,
+      2
+    ) + '\n',
+    'utf8'
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [path.join(__dirname, '..', 'bin', 'ds.js'), '--home', nestedHome, '--status'],
+    { encoding: 'utf8' }
+  );
+
+  assert.equal(result.status, 1);
+  assert.ok(result.stdout.length > 512, `stdout unexpectedly short: ${result.stdout.length}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.home, nestedHome);
+  assert.equal(payload.daemon.home, nestedHome);
+  assert.equal(payload.daemon.daemon_id, daemonId);
+  assert.equal(payload.health, null);
 });

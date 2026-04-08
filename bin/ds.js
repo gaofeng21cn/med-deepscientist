@@ -3104,6 +3104,18 @@ function writeUpdateLog(home, content) {
   return logPath;
 }
 
+function writeStdoutAndWait(content) {
+  return new Promise((resolve, reject) => {
+    process.stdout.write(content, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 function summarizeUpdateFailure(result) {
   const lines = [];
   if (result.error) {
@@ -4079,8 +4091,8 @@ async function launcherMain(rawArgs) {
     const health = await fetchHealth(url);
     const healthy = Boolean(health && health.status === 'ok');
     const identityMatch = state ? healthMatchesManagedState({ health, state, home }) : false;
-    console.log(
-      JSON.stringify(
+    await writeStdoutAndWait(
+      `${JSON.stringify(
         {
           healthy,
           identity_match: identityMatch,
@@ -4092,9 +4104,10 @@ async function launcherMain(rawArgs) {
         },
         null,
         2
-      )
+      )}\n`
     );
-    process.exit(healthy && (!state || identityMatch) ? 0 : 1);
+    process.exitCode = healthy && (!state || identityMatch) ? 0 : 1;
+    return;
   }
 
   const pythonRuntime = ensurePythonRuntime(home);
