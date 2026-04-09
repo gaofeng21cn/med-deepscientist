@@ -508,6 +508,7 @@ npm --prefix src/ui run build</pre>
 
     def quest_session(self, quest_id: str) -> dict:
         snapshot = self.app.quest_service.snapshot_fast(quest_id)
+        snapshot = self.app._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
         runtime_audit = self.app.quest_runtime_audit(quest_id, snapshot=snapshot)
         for kind in ("details", "canvas"):
             try:

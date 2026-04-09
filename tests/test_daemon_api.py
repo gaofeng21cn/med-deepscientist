@@ -456,11 +456,64 @@ def test_quest_session_reports_none_runtime_audit_for_stale_active_run_without_w
         "ok": True,
         "status": "none",
         "source": "daemon_turn_worker",
-        "active_run_id": "run-stale-001",
+        "active_run_id": None,
         "worker_running": False,
         "worker_pending": False,
         "stop_requested": False,
     }
+    assert payload["snapshot"]["status"] == "active"
+    assert payload["snapshot"]["runtime_status"] == "active"
+    assert payload["snapshot"]["display_status"] == "active"
+    assert payload["snapshot"]["active_run_id"] is None
+
+
+def test_quest_session_surfaces_stale_interaction_watchdog_for_live_silent_turn(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("session live silent run quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    release = threading.Event()
+    stale_at = (datetime.now(UTC) - timedelta(minutes=31)).isoformat()
+
+    worker = threading.Thread(target=lambda: release.wait(timeout=5.0), daemon=True)
+    worker.start()
+    try:
+        with app._turn_lock:
+            app._turn_state[quest_id] = {
+                "running": True,
+                "pending": False,
+                "worker": worker,
+                "stop_requested": False,
+            }
+        app.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            status="running",
+            active_run_id="run-live-stale-001",
+            last_artifact_interact_at=stale_at,
+            tool_calls_since_last_artifact_interact=0,
+        )
+
+        payload = app.handlers.quest_session(quest_id)
+
+        assert payload["runtime_audit"] == {
+            "ok": True,
+            "status": "live",
+            "source": "daemon_turn_worker",
+            "active_run_id": "run-live-stale-001",
+            "worker_running": True,
+            "worker_pending": False,
+            "stop_requested": False,
+        }
+        assert payload["snapshot"]["interaction_watchdog"]["tool_calls_since_last_artifact_interact"] == 0
+        assert payload["snapshot"]["interaction_watchdog"]["stale_visibility_gap"] is True
+        assert payload["snapshot"]["interaction_watchdog"]["active_execution_window"] is True
+        assert payload["snapshot"]["interaction_watchdog"]["inspection_due"] is True
+        assert payload["snapshot"]["interaction_watchdog"]["seconds_since_last_artifact_interact"] >= 30 * 60
+    finally:
+        release.set()
+        worker.join(timeout=1.0)
 
 
 def test_quest_session_reports_live_runtime_audit_for_active_turn_worker(temp_home: Path) -> None:

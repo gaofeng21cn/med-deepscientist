@@ -5853,15 +5853,19 @@ class QuestService:
         runtime_state = self._read_runtime_state(quest_root)
         last_artifact_interact_at = str(runtime_state.get("last_artifact_interact_at") or "").strip() or None
         last_tool_activity_at = str(runtime_state.get("last_tool_activity_at") or "").strip() or None
+        runtime_status = str(runtime_state.get("status") or runtime_state.get("display_status") or "").strip().lower()
+        active_run_id = str(runtime_state.get("active_run_id") or "").strip() or None
         tool_count = int(runtime_state.get("tool_calls_since_last_artifact_interact") or 0)
         silence_seconds = self._seconds_since_iso_timestamp(last_artifact_interact_at)
+        active_execution_window = bool(active_run_id) or runtime_status == "running"
+        stale_visibility_gap = bool(
+            silence_seconds is not None
+            and silence_seconds >= 30 * 60
+            and (tool_count > 0 or active_execution_window)
+        )
         inspection_due = bool(
             tool_count >= 25
-            or (
-                tool_count > 0
-                and silence_seconds is not None
-                and silence_seconds >= 30 * 60
-            )
+            or stale_visibility_gap
         )
         return {
             "last_artifact_interact_at": last_artifact_interact_at,
@@ -5870,6 +5874,8 @@ class QuestService:
             "last_tool_activity_at": last_tool_activity_at,
             "seconds_since_last_tool_activity": self._seconds_since_iso_timestamp(last_tool_activity_at),
             "last_tool_activity_name": str(runtime_state.get("last_tool_activity_name") or "").strip() or None,
+            "active_execution_window": active_execution_window,
+            "stale_visibility_gap": stale_visibility_gap,
             "inspection_due": inspection_due,
             "user_update_due": False,
         }
