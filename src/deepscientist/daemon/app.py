@@ -1562,8 +1562,12 @@ class DaemonApp:
                 state.pop("worker", None)
             return dict(state)
 
+    def _compact_snapshot_with_reconciled_turn_state(self, quest_id: str) -> dict[str, Any]:
+        snapshot = self.quest_service.snapshot_fast(quest_id)
+        return self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+
     def quest_runtime_audit(self, quest_id: str, *, snapshot: dict | None = None) -> dict[str, Any]:
-        resolved_snapshot = dict(snapshot or self.quest_service.snapshot_fast(quest_id))
+        resolved_snapshot = dict(snapshot or self._compact_snapshot_with_reconciled_turn_state(quest_id))
         turn_state = self._refresh_turn_worker_state(quest_id)
         worker_running = bool(turn_state.get("running"))
         worker_pending = bool(turn_state.get("pending"))
@@ -2745,7 +2749,7 @@ class DaemonApp:
         previous_output_text: str,
         stderr_text: str,
     ) -> dict[str, Any]:
-        compact_snapshot = self.quest_service.snapshot_fast(quest_id)
+        compact_snapshot = self._compact_snapshot_with_reconciled_turn_state(quest_id)
         quest_root = Path(str(compact_snapshot.get("quest_root") or self.quest_service._quest_root(quest_id)))
         workspace_root = Path(
             str(
@@ -6011,7 +6015,7 @@ class DaemonApp:
     def _lingzhu_short_status_text(self, quest_id: str | None) -> str:
         normalized_quest_id = str(quest_id or "").strip()
         if normalized_quest_id:
-            snapshot = self.quest_service.snapshot_fast(normalized_quest_id)
+            snapshot = self._compact_snapshot_with_reconciled_turn_state(normalized_quest_id)
             runtime_status = str(snapshot.get("runtime_status") or snapshot.get("status") or "").strip().lower()
             if runtime_status in {"running", "active"}:
                 return "进行中"

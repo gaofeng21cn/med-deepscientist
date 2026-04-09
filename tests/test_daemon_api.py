@@ -467,6 +467,38 @@ def test_quest_session_reports_none_runtime_audit_for_stale_active_run_without_w
     assert payload["snapshot"]["active_run_id"] is None
 
 
+def test_quest_runtime_audit_reconciles_stale_active_run_without_worker(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("runtime audit stale run quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id="run-stale-audit-001",
+    )
+
+    payload = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+
+    assert payload == {
+        "ok": True,
+        "status": "none",
+        "source": "daemon_turn_worker",
+        "active_run_id": None,
+        "worker_running": False,
+        "worker_pending": False,
+        "stop_requested": False,
+    }
+    assert snapshot["status"] == "active"
+    assert snapshot["runtime_status"] == "active"
+    assert snapshot["display_status"] == "active"
+    assert snapshot["active_run_id"] is None
+
+
 def test_quest_session_surfaces_stale_interaction_watchdog_for_live_silent_turn(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
