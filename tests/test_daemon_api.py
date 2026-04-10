@@ -4362,6 +4362,58 @@ def test_quest_control_stop_stops_runner_owned_bash_exec_sessions(temp_home: Pat
         raise AssertionError("stopped quest did not clear active_run_id after the runner exited")
 
 
+def test_quest_control_stop_preserves_controller_source_in_stop_reason(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("controller stop reason quest")
+    quest_id = quest["quest_id"]
+
+    class InterruptibleRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.started = threading.Event()
+            self.interrupted = threading.Event()
+
+        def run(self, request):
+            self.started.set()
+            while not self.interrupted.is_set():
+                time.sleep(0.05)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=False,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="Interrupted.",
+                exit_code=130,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="stopped by controller",
+            )
+
+        def interrupt(self, quest_id: str) -> bool:
+            self.interrupted.set()
+            return True
+
+    runner = InterruptibleRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Controller should stop this task.", "source": "web-react"})
+    assert payload["ok"] is True
+    assert runner.started.wait(timeout=2)
+
+    stop_payload = app.handlers.quest_control(
+        quest_id,
+        {"action": "stop", "source": "medautosci-figure-loop-guard"},
+    )
+
+    assert stop_payload["ok"] is True
+    assert stop_payload["snapshot"]["status"] == "stopped"
+    assert stop_payload["snapshot"]["stop_reason"] == "controller_stop:medautosci-figure-loop-guard"
+
+
 def test_admin_shutdown_endpoint_requests_daemon_shutdown(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

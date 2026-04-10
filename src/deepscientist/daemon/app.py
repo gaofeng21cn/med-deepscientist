@@ -1647,6 +1647,19 @@ class DaemonApp:
     def stop_quest(self, quest_id: str, *, source: str = "local") -> dict:
         return self._interrupt_quest(quest_id, action="stop", status="stopped", source=source)
 
+    def _control_stop_reason(self, *, action: str, source: str) -> str:
+        normalized_source = str(source or "").strip() or "local"
+        if action == "stop" and normalized_source == "local-admin":
+            return "daemon_shutdown"
+        user_sources = {"local", "local-ui", "cli", "command"}
+        if (
+            normalized_source in user_sources
+            or normalized_source.startswith(("web-", "tui-", "ui-"))
+            or normalized_source.endswith(":connector")
+        ):
+            return f"user_{action}"
+        return f"controller_{action}:{normalized_source}"
+
     def _interrupt_quest(self, quest_id: str, *, action: str, status: str, source: str) -> dict:
         previous_snapshot = self.quest_service.snapshot(quest_id)
         runner_name = self._runner_name_for(previous_snapshot)
@@ -1681,7 +1694,7 @@ class DaemonApp:
                 action=action,
                 source=source,
             )
-        stop_reason = "daemon_shutdown" if action == "stop" and source == "local-admin" else f"user_{action}"
+        stop_reason = self._control_stop_reason(action=action, source=source)
         snapshot = self.quest_service.mark_turn_finished(quest_id, status=status, stop_reason=stop_reason)
         verb = "paused" if action == "pause" else "stopped"
         summary = f"Quest {quest_id} {verb}."
