@@ -961,6 +961,210 @@ def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_no
     assert "forbidden_manuscript_terminology" in joined
 
 
+def test_snapshot_resolves_relative_study_root_for_managed_publication_eval(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by managed publication gate with relative study root")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "latest.json",
+        {
+            "schema_version": 1,
+            "eval_id": "eval-001",
+            "study_id": "001-risk",
+            "quest_id": snapshot["quest_id"],
+            "emitted_at": "2026-04-10T00:00:00Z",
+            "evaluation_scope": "paper_gate",
+            "charter_context_ref": {
+                "ref": "artifacts/controller/study_charter.json",
+                "charter_id": "charter-001",
+                "publication_objective": "manuscript_ready",
+            },
+            "runtime_context_refs": {
+                "runtime_escalation_ref": "artifacts/runtime/runtime_supervision/latest.json",
+                "main_result_ref": "artifacts/results/main.json",
+            },
+            "delivery_context_refs": {
+                "paper_root_ref": "paper",
+                "submission_minimal_ref": "paper/submission_minimal",
+            },
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "reporting",
+                    "severity": "must_fix",
+                    "summary": "forbidden_manuscript_terminology",
+                    "evidence_refs": ["paper/draft.md"],
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "evidence_refs": ["paper/draft.md"],
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Managed Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-managed-gate",
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Managed Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-10T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": "../../studies/001-risk",
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+
+    review_root = ensure_dir(paper_root / "review")
+    write_text(review_root / "review.md", "# Review\n\nReady.\n")
+    write_text(review_root / "revision_log.md", "# Revision Log\n\nReady.\n")
+    write_json(review_root / "submission_checklist.json", {"status": "ready_for_submission", "blocking_items": []})
+    proofing_root = ensure_dir(paper_root / "proofing")
+    write_text(proofing_root / "proofing_report.md", "# Proofing Report\n\nReady.\n")
+    write_text(proofing_root / "language_issues.md", "# Language Issues\n\nNone.\n")
+    write_text(paper_root / "final_claim_ledger.md", "# Final Claim Ledger\n\nAll claims closed.\n")
+    write_text(quest_root / "handoffs" / "finalize_resume_packet.md", "# Finalize Resume Packet\n\nReady.\n")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["managed_publication_gate_status"] == "blocked"
+    assert health["managed_publication_eval_path"] == str(study_root / "artifacts" / "publication_eval" / "latest.json")
+    assert "forbidden_manuscript_terminology" in " ".join(health["completion_blocking_reasons"])
+
+
+def test_snapshot_marks_invalid_when_managed_publication_eval_schema_is_incomplete(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by invalid managed publication gate payload")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "latest.json",
+        {
+            "schema_version": 1,
+            "study_id": "001-risk",
+            "quest_id": snapshot["quest_id"],
+            "verdict": {
+                "overall_verdict": "blocked",
+            },
+            "gaps": [],
+            "recommended_actions": [],
+        },
+    )
+
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Managed Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-managed-gate",
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Managed Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-10T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+
+    review_root = ensure_dir(paper_root / "review")
+    write_text(review_root / "review.md", "# Review\n\nReady.\n")
+    write_text(review_root / "revision_log.md", "# Revision Log\n\nReady.\n")
+    write_json(review_root / "submission_checklist.json", {"status": "ready_for_submission", "blocking_items": []})
+    proofing_root = ensure_dir(paper_root / "proofing")
+    write_text(proofing_root / "proofing_report.md", "# Proofing Report\n\nReady.\n")
+    write_text(proofing_root / "language_issues.md", "# Language Issues\n\nNone.\n")
+    write_text(paper_root / "final_claim_ledger.md", "# Final Claim Ledger\n\nAll claims closed.\n")
+    write_text(quest_root / "handoffs" / "finalize_resume_packet.md", "# Finalize Resume Packet\n\nReady.\n")
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["managed_publication_gate_status"] == "invalid"
+    assert health["managed_publication_gate_clear"] is False
+    assert "invalid" in str(health["managed_publication_gate_summary"] or "")
+
+
 def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     service = QuestService(temp_home)

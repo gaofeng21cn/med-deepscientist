@@ -1713,9 +1713,10 @@ class QuestService:
             deduped.append(root)
         return deduped
 
-    def _paper_reporting_contract_payload(self, roots: list[Path]) -> tuple[dict[str, Any], Path | None]:
+    def _paper_reporting_contract_payload(self, roots: list[Path]) -> tuple[dict[str, Any], Path | None, Path | None]:
         contract: dict[str, Any] = {}
         contract_path: Path | None = None
+        contract_root: Path | None = None
         for root in roots:
             candidate = root / "paper" / "medical_reporting_contract.json"
             if not candidate.exists():
@@ -1724,8 +1725,160 @@ class QuestService:
             if isinstance(payload, dict) and payload:
                 contract = payload
                 contract_path = candidate
+                contract_root = root
                 break
-        return contract, contract_path
+        return contract, contract_path, contract_root
+
+    @staticmethod
+    def _resolve_managed_study_root(*, study_root_raw: str, contract_root: Path | None) -> Path:
+        candidate = Path(study_root_raw).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve()
+        if contract_root is not None:
+            return (contract_root / candidate).resolve()
+        return candidate.resolve()
+
+    @staticmethod
+    def _managed_publication_eval_validation_error(
+        *,
+        study_root: Path,
+        publication_eval_path: Path,
+        contract_path: Path | None,
+        detail: str,
+    ) -> dict[str, Any]:
+        normalized_detail = str(detail).strip() or "managed publication gate durable surface is invalid"
+        return {
+            "managed": True,
+            "status": "invalid",
+            "clear": False,
+            "study_root": str(study_root),
+            "publication_eval_path": str(publication_eval_path),
+            "summary": f"managed publication gate durable surface is invalid: {normalized_detail}",
+            "overall_verdict": None,
+            "gap_summaries": [],
+            "recommended_action_types": [],
+            "requires_controller_decision": True,
+            "reporting_contract_path": str(contract_path) if contract_path is not None else None,
+        }
+
+    @staticmethod
+    def _validate_managed_publication_eval_payload(
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+        if not isinstance(payload, dict) or not payload:
+            raise ValueError("publication eval payload must be a non-empty JSON object")
+
+        allowed_verdicts = frozenset({"promising", "mixed", "weak", "blocked"})
+        allowed_primary_claim_statuses = frozenset({"supported", "partial", "unsupported", "blocked"})
+        allowed_stop_loss_pressures = frozenset({"none", "watch", "high"})
+        allowed_gap_types = frozenset({"claim", "evidence", "reporting", "delivery"})
+        allowed_gap_severities = frozenset({"must_fix", "important", "optional"})
+        allowed_action_types = frozenset(
+            {"continue_same_line", "bounded_analysis", "return_to_controller", "prepare_promotion_review"}
+        )
+        allowed_action_priorities = frozenset({"now", "next"})
+
+        def _require_mapping(label: str, value: Any) -> dict[str, Any]:
+            if not isinstance(value, dict):
+                raise ValueError(f"{label} must be a mapping")
+            return dict(value)
+
+        def _require_text(label: str, value: Any) -> str:
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{label} must be non-empty")
+            return value.strip()
+
+        def _require_int(label: str, value: Any) -> int:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ValueError(f"{label} must be int")
+            return value
+
+        def _require_choice(label: str, value: Any, allowed: frozenset[str]) -> str:
+            normalized = _require_text(label, value)
+            if normalized not in allowed:
+                raise ValueError(f"{label} must be one of: {', '.join(sorted(allowed))}")
+            return normalized
+
+        def _require_text_list(label: str, value: Any) -> tuple[str, ...]:
+            if not isinstance(value, list) or not value:
+                raise ValueError(f"{label} must be a non-empty list")
+            return tuple(_require_text(label, item) for item in value)
+
+        def _require_ref_mapping(label: str, value: Any, required_keys: frozenset[str]) -> dict[str, str]:
+            mapping = _require_mapping(label, value)
+            normalized: dict[str, str] = {}
+            for key, item in mapping.items():
+                normalized_key = _require_text(f"{label} key", key)
+                if not normalized_key.endswith("_ref"):
+                    raise ValueError(f"{label} keys must end with _ref")
+                normalized[normalized_key] = _require_text(f"{label} value", item)
+            missing = sorted(required_keys - normalized.keys())
+            if missing:
+                raise ValueError(f"{label} missing required key {missing[0]}")
+            unexpected = sorted(normalized.keys() - required_keys)
+            if unexpected:
+                raise ValueError(f"{label} contains unexpected ref key {unexpected[0]}")
+            return normalized
+
+        _require_int("publication eval schema_version", payload.get("schema_version"))
+        _require_text("publication eval study_id", payload.get("study_id"))
+        _require_text("publication eval quest_id", payload.get("quest_id"))
+
+        verdict = _require_mapping("publication eval verdict", payload.get("verdict"))
+        _require_choice("publication eval verdict.overall_verdict", verdict.get("overall_verdict"), allowed_verdicts)
+        _require_choice(
+            "publication eval verdict.primary_claim_status",
+            verdict.get("primary_claim_status"),
+            allowed_primary_claim_statuses,
+        )
+        _require_text("publication eval verdict.summary", verdict.get("summary"))
+        _require_choice(
+            "publication eval verdict.stop_loss_pressure",
+            verdict.get("stop_loss_pressure"),
+            allowed_stop_loss_pressures,
+        )
+
+        gaps_value = payload.get("gaps")
+        if not isinstance(gaps_value, list):
+            raise ValueError("publication eval gaps must be a list")
+        validated_gaps: list[dict[str, Any]] = []
+        for item in gaps_value:
+            gap = _require_mapping("publication eval gap", item)
+            _require_text("publication eval gap.summary", gap.get("summary"))
+            if "gap_type" in gap:
+                _require_choice("publication eval gap.gap_type", gap.get("gap_type"), allowed_gap_types)
+            if "severity" in gap:
+                _require_choice("publication eval gap.severity", gap.get("severity"), allowed_gap_severities)
+            if "evidence_refs" in gap:
+                _require_text_list("publication eval gap.evidence_refs", gap.get("evidence_refs"))
+            validated_gaps.append(gap)
+
+        actions_value = payload.get("recommended_actions")
+        if not isinstance(actions_value, list):
+            raise ValueError("publication eval recommended_actions must be a list")
+        validated_actions: list[dict[str, Any]] = []
+        for item in actions_value:
+            action = _require_mapping("publication eval recommended action", item)
+            _require_choice(
+                "publication eval recommended action.action_type",
+                action.get("action_type"),
+                allowed_action_types,
+            )
+            if "priority" in action:
+                _require_choice(
+                    "publication eval recommended action.priority",
+                    action.get("priority"),
+                    allowed_action_priorities,
+                )
+            if "reason" in action:
+                _require_text("publication eval recommended action.reason", action.get("reason"))
+            if "evidence_refs" in action:
+                _require_text_list("publication eval recommended action.evidence_refs", action.get("evidence_refs"))
+            if "requires_controller_decision" in action and not isinstance(action.get("requires_controller_decision"), bool):
+                raise ValueError("publication eval recommended action.requires_controller_decision must be boolean")
+            validated_actions.append(action)
+
+        return verdict, validated_gaps, validated_actions
 
     def _managed_publication_eval_payload(
         self,
@@ -1734,7 +1887,7 @@ class QuestService:
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
         roots = self._paper_context_roots(quest_root, workspace_root=workspace_root)
-        contract, contract_path = self._paper_reporting_contract_payload(roots)
+        contract, contract_path, contract_root = self._paper_reporting_contract_payload(roots)
         study_root_raw = str(contract.get("study_root") or "").strip()
         if not study_root_raw:
             return {
@@ -1751,7 +1904,10 @@ class QuestService:
                 "reporting_contract_path": str(contract_path) if contract_path is not None else None,
             }
 
-        study_root = Path(study_root_raw).expanduser()
+        study_root = self._resolve_managed_study_root(
+            study_root_raw=study_root_raw,
+            contract_root=contract_root,
+        )
         publication_eval_path = study_root / "artifacts" / "publication_eval" / "latest.json"
         if not publication_eval_path.exists():
             return {
@@ -1769,33 +1925,22 @@ class QuestService:
             }
 
         payload = read_json(publication_eval_path, {})
-        if not isinstance(payload, dict) or not payload:
-            return {
-                "managed": True,
-                "status": "invalid",
-                "clear": False,
-                "study_root": str(study_root),
-                "publication_eval_path": str(publication_eval_path),
-                "summary": "managed publication gate durable surface is unreadable",
-                "overall_verdict": None,
-                "gap_summaries": [],
-                "recommended_action_types": [],
-                "requires_controller_decision": True,
-                "reporting_contract_path": str(contract_path) if contract_path is not None else None,
-            }
+        try:
+            verdict, gaps, recommended_actions = self._validate_managed_publication_eval_payload(payload)
+        except (TypeError, ValueError) as exc:
+            return self._managed_publication_eval_validation_error(
+                study_root=study_root,
+                publication_eval_path=publication_eval_path,
+                contract_path=contract_path,
+                detail=str(exc),
+            )
 
-        verdict = dict(payload.get("verdict") or {}) if isinstance(payload.get("verdict"), dict) else {}
         overall_verdict = str(verdict.get("overall_verdict") or "").strip().lower() or None
         summary = str(verdict.get("summary") or "").strip() or None
         gap_summaries = [
             str(item.get("summary") or "").strip()
-            for item in (payload.get("gaps") or [])
+            for item in gaps
             if isinstance(item, dict) and str(item.get("summary") or "").strip()
-        ]
-        recommended_actions = [
-            dict(item)
-            for item in (payload.get("recommended_actions") or [])
-            if isinstance(item, dict)
         ]
         status = "clear" if overall_verdict == "promising" else "blocked"
         return {
@@ -1817,7 +1962,7 @@ class QuestService:
         }
 
     def _paper_reference_gate_payload(self, roots: list[Path]) -> dict[str, Any]:
-        contract, contract_path = self._paper_reporting_contract_payload(roots)
+        contract, contract_path, _ = self._paper_reporting_contract_payload(roots)
 
         requirements: dict[str, Any] = {
             "minimum_bibliography_entries": 12,
