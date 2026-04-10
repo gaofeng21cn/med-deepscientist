@@ -3978,7 +3978,7 @@ def test_artifact_completion_endpoints_finalize_quest_and_refresh_documents(temp
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     app = DaemonApp(temp_home)
-    quest = app.quest_service.create("artifact completion api quest")
+    quest = app.quest_service.create("artifact completion api quest", startup_contract={"need_research_paper": False})
     quest_id = quest["quest_id"]
     quest_root = Path(quest["quest_root"])
 
@@ -4036,7 +4036,10 @@ def test_artifact_completion_accepts_typed_decision_response_without_lexicon_mat
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     app = DaemonApp(temp_home)
-    quest = app.quest_service.create("artifact completion typed approval quest")
+    quest = app.quest_service.create(
+        "artifact completion typed approval quest",
+        startup_contract={"need_research_paper": False},
+    )
     quest_id = quest["quest_id"]
 
     request = app.handlers.artifact_interact(
@@ -5493,7 +5496,7 @@ def test_daemon_does_not_auto_continue_while_waiting_for_blocking_user_decision(
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     app = DaemonApp(temp_home)
-    quest = app.quest_service.create("waiting quest")
+    quest = app.quest_service.create("waiting quest", startup_contract={"need_research_paper": False})
     quest_id = quest["quest_id"]
 
     class WaitingRunner:

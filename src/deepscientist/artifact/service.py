@@ -3909,6 +3909,10 @@ class ArtifactService:
             quest_root,
             workspace_root=workspace_root,
         )
+        managed_publication_gate = self.quest_service._managed_publication_eval_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
         citation_usage = self.quest_service._paper_citation_usage_payload(
             quest_root,
             workspace_root=workspace_root,
@@ -3983,6 +3987,18 @@ class ArtifactService:
                 "submission packaging checklist still has "
                 f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
             )
+        if bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
+            gate_detail = "; ".join(
+                str(item).strip()
+                for item in (managed_publication_gate.get("gap_summaries") or [])
+                if str(item).strip()
+            )
+            if not gate_detail:
+                gate_detail = str(managed_publication_gate.get("summary") or "").strip()
+            blocking_reasons.append(
+                "managed publication gate is not clear"
+                + (f": {gate_detail}" if gate_detail else "")
+            )
 
         if unmapped_completed_items:
             recommended_next_stage = "write"
@@ -4012,6 +4028,9 @@ class ArtifactService:
         ):
             recommended_next_stage = "write"
             recommended_action = "finish_proofing_and_submission_checks"
+        elif bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
+            recommended_next_stage = "write"
+            recommended_action = "resolve_publication_gate_blockers"
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
@@ -4050,7 +4069,11 @@ class ArtifactService:
             delivery_state = "delivered"
             closure_state = "delivered_continue_research" if "continue" in overall_status else "delivered_parked"
             keep_bundle_fixed_by_default = True
-        finalize_ready = writing_ready and submission_ready_for_delivery
+        finalize_ready = (
+            writing_ready
+            and submission_ready_for_delivery
+            and (not bool(managed_publication_gate.get("managed")) or bool(managed_publication_gate.get("clear")))
+        )
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
             completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
@@ -4119,6 +4142,14 @@ class ArtifactService:
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
             "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
             "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
+            "managed_publication_gate_status": str(managed_publication_gate.get("status") or "").strip() or "not_managed",
+            "managed_publication_gate_clear": bool(managed_publication_gate.get("clear")),
+            "managed_publication_gate_summary": str(managed_publication_gate.get("summary") or "").strip() or None,
+            "managed_publication_gate_overall_verdict": (
+                str(managed_publication_gate.get("overall_verdict") or "").strip() or None
+            ),
+            "managed_publication_gate_gap_summaries": list(managed_publication_gate.get("gap_summaries") or []),
+            "managed_publication_eval_path": str(managed_publication_gate.get("publication_eval_path") or "").strip() or None,
             "completion_approval_ready": completion_approval_ready,
             "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
@@ -11344,23 +11375,18 @@ class ArtifactService:
         decision_type = self._interaction_decision_type({"reply_schema": reply_schema_resolved})
         if kind == "decision_request" and decision_type == QUEST_COMPLETION_DECISION_TYPE:
             snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+            startup_contract = (
+                dict(snapshot.get("startup_contract") or {})
+                if isinstance(snapshot.get("startup_contract"), dict)
+                else {}
+            )
             paper_health = (
                 dict(snapshot.get("paper_contract_health") or {})
                 if isinstance(snapshot.get("paper_contract_health"), dict)
                 else {}
             )
-            paper_gate_enforced = any(
-                bool(paper_health.get(key))
-                for key in (
-                    "selected_outline_ref",
-                    "bundle_present",
-                    "draft_available",
-                    "review_outputs_ready",
-                    "proofing_outputs_ready",
-                    "submission_checklist_ready",
-                )
-            )
-            if paper_gate_enforced and not bool(paper_health.get("completion_approval_ready")):
+            needs_research_paper = bool(startup_contract.get("need_research_paper", True))
+            if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
                 blocking_reasons = [
                     str(item).strip()
                     for item in (
@@ -11726,6 +11752,47 @@ class ArtifactService:
         summary: str = "",
     ) -> dict[str, Any]:
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+        startup_contract = (
+            dict(snapshot.get("startup_contract") or {})
+            if isinstance(snapshot.get("startup_contract"), dict)
+            else {}
+        )
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        needs_research_paper = bool(startup_contract.get("need_research_paper", True))
+        if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
+            blocking_reasons = [
+                str(item).strip()
+                for item in (
+                    paper_health.get("completion_blocking_reasons")
+                    or paper_health.get("blocking_reasons")
+                    or []
+                )
+                if str(item).strip()
+            ]
+            guidance = self.quest_service.localized_copy(
+                quest_root=quest_root,
+                zh=(
+                    "paper line 还没到可以完成 quest 的状态。"
+                    + (f" 当前阻塞：{'; '.join(blocking_reasons[:4])}。" if blocking_reasons else "")
+                    + " 请先清完 publication gate 与 finalize blocker，再重新申请结题。"
+                ),
+                en=(
+                    "The paper line is not yet ready to complete the quest."
+                    + (f" Current blockers: {'; '.join(blocking_reasons[:4])}." if blocking_reasons else "")
+                    + " Clear the publication gate and finalize blockers before trying to complete the quest again."
+                ),
+            )
+            return {
+                "ok": False,
+                "status": "completion_gate_blocked",
+                "quest_id": snapshot.get("quest_id"),
+                "message": guidance,
+                "blocking_reasons": blocking_reasons,
+            }
         if str(snapshot.get("status") or "") == "completed":
             return {
                 "ok": True,

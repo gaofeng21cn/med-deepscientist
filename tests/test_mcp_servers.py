@@ -271,7 +271,10 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)
         ConfigManager(temp_home).ensure_files()
-        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("mcp artifact quest")
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp artifact quest",
+            startup_contract={"need_research_paper": False},
+        )
         quest_root = Path(quest["quest_root"])
         context = McpContext(
             home=temp_home,

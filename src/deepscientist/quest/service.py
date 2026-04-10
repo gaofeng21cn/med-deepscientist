@@ -1693,9 +1693,29 @@ class QuestService:
             )
         return payload
 
-    def _paper_reference_gate_payload(self, roots: list[Path]) -> dict[str, Any]:
+    def _paper_context_roots(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
+        roots: list[Path] = []
+        seen: set[str] = set()
+        if workspace_root is not None:
+            roots.append(workspace_root)
+        roots.extend(self.workspace_roots(quest_root))
+        deduped: list[Path] = []
+        for root in roots:
+            key = str(root.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(root)
+        return deduped
+
+    def _paper_reporting_contract_payload(self, roots: list[Path]) -> tuple[dict[str, Any], Path | None]:
         contract: dict[str, Any] = {}
-        contract_path: str | None = None
+        contract_path: Path | None = None
         for root in roots:
             candidate = root / "paper" / "medical_reporting_contract.json"
             if not candidate.exists():
@@ -1703,8 +1723,101 @@ class QuestService:
             payload = read_json(candidate, {})
             if isinstance(payload, dict) and payload:
                 contract = payload
-                contract_path = str(candidate)
+                contract_path = candidate
                 break
+        return contract, contract_path
+
+    def _managed_publication_eval_payload(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        roots = self._paper_context_roots(quest_root, workspace_root=workspace_root)
+        contract, contract_path = self._paper_reporting_contract_payload(roots)
+        study_root_raw = str(contract.get("study_root") or "").strip()
+        if not study_root_raw:
+            return {
+                "managed": False,
+                "status": "not_managed",
+                "clear": True,
+                "study_root": None,
+                "publication_eval_path": None,
+                "summary": None,
+                "overall_verdict": None,
+                "gap_summaries": [],
+                "recommended_action_types": [],
+                "requires_controller_decision": False,
+                "reporting_contract_path": str(contract_path) if contract_path is not None else None,
+            }
+
+        study_root = Path(study_root_raw).expanduser()
+        publication_eval_path = study_root / "artifacts" / "publication_eval" / "latest.json"
+        if not publication_eval_path.exists():
+            return {
+                "managed": True,
+                "status": "missing",
+                "clear": False,
+                "study_root": str(study_root),
+                "publication_eval_path": str(publication_eval_path),
+                "summary": "managed publication gate durable surface is missing",
+                "overall_verdict": None,
+                "gap_summaries": [],
+                "recommended_action_types": [],
+                "requires_controller_decision": True,
+                "reporting_contract_path": str(contract_path) if contract_path is not None else None,
+            }
+
+        payload = read_json(publication_eval_path, {})
+        if not isinstance(payload, dict) or not payload:
+            return {
+                "managed": True,
+                "status": "invalid",
+                "clear": False,
+                "study_root": str(study_root),
+                "publication_eval_path": str(publication_eval_path),
+                "summary": "managed publication gate durable surface is unreadable",
+                "overall_verdict": None,
+                "gap_summaries": [],
+                "recommended_action_types": [],
+                "requires_controller_decision": True,
+                "reporting_contract_path": str(contract_path) if contract_path is not None else None,
+            }
+
+        verdict = dict(payload.get("verdict") or {}) if isinstance(payload.get("verdict"), dict) else {}
+        overall_verdict = str(verdict.get("overall_verdict") or "").strip().lower() or None
+        summary = str(verdict.get("summary") or "").strip() or None
+        gap_summaries = [
+            str(item.get("summary") or "").strip()
+            for item in (payload.get("gaps") or [])
+            if isinstance(item, dict) and str(item.get("summary") or "").strip()
+        ]
+        recommended_actions = [
+            dict(item)
+            for item in (payload.get("recommended_actions") or [])
+            if isinstance(item, dict)
+        ]
+        status = "clear" if overall_verdict == "promising" else "blocked"
+        return {
+            "managed": True,
+            "status": status,
+            "clear": status == "clear",
+            "study_root": str(study_root),
+            "publication_eval_path": str(publication_eval_path),
+            "summary": summary,
+            "overall_verdict": overall_verdict,
+            "gap_summaries": gap_summaries,
+            "recommended_action_types": [
+                str(item.get("action_type") or "").strip()
+                for item in recommended_actions
+                if str(item.get("action_type") or "").strip()
+            ],
+            "requires_controller_decision": any(bool(item.get("requires_controller_decision")) for item in recommended_actions),
+            "reporting_contract_path": str(contract_path) if contract_path is not None else None,
+        }
+
+    def _paper_reference_gate_payload(self, roots: list[Path]) -> dict[str, Any]:
+        contract, contract_path = self._paper_reporting_contract_payload(roots)
 
         requirements: dict[str, Any] = {
             "minimum_bibliography_entries": 12,
@@ -1716,7 +1829,7 @@ class QuestService:
             "publication_profile": str(contract.get("publication_profile") or "").strip() or None,
             "manuscript_family": str(contract.get("manuscript_family") or "").strip() or None,
             "reporting_guideline_family": str(contract.get("reporting_guideline_family") or "").strip() or None,
-            "contract_path": contract_path,
+            "contract_path": str(contract_path) if contract_path is not None else None,
         }
         manuscript_family = str(contract.get("manuscript_family") or "").strip().lower()
         reporting_guideline = str(contract.get("reporting_guideline_family") or "").strip().lower()
@@ -2851,6 +2964,10 @@ class QuestService:
             if str((paper_contract or {}).get("workspace_root") or "").strip()
             else None
         )
+        managed_publication_gate = self._managed_publication_eval_payload(
+            quest_root,
+            workspace_root=workspace_root,
+        )
         reference_materialization = self._paper_reference_materialization_payload(
             quest_root,
             workspace_root=workspace_root,
@@ -2949,6 +3066,9 @@ class QuestService:
         ):
             recommended_next_stage = "write"
             recommended_action = "finish_proofing_and_submission_checks"
+        elif bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
+            recommended_next_stage = "write"
+            recommended_action = "resolve_publication_gate_blockers"
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
@@ -3010,10 +3130,23 @@ class QuestService:
                 "submission packaging checklist still has "
                 f"{submission_blocking_item_count} blocking item(s)"
             )
+        if bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
+            gate_detail = "; ".join(
+                str(item).strip()
+                for item in (managed_publication_gate.get("gap_summaries") or [])
+                if str(item).strip()
+            )
+            if not gate_detail:
+                gate_detail = str(managed_publication_gate.get("summary") or "").strip()
+            blocking_reasons.append(
+                "managed publication gate is not clear"
+                + (f": {gate_detail}" if gate_detail else "")
+            )
 
         finalize_ready = (
             writing_ready
             and submission_ready_for_delivery
+            and (not bool(managed_publication_gate.get("managed")) or bool(managed_publication_gate.get("clear")))
         )
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
@@ -3101,6 +3234,14 @@ class QuestService:
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
             "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
             "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
+            "managed_publication_gate_status": str(managed_publication_gate.get("status") or "").strip() or "not_managed",
+            "managed_publication_gate_clear": bool(managed_publication_gate.get("clear")),
+            "managed_publication_gate_summary": str(managed_publication_gate.get("summary") or "").strip() or None,
+            "managed_publication_gate_overall_verdict": (
+                str(managed_publication_gate.get("overall_verdict") or "").strip() or None
+            ),
+            "managed_publication_gate_gap_summaries": list(managed_publication_gate.get("gap_summaries") or []),
+            "managed_publication_eval_path": str(managed_publication_gate.get("publication_eval_path") or "").strip() or None,
             "completion_approval_ready": completion_approval_ready,
             "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
