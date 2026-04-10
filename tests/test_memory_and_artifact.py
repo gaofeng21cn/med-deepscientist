@@ -5253,6 +5253,99 @@ def test_complete_quest_marks_quest_completed_after_explicit_user_approval(temp_
     }
 
 
+def test_complete_quest_allows_legacy_string_false_need_research_paper(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("legacy string false completion", startup_contract={"need_research_paper": False})
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
+    quest_yaml["startup_contract"] = {"need_research_paper": "false"}
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest appears complete. May I end it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+        options=[
+            {"id": "approve", "label": "Approve", "description": "End the quest now."},
+            {"id": "continue", "label": "Continue", "description": "Keep working."},
+        ],
+    )
+
+    assert request["status"] == "ok"
+
+    quest_service.append_message(
+        quest["quest_id"],
+        role="user",
+        content="structured approval payload",
+        source="web-react",
+        reply_to_interaction_id=request["interaction_id"],
+        decision_response={
+            "decision_type": "quest_completion_approval",
+            "approved": True,
+        },
+    )
+
+    result = artifact.complete_quest(quest_root, summary="Algorithm-first quest finished cleanly.")
+
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+
+
+def test_complete_quest_keeps_already_completed_semantics_when_paper_gate_drifts(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("already completed stays completed", startup_contract={"need_research_paper": False})
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest appears complete. May I end it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+        options=[
+            {"id": "approve", "label": "Approve", "description": "End the quest now."},
+            {"id": "continue", "label": "Continue", "description": "Keep working."},
+        ],
+    )
+
+    quest_service.append_message(
+        quest["quest_id"],
+        role="user",
+        content="structured approval payload",
+        source="web-react",
+        reply_to_interaction_id=request["interaction_id"],
+        decision_response={
+            "decision_type": "quest_completion_approval",
+            "approved": True,
+        },
+    )
+
+    completed = artifact.complete_quest(quest_root, summary="Quest completed once.")
+    assert completed["status"] == "completed"
+
+    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
+    quest_yaml["startup_contract"] = {"need_research_paper": True}
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+
+    second = artifact.complete_quest(quest_root, summary="Quest completion should remain idempotent.")
+
+    assert second["ok"] is True
+    assert second["status"] == "already_completed"
+
+
 def test_threaded_progress_auto_links_user_reply_without_waiting(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

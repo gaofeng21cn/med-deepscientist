@@ -46,6 +46,7 @@ from ..shared import (
 from ..quest import QuestService
 from ..memory.frontmatter import dump_markdown_document, load_markdown_document
 from ..prompts.builder import CONTINUATION_SKILLS
+from ..startup_contract import startup_contract_need_research_paper
 from .arxiv import fetch_arxiv_metadata, read_arxiv_content
 from .charts import render_main_experiment_metric_timeline_chart
 from .guidance import build_guidance_for_record, guidance_summary
@@ -8325,8 +8326,7 @@ class ArtifactService:
             if isinstance(quest_data.get("startup_contract"), dict)
             else {}
         )
-        raw_need_research_paper = startup_contract.get("need_research_paper")
-        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
+        need_research_paper = startup_contract_need_research_paper(startup_contract)
         breakthrough = bool(progress_eval.get("breakthrough"))
         beats_baseline = progress_eval.get("beats_baseline")
 
@@ -8384,8 +8384,7 @@ class ArtifactService:
 
     def _post_baseline_anchor(self, quest_root: Path) -> str:
         startup_contract = self._startup_contract(quest_root)
-        raw_need_research_paper = startup_contract.get("need_research_paper")
-        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
+        need_research_paper = startup_contract_need_research_paper(startup_contract)
         return "idea" if need_research_paper else "optimize"
 
     def _decision_policy(self, quest_root: Path) -> str:
@@ -10692,8 +10691,7 @@ class ArtifactService:
         )
         restored_idea_id = self._latest_branch_idea_id(quest_root, parent_branch) or str(manifest.get("active_idea_id") or "").strip() or None
         startup_contract = self._startup_contract(quest_root)
-        raw_need_research_paper = startup_contract.get("need_research_paper")
-        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
+        need_research_paper = startup_contract_need_research_paper(startup_contract)
         base_research_state = self.quest_service.update_research_state(
             quest_root,
             active_idea_id=restored_idea_id,
@@ -11385,7 +11383,7 @@ class ArtifactService:
                 if isinstance(snapshot.get("paper_contract_health"), dict)
                 else {}
             )
-            needs_research_paper = bool(startup_contract.get("need_research_paper", True))
+            needs_research_paper = startup_contract_need_research_paper(startup_contract)
             if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
                 blocking_reasons = [
                     str(item).strip()
@@ -11752,6 +11750,14 @@ class ArtifactService:
         summary: str = "",
     ) -> dict[str, Any]:
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+        if str(snapshot.get("status") or "") == "completed":
+            return {
+                "ok": True,
+                "status": "already_completed",
+                "quest_id": snapshot.get("quest_id"),
+                "message": "Quest is already marked as completed.",
+                "snapshot": snapshot,
+            }
         startup_contract = (
             dict(snapshot.get("startup_contract") or {})
             if isinstance(snapshot.get("startup_contract"), dict)
@@ -11762,7 +11768,7 @@ class ArtifactService:
             if isinstance(snapshot.get("paper_contract_health"), dict)
             else {}
         )
-        needs_research_paper = bool(startup_contract.get("need_research_paper", True))
+        needs_research_paper = startup_contract_need_research_paper(startup_contract)
         if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
             blocking_reasons = [
                 str(item).strip()
@@ -11792,14 +11798,6 @@ class ArtifactService:
                 "quest_id": snapshot.get("quest_id"),
                 "message": guidance,
                 "blocking_reasons": blocking_reasons,
-            }
-        if str(snapshot.get("status") or "") == "completed":
-            return {
-                "ok": True,
-                "status": "already_completed",
-                "quest_id": snapshot.get("quest_id"),
-                "message": "Quest is already marked as completed.",
-                "snapshot": snapshot,
             }
 
         completion_request = self._latest_completion_request(quest_root)

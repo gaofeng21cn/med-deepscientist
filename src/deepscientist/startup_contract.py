@@ -98,6 +98,25 @@ def runtime_owned_startup_contract(
     return {key: normalized[key] for key in RUNTIME_OWNED_STARTUP_CONTRACT_KEYS if key in normalized}
 
 
+def startup_contract_need_research_paper(
+    startup_contract: dict[str, Any] | None,
+    *,
+    default: bool = True,
+) -> bool:
+    if not isinstance(startup_contract, dict):
+        return default
+    value = startup_contract.get("need_research_paper")
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    return default
+
+
 def startup_contract_extensions(
     startup_contract: dict[str, Any] | None,
 ) -> dict[str, Any]:
