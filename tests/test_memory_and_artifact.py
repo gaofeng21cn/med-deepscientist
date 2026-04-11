@@ -433,6 +433,119 @@ def test_record_main_experiment_strict_rejects_missing_required_baseline_metric(
     assert exc.details["extra_metric_ids"] == []
 
 
+def test_record_main_experiment_strict_skips_contract_only_attachment_when_baseline_waived(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("waived baseline main experiment quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    imported_root = quest_root / "baselines" / "imported" / "baseline-contract-only"
+    imported_root.mkdir(parents=True, exist_ok=True)
+    write_yaml(
+        imported_root / "attachment.yaml",
+        {
+            "attached_at": "2026-04-10T00:00:00Z",
+            "source_baseline_id": "baseline-contract-only",
+            "source_variant_id": "primary-contract",
+            "entry": {
+                "baseline_id": "baseline-contract-only",
+                "path": str(imported_root),
+                "summary": "Contract-only imported baseline reference.",
+                "metric_contract": {
+                    "primary_metric_id": "transportability_outputs_ready",
+                    "metrics": [
+                        {
+                            "metric_id": "shared_predictor_surface_contract_ready",
+                            "direction": "maximize",
+                            "label": "Shared surface ready",
+                        },
+                        {
+                            "metric_id": "transportability_outputs_ready",
+                            "direction": "maximize",
+                            "label": "Transportability outputs ready",
+                        },
+                    ],
+                },
+                "metrics_summary": {
+                    "shared_predictor_surface_contract_ready": 1.0,
+                    "transportability_outputs_ready": 0.0,
+                },
+                "primary_metric": {
+                    "metric_id": "transportability_outputs_ready",
+                    "value": 0.0,
+                    "direction": "maximize",
+                },
+            },
+            "selected_variant": {},
+            "confirmation": {},
+        },
+    )
+
+    artifact.waive_baseline(
+        quest_root,
+        reason="Only a contract-only imported reference exists; no numeric comparator is confirmed yet.",
+    )
+    artifact.submit_idea(
+        quest_root,
+        mode="create",
+        title="Waived baseline line",
+        problem="Need to record a real main experiment even when the baseline gate was waived.",
+        hypothesis="The main run should still be recorded honestly without pretending the contract-only attachment is a comparator.",
+        mechanism="Skip strict baseline comparison when no confirmed baseline JSON exists under a waiver.",
+        decision_reason="Launch the waived-baseline main run path.",
+        next_target="experiment",
+    )
+
+    result = artifact.record_main_experiment(
+        quest_root,
+        run_id="waived-main-001",
+        title="Waived baseline main run",
+        hypothesis="The real transportability run should still be recorded.",
+        setup="Use the frozen transportability surface.",
+        execution="Ran the first reviewer-facing main experiment.",
+        results="The run produced real discrimination and calibration outputs.",
+        conclusion="Record the run without fabricating a confirmed comparator.",
+        metric_rows=[
+            {"metric_id": "china_c_index", "value": 0.76, "scope_id": "full"},
+            {"metric_id": "nhanes_c_index", "value": 0.565, "scope_id": "full"},
+        ],
+        metric_contract={
+            "primary_metric_id": "nhanes_c_index",
+            "metrics": [
+                {"metric_id": "china_c_index", "direction": "maximize", "label": "China c-index"},
+                {"metric_id": "nhanes_c_index", "direction": "maximize", "label": "NHANES c-index"},
+            ],
+        },
+        strict_metric_contract=True,
+        evaluation_summary={
+            "takeaway": "The run is recordable even without a confirmed comparator.",
+            "claim_update": "mixed",
+            "baseline_relation": "not_applicable",
+            "comparability": "waived_baseline",
+            "failure_mode": "none",
+            "next_action": "analysis_campaign",
+        },
+    )
+
+    payload = read_json(Path(result["result_json_path"]), {})
+    assert payload["metric_validation"] == {
+        "status": "skipped",
+        "reason": "baseline_gate_waived_without_confirmed_metric_contract",
+        "validation_stage": "main_experiment",
+        "baseline_gate": "waived",
+        "baseline_metric_ids": [],
+        "baseline_metric_details": [],
+    }
+    assert payload["baseline_ref"]["baseline_id"] == "baseline-contract-only"
+    assert payload["baseline_ref"]["metric_contract_json_rel_path"] is None
+    assert payload["baseline_ref"]["metric_lines"] == []
+    assert payload["baseline_comparisons"]["items"] == []
+    assert payload["baseline_comparisons"]["summary"]["comparable_metric_ids"] == []
+    assert payload["metric_contract"]["primary_metric_id"] == "nhanes_c_index"
+
+
 class _FakeHeaders:
     def __init__(self, charset: str = "utf-8") -> None:
         self._charset = charset
@@ -1573,10 +1686,11 @@ def test_select_paper_outline_syncs_status_and_summary_into_paper_workspace_and_
     quest_status = (quest_root / "status.md").read_text(encoding="utf-8")
     quest_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
 
-    assert "Paper Line Status" in workspace_status
+    assert "Paper Line Local Recommendation" in workspace_status
     assert "Sync Outline" in workspace_status
     assert "Reference Materialization" in workspace_status
     assert "materialize_reference_materials" in workspace_status
+    assert "- Recommendation Scope: `paper_line_local_only`" in workspace_status
     assert "Paper Line Summary" in workspace_summary
     assert "Sync Outline" in workspace_summary
     assert "Quest created. Waiting for baseline setup or reuse." not in workspace_status
@@ -4618,7 +4732,7 @@ def test_artifact_interact_allows_completion_approval_in_autonomous_mode(temp_ho
     quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
     quest = quest_service.create(
         "autonomous completion approval quest",
-        startup_contract={"decision_policy": "autonomous", "need_research_paper": False},
+        startup_contract={"decision_policy": "autonomous"},
     )
     quest_root = Path(quest["quest_root"])
     artifact = ArtifactService(temp_home)
@@ -4698,135 +4812,6 @@ def test_artifact_interact_blocks_completion_approval_for_incomplete_paper_final
     assert request["reply_mode"] == "none"
     assert request["interaction_id"] is None
     assert "skeptical review outputs are missing" in str(request["guidance"])
-    snapshot_after = quest_service.snapshot(quest["quest_id"])
-    assert snapshot_after["status"] != "waiting_for_user"
-    assert not snapshot_after["pending_decisions"]
-
-
-def test_artifact_interact_blocks_completion_approval_when_managed_publication_eval_is_blocked(
-    temp_home: Path,
-) -> None:
-    ensure_home_layout(temp_home)
-    ConfigManager(temp_home).ensure_files()
-    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create(
-        "autonomous managed publication gate blocked quest",
-        startup_contract={"decision_policy": "autonomous"},
-    )
-    quest_root = Path(quest["quest_root"])
-    study_root = temp_home / "studies" / "001-risk"
-    artifact = ArtifactService(temp_home)
-
-    write_json(
-        study_root / "artifacts" / "publication_eval" / "latest.json",
-        {
-            "schema_version": 1,
-            "study_id": "001-risk",
-            "quest_id": quest["quest_id"],
-            "verdict": {
-                "overall_verdict": "blocked",
-                "primary_claim_status": "partial",
-                "summary": "publication gate still blocks completion",
-                "stop_loss_pressure": "watch",
-            },
-            "gaps": [
-                {
-                    "gap_id": "gap-001",
-                    "gap_type": "reporting",
-                    "severity": "must_fix",
-                    "summary": "forbidden_manuscript_terminology",
-                }
-            ],
-            "recommended_actions": [
-                {
-                    "action_id": "action-001",
-                    "action_type": "return_to_controller",
-                    "priority": "now",
-                    "reason": "publication gate still blocks completion",
-                    "requires_controller_decision": True,
-                }
-            ],
-        },
-    )
-
-    paper_root = quest_root / "paper"
-    paper_root.mkdir(parents=True, exist_ok=True)
-    write_json(
-        paper_root / "selected_outline.json",
-        {
-            "outline_id": "outline-001",
-            "title": "Managed Gate Outline",
-            "sections": [],
-        },
-    )
-    write_json(
-        paper_root / "paper_line_state.json",
-        {
-            "paper_line_id": "paper-line-managed-gate",
-            "paper_branch": "paper/managed-gate",
-            "selected_outline_ref": "outline-001",
-            "title": "Managed Gate Outline",
-            "draft_status": "present",
-            "bundle_status": "present",
-            "updated_at": "2026-04-10T00:00:00Z",
-        },
-    )
-    write_json(
-        paper_root / "paper_bundle_manifest.json",
-        {
-            "paper_branch": "paper/managed-gate",
-            "selected_outline_ref": "outline-001",
-            "status": "ready_for_submission",
-        },
-    )
-    write_json(
-        paper_root / "medical_reporting_contract.json",
-        {
-            "status": "resolved",
-            "study_root": str(study_root),
-            "publication_profile": "general_medical_journal",
-            "manuscript_family": "prediction_model",
-            "reporting_guideline_family": "TRIPOD",
-        },
-    )
-    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
-    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
-    _write_citation_rich_draft(paper_root)
-    _materialize_reference_materials(quest_root, paper_root)
-    review_root = paper_root / "review"
-    review_root.mkdir(parents=True, exist_ok=True)
-    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
-    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
-    write_json(
-        review_root / "submission_checklist.json",
-        {
-            "status": "ready_for_submission",
-            "blocking_items": [],
-        },
-    )
-    proofing_root = paper_root / "proofing"
-    proofing_root.mkdir(parents=True, exist_ok=True)
-    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nReady.\n", encoding="utf-8")
-    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
-    (paper_root / "final_claim_ledger.md").write_text("# Final Claim Ledger\n\nAll claims closed.\n", encoding="utf-8")
-    handoff_root = quest_root / "handoffs"
-    handoff_root.mkdir(parents=True, exist_ok=True)
-    (handoff_root / "finalize_resume_packet.md").write_text("# Finalize Resume Packet\n\nReady.\n", encoding="utf-8")
-
-    request = artifact.interact(
-        quest_root,
-        kind="decision_request",
-        message="The quest appears complete. May I end it now?",
-        deliver_to_bound_conversations=False,
-        include_recent_inbound_messages=False,
-        reply_mode="blocking",
-        reply_schema={"decision_type": "quest_completion_approval"},
-    )
-
-    assert request["status"] == "completion_gate_blocked"
-    assert request["reply_mode"] == "none"
-    assert request["interaction_id"] is None
-    assert "forbidden_manuscript_terminology" in str(request["guidance"])
     snapshot_after = quest_service.snapshot(quest["quest_id"])
     assert snapshot_after["status"] != "waiting_for_user"
     assert not snapshot_after["pending_decisions"]
@@ -4965,6 +4950,99 @@ def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp
     assert second["status"] == "semantically_equivalent"
     assert "Bibliography Entries: `21`" in (quest_root / "status.md").read_text(encoding="utf-8")
     assert "Bibliography entries: `21`" in (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+
+def test_decision_record_updates_active_anchor_from_next_stage(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("decision anchor sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    quest_service.update_settings(quest["quest_id"], active_anchor="finalize")
+
+    recorded = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "good",
+            "action": "write",
+            "next_stage": "write",
+            "reason": "Continue with manuscript-facing maintenance instead of staying parked on finalize.",
+            "summary": "Route returns to write/review.",
+        },
+    )
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    assert recorded["ok"] is True
+    assert snapshot["continuation_anchor"] == "write"
+    assert snapshot["active_anchor"] == "write"
+
+
+def test_quest_service_accepts_companion_skill_active_anchor(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("companion anchor quest")
+    quest_root = Path(quest["quest_root"])
+
+    snapshot = quest_service.update_settings(quest["quest_id"], active_anchor="review")
+    assert snapshot["active_anchor"] == "review"
+
+    baseline_snapshot = quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+        active_anchor="rebuttal",
+    )
+    assert baseline_snapshot["active_anchor"] == "rebuttal"
+    assert quest_service.snapshot(quest["quest_id"])["active_anchor"] == "rebuttal"
+
+
+def test_render_paper_line_status_uses_local_recommendation_headline_for_local_scope(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    artifact = ArtifactService(temp_home)
+
+    status_text = artifact._render_paper_line_status_markdown(
+        {
+            "recommended_next_stage": "finalize",
+            "recommended_action": "finalize_paper_line",
+            "paper_branch": "paper/main",
+            "updated_at": "2026-04-10T13:31:12+00:00",
+            "paper_line_id": "paper-main-outline-001-run",
+            "title": "Route Sync Outline",
+            "selected_outline_ref": "outline-001",
+            "contract_ok": True,
+            "reference_materialization_ready": True,
+            "writing_ready": True,
+            "audit_package_ready": True,
+            "finalize_ready": True,
+            "draft_status": "present",
+            "bundle_status": "present",
+            "ready_required_count": 15,
+            "required_count": 15,
+            "ready_section_count": 7,
+            "section_count": 7,
+            "open_supplementary_count": 0,
+            "bibliography_entry_count": 32,
+            "literature_record_count": 32,
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "blocking_reasons": [],
+        }
+    )
+
+    assert "Paper Line Local Recommendation: `finalize` / `finalize_paper_line` on `paper/main`." in status_text
+    assert "Paper Line Status:" not in status_text
+    assert "- Recommendation Scope: `paper_line_local_only`" in status_text
+    assert "- Global Stage Authority: `publication_gate`" in status_text
+    assert (
+        "- Global Stage Rule: `paper-line recommendations are subordinate until publication gate allows write`"
+        in status_text
+    )
 
 
 def test_read_quest_documents_accepts_single_string_without_comma_splitting(temp_home: Path) -> None:
@@ -5171,7 +5249,7 @@ def test_complete_quest_requires_explicit_user_approval(temp_home: Path) -> None
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create("completion approval required", startup_contract={"need_research_paper": False})
+    quest = quest_service.create("completion approval required")
     quest_root = Path(quest["quest_root"])
     artifact = ArtifactService(temp_home)
 
@@ -5209,7 +5287,7 @@ def test_complete_quest_marks_quest_completed_after_explicit_user_approval(temp_
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create("completion approved", startup_contract={"need_research_paper": False})
+    quest = quest_service.create("completion approved")
     quest_root = Path(quest["quest_root"])
     artifact = ArtifactService(temp_home)
 
@@ -5251,99 +5329,6 @@ def test_complete_quest_marks_quest_completed_after_explicit_user_approval(temp_
         "decision_type": "quest_completion_approval",
         "approved": True,
     }
-
-
-def test_complete_quest_allows_legacy_string_false_need_research_paper(temp_home: Path) -> None:
-    ensure_home_layout(temp_home)
-    ConfigManager(temp_home).ensure_files()
-    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create("legacy string false completion", startup_contract={"need_research_paper": False})
-    quest_root = Path(quest["quest_root"])
-    artifact = ArtifactService(temp_home)
-
-    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
-    quest_yaml["startup_contract"] = {"need_research_paper": "false"}
-    write_yaml(quest_root / "quest.yaml", quest_yaml)
-
-    request = artifact.interact(
-        quest_root,
-        kind="decision_request",
-        message="The quest appears complete. May I end it now?",
-        deliver_to_bound_conversations=False,
-        include_recent_inbound_messages=False,
-        reply_mode="blocking",
-        reply_schema={"decision_type": "quest_completion_approval"},
-        options=[
-            {"id": "approve", "label": "Approve", "description": "End the quest now."},
-            {"id": "continue", "label": "Continue", "description": "Keep working."},
-        ],
-    )
-
-    assert request["status"] == "ok"
-
-    quest_service.append_message(
-        quest["quest_id"],
-        role="user",
-        content="structured approval payload",
-        source="web-react",
-        reply_to_interaction_id=request["interaction_id"],
-        decision_response={
-            "decision_type": "quest_completion_approval",
-            "approved": True,
-        },
-    )
-
-    result = artifact.complete_quest(quest_root, summary="Algorithm-first quest finished cleanly.")
-
-    assert result["ok"] is True
-    assert result["status"] == "completed"
-
-
-def test_complete_quest_keeps_already_completed_semantics_when_paper_gate_drifts(temp_home: Path) -> None:
-    ensure_home_layout(temp_home)
-    ConfigManager(temp_home).ensure_files()
-    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    quest = quest_service.create("already completed stays completed", startup_contract={"need_research_paper": False})
-    quest_root = Path(quest["quest_root"])
-    artifact = ArtifactService(temp_home)
-
-    request = artifact.interact(
-        quest_root,
-        kind="decision_request",
-        message="The quest appears complete. May I end it now?",
-        deliver_to_bound_conversations=False,
-        include_recent_inbound_messages=False,
-        reply_mode="blocking",
-        reply_schema={"decision_type": "quest_completion_approval"},
-        options=[
-            {"id": "approve", "label": "Approve", "description": "End the quest now."},
-            {"id": "continue", "label": "Continue", "description": "Keep working."},
-        ],
-    )
-
-    quest_service.append_message(
-        quest["quest_id"],
-        role="user",
-        content="structured approval payload",
-        source="web-react",
-        reply_to_interaction_id=request["interaction_id"],
-        decision_response={
-            "decision_type": "quest_completion_approval",
-            "approved": True,
-        },
-    )
-
-    completed = artifact.complete_quest(quest_root, summary="Quest completed once.")
-    assert completed["status"] == "completed"
-
-    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
-    quest_yaml["startup_contract"] = {"need_research_paper": True}
-    write_yaml(quest_root / "quest.yaml", quest_yaml)
-
-    second = artifact.complete_quest(quest_root, summary="Quest completion should remain idempotent.")
-
-    assert second["ok"] is True
-    assert second["status"] == "already_completed"
 
 
 def test_threaded_progress_auto_links_user_reply_without_waiting(temp_home: Path) -> None:

@@ -46,7 +46,6 @@ from ..shared import (
 from ..quest import QuestService
 from ..memory.frontmatter import dump_markdown_document, load_markdown_document
 from ..prompts.builder import CONTINUATION_SKILLS
-from ..startup_contract import startup_contract_need_research_paper
 from .arxiv import fetch_arxiv_metadata, read_arxiv_content
 from .charts import render_main_experiment_metric_timeline_chart
 from .guidance import build_guidance_for_record, guidance_summary
@@ -3910,10 +3909,6 @@ class ArtifactService:
             quest_root,
             workspace_root=workspace_root,
         )
-        managed_publication_gate = self.quest_service._managed_publication_eval_payload(
-            quest_root,
-            workspace_root=workspace_root,
-        )
         citation_usage = self.quest_service._paper_citation_usage_payload(
             quest_root,
             workspace_root=workspace_root,
@@ -3988,18 +3983,6 @@ class ArtifactService:
                 "submission packaging checklist still has "
                 f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
             )
-        if bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
-            gate_detail = "; ".join(
-                str(item).strip()
-                for item in (managed_publication_gate.get("gap_summaries") or [])
-                if str(item).strip()
-            )
-            if not gate_detail:
-                gate_detail = str(managed_publication_gate.get("summary") or "").strip()
-            blocking_reasons.append(
-                "managed publication gate is not clear"
-                + (f": {gate_detail}" if gate_detail else "")
-            )
 
         if unmapped_completed_items:
             recommended_next_stage = "write"
@@ -4029,9 +4012,6 @@ class ArtifactService:
         ):
             recommended_next_stage = "write"
             recommended_action = "finish_proofing_and_submission_checks"
-        elif bool(managed_publication_gate.get("managed")) and not bool(managed_publication_gate.get("clear")):
-            recommended_next_stage = "write"
-            recommended_action = "resolve_publication_gate_blockers"
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
@@ -4070,11 +4050,7 @@ class ArtifactService:
             delivery_state = "delivered"
             closure_state = "delivered_continue_research" if "continue" in overall_status else "delivered_parked"
             keep_bundle_fixed_by_default = True
-        finalize_ready = (
-            writing_ready
-            and submission_ready_for_delivery
-            and (not bool(managed_publication_gate.get("managed")) or bool(managed_publication_gate.get("clear")))
-        )
+        finalize_ready = writing_ready and submission_ready_for_delivery
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
             completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
@@ -4143,14 +4119,6 @@ class ArtifactService:
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
             "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
             "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
-            "managed_publication_gate_status": str(managed_publication_gate.get("status") or "").strip() or "not_managed",
-            "managed_publication_gate_clear": bool(managed_publication_gate.get("clear")),
-            "managed_publication_gate_summary": str(managed_publication_gate.get("summary") or "").strip() or None,
-            "managed_publication_gate_overall_verdict": (
-                str(managed_publication_gate.get("overall_verdict") or "").strip() or None
-            ),
-            "managed_publication_gate_gap_summaries": list(managed_publication_gate.get("gap_summaries") or []),
-            "managed_publication_eval_path": str(managed_publication_gate.get("publication_eval_path") or "").strip() or None,
             "completion_approval_ready": completion_approval_ready,
             "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
@@ -4169,11 +4137,17 @@ class ArtifactService:
 
     def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
+        headline_label = (
+            "Paper Line Local Recommendation"
+            if recommendation_scope == "paper_line_local_only"
+            else "Paper Line Status"
+        )
         lines = [
             "# Status",
             "",
             (
-                "Paper Line Status: "
+                f"{headline_label}: "
                 f"`{str(payload.get('recommended_next_stage') or 'write').strip() or 'write'}` / "
                 f"`{str(payload.get('recommended_action') or 'continue').strip() or 'continue'}` on "
                 f"`{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`."
@@ -4198,8 +4172,9 @@ class ArtifactService:
             f"- Literature Records: `{int(payload.get('literature_record_count') or 0)}`",
             f"- Recommended Next Stage: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}`",
             f"- Recommended Action: `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
-            f"- Recommendation Scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
+            f"- Recommendation Scope: `{recommendation_scope}`",
             f"- Global Stage Authority: `{str(payload.get('global_stage_authority') or 'none').strip() or 'none'}`",
+            f"- Global Stage Rule: `{str(payload.get('global_stage_rule') or 'none').strip() or 'none'}`",
             "",
             "## Blocking Reasons",
             "",
@@ -7068,6 +7043,10 @@ class ArtifactService:
         )
         self._touch_quest_updated_at(quest_root)
         if decision_continuation_anchor is not None:
+            self.quest_service.update_settings(
+                self._quest_id(quest_root),
+                active_anchor=decision_continuation_anchor,
+            )
             self.quest_service.update_runtime_state(
                 quest_root=quest_root,
                 continuation_policy="auto",
@@ -8326,7 +8305,8 @@ class ArtifactService:
             if isinstance(quest_data.get("startup_contract"), dict)
             else {}
         )
-        need_research_paper = startup_contract_need_research_paper(startup_contract)
+        raw_need_research_paper = startup_contract.get("need_research_paper")
+        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
         breakthrough = bool(progress_eval.get("breakthrough"))
         beats_baseline = progress_eval.get("beats_baseline")
 
@@ -8384,7 +8364,8 @@ class ArtifactService:
 
     def _post_baseline_anchor(self, quest_root: Path) -> str:
         startup_contract = self._startup_contract(quest_root)
-        need_research_paper = startup_contract_need_research_paper(startup_contract)
+        raw_need_research_paper = startup_contract.get("need_research_paper")
+        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
         return "idea" if need_research_paper else "optimize"
 
     def _decision_policy(self, quest_root: Path) -> str:
@@ -8421,6 +8402,7 @@ class ArtifactService:
     ) -> dict[str, Any]:
         self._require_baseline_gate_open(quest_root, action="record_main_experiment")
         state = self.quest_service.read_research_state(quest_root)
+        quest_data = self.quest_service.read_quest_yaml(quest_root)
         workspace_mode = str(state.get("workspace_mode") or "").strip()
         if workspace_mode == "analysis":
             raise ValueError(
@@ -8480,6 +8462,10 @@ class ArtifactService:
                 for item in normalized_metric_rows
                 if str(item.get("metric_id") or "").strip()
             }
+        baseline_gate = str(
+            quest_data.get("baseline_gate") or state.get("baseline_gate") or ""
+        ).strip().lower()
+        waived_without_confirmed_baseline = baseline_gate == "waived" and not metric_contract_json_rel_path
         baseline_contract_payload = self._load_metric_contract_payload(quest_root, metric_contract_json_rel_path)
         baseline_metric_contract = baseline_entry.get("metric_contract")
         baseline_primary_metric = baseline_entry.get("primary_metric")
@@ -8490,6 +8476,9 @@ class ArtifactService:
             payload_primary_metric = baseline_contract_payload.get("primary_metric")
             if isinstance(payload_primary_metric, dict) and payload_primary_metric:
                 baseline_primary_metric = payload_primary_metric
+        if waived_without_confirmed_baseline:
+            baseline_metric_contract = None
+            baseline_primary_metric = None
         effective_metric_contract = (
             self._merge_run_metric_contract(
                 baseline_metric_contract=baseline_metric_contract,
@@ -8512,20 +8501,58 @@ class ArtifactService:
         )
         metric_validation: dict[str, Any] | None = None
         if strict_metric_contract:
-            metric_validation = validate_main_experiment_against_baseline_contract(
-                baseline_contract_payload=baseline_contract_payload,
-                run_metric_contract=effective_metric_contract,
-                metric_rows=normalized_metric_rows,
-                metrics_summary=normalized_metrics_summary,
-                dataset_scope=dataset_scope,
-            )
-        baseline_metrics = selected_baseline_metrics(baseline_entry, resolved_variant_id)
+            if waived_without_confirmed_baseline:
+                metric_validation = {
+                    "status": "skipped",
+                    "reason": "baseline_gate_waived_without_confirmed_metric_contract",
+                    "validation_stage": "main_experiment",
+                    "baseline_gate": "waived",
+                    "baseline_metric_ids": [],
+                    "baseline_metric_details": [],
+                }
+            else:
+                metric_validation = validate_main_experiment_against_baseline_contract(
+                    baseline_contract_payload=baseline_contract_payload,
+                    run_metric_contract=effective_metric_contract,
+                    metric_rows=normalized_metric_rows,
+                    metrics_summary=normalized_metrics_summary,
+                    dataset_scope=dataset_scope,
+                )
+        baseline_metrics = (
+            {}
+            if waived_without_confirmed_baseline
+            else selected_baseline_metrics(baseline_entry, resolved_variant_id)
+        )
+        baseline_metric_lines_payload = (
+            [] if waived_without_confirmed_baseline else baseline_metric_lines(baseline_entry, resolved_variant_id)
+        )
         comparisons = compare_with_baseline(
             metrics_summary=normalized_metrics_summary,
             metric_rows=normalized_metric_rows,
             metric_contract=effective_metric_contract,
             baseline_metrics=baseline_metrics,
         )
+        if waived_without_confirmed_baseline:
+            primary_metric_id = (
+                str(comparisons.get("primary_metric_id") or "").strip()
+                if isinstance(comparisons, dict)
+                else ""
+            ) or None
+            primary_item = (
+                dict(comparisons.get("primary") or {})
+                if isinstance(comparisons, dict) and isinstance(comparisons.get("primary"), dict)
+                else None
+            )
+            comparisons = {
+                "primary_metric_id": primary_metric_id,
+                "items": [],
+                "summary": {
+                    "comparable_metric_ids": [],
+                    "improved_metric_ids": [],
+                    "regressed_metric_ids": [],
+                },
+                "primary": primary_item,
+            }
         previous_primary_best = self._previous_primary_best(
             quest_root,
             primary_metric_id=comparisons.get("primary_metric_id"),
@@ -8689,7 +8716,7 @@ class ArtifactService:
                 "variant_id": resolved_variant_id,
                 "metric_contract_json_rel_path": metric_contract_json_rel_path,
                 "metric_contract": effective_metric_contract,
-                "metric_lines": baseline_metric_lines(baseline_entry, resolved_variant_id),
+                "metric_lines": baseline_metric_lines_payload,
             },
             "run_context": {
                 "dataset_scope": normalized_dataset_scope,
@@ -10691,7 +10718,8 @@ class ArtifactService:
         )
         restored_idea_id = self._latest_branch_idea_id(quest_root, parent_branch) or str(manifest.get("active_idea_id") or "").strip() or None
         startup_contract = self._startup_contract(quest_root)
-        need_research_paper = startup_contract_need_research_paper(startup_contract)
+        raw_need_research_paper = startup_contract.get("need_research_paper")
+        need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
         base_research_state = self.quest_service.update_research_state(
             quest_root,
             active_idea_id=restored_idea_id,
@@ -11373,18 +11401,23 @@ class ArtifactService:
         decision_type = self._interaction_decision_type({"reply_schema": reply_schema_resolved})
         if kind == "decision_request" and decision_type == QUEST_COMPLETION_DECISION_TYPE:
             snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
-            startup_contract = (
-                dict(snapshot.get("startup_contract") or {})
-                if isinstance(snapshot.get("startup_contract"), dict)
-                else {}
-            )
             paper_health = (
                 dict(snapshot.get("paper_contract_health") or {})
                 if isinstance(snapshot.get("paper_contract_health"), dict)
                 else {}
             )
-            needs_research_paper = startup_contract_need_research_paper(startup_contract)
-            if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
+            paper_gate_enforced = any(
+                bool(paper_health.get(key))
+                for key in (
+                    "selected_outline_ref",
+                    "bundle_present",
+                    "draft_available",
+                    "review_outputs_ready",
+                    "proofing_outputs_ready",
+                    "submission_checklist_ready",
+                )
+            )
+            if paper_gate_enforced and not bool(paper_health.get("completion_approval_ready")):
                 blocking_reasons = [
                     str(item).strip()
                     for item in (
@@ -11757,47 +11790,6 @@ class ArtifactService:
                 "quest_id": snapshot.get("quest_id"),
                 "message": "Quest is already marked as completed.",
                 "snapshot": snapshot,
-            }
-        startup_contract = (
-            dict(snapshot.get("startup_contract") or {})
-            if isinstance(snapshot.get("startup_contract"), dict)
-            else {}
-        )
-        paper_health = (
-            dict(snapshot.get("paper_contract_health") or {})
-            if isinstance(snapshot.get("paper_contract_health"), dict)
-            else {}
-        )
-        needs_research_paper = startup_contract_need_research_paper(startup_contract)
-        if needs_research_paper and not bool(paper_health.get("completion_approval_ready")):
-            blocking_reasons = [
-                str(item).strip()
-                for item in (
-                    paper_health.get("completion_blocking_reasons")
-                    or paper_health.get("blocking_reasons")
-                    or []
-                )
-                if str(item).strip()
-            ]
-            guidance = self.quest_service.localized_copy(
-                quest_root=quest_root,
-                zh=(
-                    "paper line 还没到可以完成 quest 的状态。"
-                    + (f" 当前阻塞：{'; '.join(blocking_reasons[:4])}。" if blocking_reasons else "")
-                    + " 请先清完 publication gate 与 finalize blocker，再重新申请结题。"
-                ),
-                en=(
-                    "The paper line is not yet ready to complete the quest."
-                    + (f" Current blockers: {'; '.join(blocking_reasons[:4])}." if blocking_reasons else "")
-                    + " Clear the publication gate and finalize blockers before trying to complete the quest again."
-                ),
-            )
-            return {
-                "ok": False,
-                "status": "completion_gate_blocked",
-                "quest_id": snapshot.get("quest_id"),
-                "message": guidance,
-                "blocking_reasons": blocking_reasons,
             }
 
         completion_request = self._latest_completion_request(quest_root)
