@@ -669,6 +669,12 @@ class DaemonApp:
             recent_attempts=recent_attempts,
             cooldown_minutes=int(_CRASH_AUTO_RESUME_COOLDOWN.total_seconds() // 60),
         )
+        self.quest_service.emit_runtime_event(
+            quest_root=self.quest_service._quest_root(quest_id),
+            event_source="daemon_runtime_recovery",
+            event_kind="runtime_auto_resume_suppressed",
+            summary=summary,
+        )
         self.quest_service.append_message(
             quest_id,
             role="assistant",
@@ -1629,7 +1635,13 @@ class DaemonApp:
             completed_at=completed_at or None,
             exit_code=exit_code if isinstance(exit_code, int) else None,
         )
-        return self.quest_service.mark_turn_finished(quest_id, status=normalized_status)
+        return self.quest_service.mark_turn_finished(
+            quest_id,
+            status=normalized_status,
+            event_source="daemon_runtime_reconcile",
+            event_kind="runtime_stale_turn_reconciled",
+            event_summary=summary,
+        )
 
     def control_quest(self, quest_id: str, *, action: str, source: str = "local") -> dict:
         normalized_action = str(action or "").strip().lower()
@@ -1695,7 +1707,16 @@ class DaemonApp:
                 source=source,
             )
         stop_reason = self._control_stop_reason(action=action, source=source)
-        snapshot = self.quest_service.mark_turn_finished(quest_id, status=status, stop_reason=stop_reason)
+        snapshot = self.quest_service.mark_turn_finished(
+            quest_id,
+            status=status,
+            stop_reason=stop_reason,
+            event_source="quest_control",
+            event_kind="runtime_control_applied",
+            event_summary=(
+                f"Quest {quest_id} {'paused' if action == 'pause' else 'stopped'} via `{source}`."
+            ),
+        )
         verb = "paused" if action == "pause" else "stopped"
         summary = f"Quest {quest_id} {verb}."
         if interrupted:
@@ -1781,7 +1802,13 @@ class DaemonApp:
             state["stop_requested"] = False
         snapshot = self.quest_service.snapshot(quest_id)
         next_status = "running" if snapshot.get("status") == "running" else "active"
-        snapshot = self.quest_service.set_status(quest_id, next_status)
+        snapshot = self.quest_service.set_status(
+            quest_id,
+            next_status,
+            event_source="quest_control",
+            event_kind="runtime_control_applied",
+            event_summary=f"Quest {quest_id} resumed via `{source}`.",
+        )
         recovery_abandoned_run_id = None
         recovery_summary = None
         if source.startswith("auto:daemon-recovery"):
@@ -2178,7 +2205,14 @@ class DaemonApp:
                 max_attempts=max_attempts,
                 retry_context=retry_context,
             )
-            self.quest_service.mark_turn_started(quest_id, run_id=current_run_id, status="running")
+            self.quest_service.mark_turn_started(
+                quest_id,
+                run_id=current_run_id,
+                status="running",
+                event_source="daemon_turn_worker",
+                event_kind="runtime_turn_started",
+                event_summary=f"Quest {quest_id} started run `{current_run_id}`.",
+            )
             if attempt_index > 1:
                 self.quest_service.update_runtime_state(
                     quest_root=quest_root,
@@ -2891,7 +2925,11 @@ class DaemonApp:
             status="active",
             display_status=display_status,
             active_run_id=None,
+            worker_running=False,
             retry_state=retry_state,
+            event_source="runner_postprocess",
+            event_kind="runtime_turn_error",
+            event_summary=summary,
         )
         self.logger.log(
             "error",
@@ -2972,7 +3010,13 @@ class DaemonApp:
             runtime_state = self.quest_service._read_runtime_state(quest_root)
             current_status = str(runtime_state.get("status") or runtime_state.get("display_status") or "active").strip() or "active"
             normalized_status = "active" if current_status == "running" else current_status
-            self.quest_service.mark_turn_finished(quest_id, status=normalized_status)
+            self.quest_service.mark_turn_finished(
+                quest_id,
+                status=normalized_status,
+                event_source="runner_turn_cleanup",
+                event_kind="runtime_turn_cleanup_recovered",
+                event_summary=f"Recovered turn cleanup for quest {quest_id} after `_normalize_status_after_turn` failed.",
+            )
             append_jsonl(
                 quest_root / ".ds" / "events.jsonl",
                 {

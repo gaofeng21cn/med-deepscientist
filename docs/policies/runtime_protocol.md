@@ -83,6 +83,10 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - top-level `snapshot`
   - top-level `runtime_audit`
   - top-level `acp_session`
+- Stable native runtime truth extension:
+  - top-level `runtime_event_ref` may be returned when a quest-owned native runtime event has already been materialized
+  - top-level `runtime_event` may be returned as the latest native runtime event payload
+  - if present, `runtime_event_ref` and `runtime_event` must point to the same durable artifact
 - Stable `runtime_audit` keys:
   - `ok`
   - `status` (`live` or `none`)
@@ -142,6 +146,7 @@ Stable quest root files:
 
 Stable runtime directories:
 
+- `artifacts/reports/runtime_events/`
 - `baselines/imported/`
 - `baselines/local/`
 - `experiments/main/`
@@ -159,6 +164,48 @@ Stable workspace semantics:
 - active branch workspaces live under `.ds/worktrees/<worktree_id>/`
 - `current_workspace_root` and `research_head_worktree_root` (when present) must resolve to quest-owned workspace paths
 - binary/document resolution for active worktree must use `current_workspace_root` first
+
+### 3.1 Stable Native Runtime Event Surface
+
+When present, the quest-owned native runtime event surface is:
+
+- `artifacts/reports/runtime_events/<timestamp>_<event_kind>.json`
+- `artifacts/reports/runtime_events/latest.json`
+
+Stable native runtime event payload minimum:
+
+- `schema_version`
+- `event_id`
+- `quest_id`
+- `emitted_at`
+- `event_source`
+- `event_kind`
+- `summary_ref`
+- `status_snapshot`
+- `outer_loop_input`
+
+Stable `status_snapshot` / `outer_loop_input` minimum keys:
+
+- `quest_status`
+- `display_status`
+- `active_run_id`
+- `runtime_liveness_status`
+- `worker_running`
+- `stop_reason`
+- `continuation_policy`
+- `continuation_reason`
+- `pending_user_message_count`
+- `interaction_action`
+- `interaction_requires_user_input`
+- `active_interaction_id`
+- `last_transition_at`
+
+Stable semantics:
+
+- this is runtime-owned quest truth, not a controller-side projection
+- `runtime_liveness_status` distinguishes at least `live`, `stale`, and `none`
+- `waiting_for_user`, `paused`, `stopped`, stale-turn reconcile, and runner-error display states must be representable without collapsing back into a single healthy/inactive label
+- `quest.runtime_event` may also appear in `.ds/events.jsonl` as the append-only pointer event for the durable artifact
 
 ## 4. Stable Startup Contract
 

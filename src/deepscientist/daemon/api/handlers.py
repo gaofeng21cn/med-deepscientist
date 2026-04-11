@@ -514,12 +514,19 @@ npm --prefix src/ui run build</pre>
                 self.app.quest_service.prime_projection(quest_id, kind)
             except Exception:
                 continue
-        return build_quest_session_contract(
+        payload = build_quest_session_contract(
             quest_id=quest_id,
             snapshot=snapshot,
             runtime_audit=runtime_audit,
             acp_session=build_session_descriptor(snapshot),
         )
+        runtime_event = self.app.quest_service.read_runtime_event(quest_id)
+        runtime_event_ref = self.app.quest_service.read_runtime_event_ref(quest_id)
+        if runtime_event_ref is not None:
+            payload["runtime_event_ref"] = runtime_event_ref.to_dict()
+        if runtime_event is not None:
+            payload["runtime_event"] = runtime_event
+        return payload
 
     def quest_events(self, quest_id: str, path: str) -> dict:
         query = self.parse_query(path)
@@ -547,6 +554,7 @@ npm --prefix src/ui run build</pre>
                     session_id=session_id,
                 )
                 for event in payload["events"]
+                if str(event.get("type") or "").strip() != "quest.runtime_event"
             ]
         if format_name in {"acp_sdk", "both"}:
             bridge = OptionalACPBridge()

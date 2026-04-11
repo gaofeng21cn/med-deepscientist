@@ -14,6 +14,7 @@ QUEST_DIRECTORIES = (
     "artifacts/milestones",
     "artifacts/progress",
     "artifacts/reports",
+    "artifacts/reports/runtime_events",
     "artifacts/runs",
     "baselines/imported",
     "baselines/local",

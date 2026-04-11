@@ -267,5 +267,6 @@ daemon 的实时刷新依赖：
 重要原则：
 
 - 文件与 artifacts 是持久化真相
+- `artifacts/reports/runtime_events/latest.json` 是 quest-owned native runtime truth 的 latest 指针
 - events 是实时操作流
 - ACP 只是兼容包装层

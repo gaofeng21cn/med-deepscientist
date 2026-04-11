@@ -42,6 +42,7 @@ from .layout import (
     initial_summary,
 )
 from .node_traces import QuestNodeTraceManager
+from .runtime_event import QuestRuntimeEvent, QuestRuntimeEventRef, runtime_event_latest_path, runtime_event_record_path
 from .stage_views import QuestStageViewBuilder
 
 _UNSET = object()
@@ -4173,13 +4174,26 @@ class QuestService:
             write_yaml(quest_root / "quest.yaml", quest_data)
         return record
 
-    def mark_turn_started(self, quest_id: str, *, run_id: str, status: str = "running") -> dict:
+    def mark_turn_started(
+        self,
+        quest_id: str,
+        *,
+        run_id: str,
+        status: str = "running",
+        event_source: str | None = None,
+        event_kind: str | None = None,
+        event_summary: str | None = None,
+    ) -> dict:
         quest_root = self._quest_root(quest_id)
         self.update_runtime_state(
             quest_root=quest_root,
             status=status,
             active_run_id=run_id,
+            worker_running=True,
             stop_reason=None,
+            event_source=event_source if event_source is not None else _UNSET,
+            event_kind=event_kind if event_kind is not None else _UNSET,
+            event_summary=event_summary if event_summary is not None else _UNSET,
         )
         return self.snapshot(quest_id)
 
@@ -4189,14 +4203,21 @@ class QuestService:
         *,
         status: str | None = None,
         stop_reason: str | None | object = _UNSET,
+        event_source: str | None = None,
+        event_kind: str | None = None,
+        event_summary: str | None = None,
     ) -> dict:
         quest_root = self._quest_root(quest_id)
         self.update_runtime_state(
             quest_root=quest_root,
             active_run_id=None,
+            worker_running=False,
             status=status if status is not None else _UNSET,
             stop_reason=stop_reason,
             retry_state=None,
+            event_source=event_source if event_source is not None else _UNSET,
+            event_kind=event_kind if event_kind is not None else _UNSET,
+            event_summary=event_summary if event_summary is not None else _UNSET,
         )
         return self.snapshot(quest_id)
 
@@ -4205,14 +4226,21 @@ class QuestService:
         quest_id: str,
         *,
         stop_reason: str = "completed_by_user_approval",
+        event_source: str | None = None,
+        event_kind: str | None = None,
+        event_summary: str | None = None,
     ) -> dict:
         quest_root = self._quest_root(quest_id)
         self.update_runtime_state(
             quest_root=quest_root,
             status="completed",
             active_run_id=None,
+            worker_running=False,
             active_interaction_id=None,
             stop_reason=stop_reason,
+            event_source=event_source if event_source is not None else _UNSET,
+            event_kind=event_kind if event_kind is not None else _UNSET,
+            event_summary=event_summary if event_summary is not None else _UNSET,
         )
         return self.snapshot(quest_id)
 
@@ -4263,12 +4291,23 @@ class QuestService:
             write_json(bindings_path, bindings)
         return bindings
 
-    def set_status(self, quest_id: str, status: str) -> dict:
+    def set_status(
+        self,
+        quest_id: str,
+        status: str,
+        *,
+        event_source: str | None = None,
+        event_kind: str | None = None,
+        event_summary: str | None = None,
+    ) -> dict:
         quest_root = self._quest_root(quest_id)
         self.update_runtime_state(
             quest_root=quest_root,
             status=status,
             stop_reason=None if status not in {"stopped", "paused"} else _UNSET,
+            event_source=event_source if event_source is not None else _UNSET,
+            event_kind=event_kind if event_kind is not None else _UNSET,
+            event_summary=event_summary if event_summary is not None else _UNSET,
         )
         return self.snapshot(quest_id)
 
@@ -4430,7 +4469,14 @@ class QuestService:
                 quest_root=quest_root,
                 status="stopped",
                 active_run_id=None,
+                worker_running=False,
                 stop_reason="crash_recovered",
+                event_source="quest_runtime_recovery",
+                event_kind="runtime_reconciled",
+                event_summary=(
+                    f"Recovered quest from stale runtime state; previous status `{previous_status}`"
+                    + (f", abandoned run `{active_run_id}`." if active_run_id else ".")
+                ),
             )
             summary = (
                 f"Recovered quest from stale runtime state; previous status `{previous_status}`"
@@ -5303,6 +5349,7 @@ class QuestService:
             "status": status,
             "display_status": status,
             "active_run_id": quest_yaml.get("active_run_id"),
+            "worker_running": False,
             "active_interaction_id": None,
             "stop_reason": None,
             "last_transition_at": timestamp,
@@ -5384,6 +5431,7 @@ class QuestService:
         if not isinstance(payload, dict):
             payload = defaults
         merged = {**defaults, **payload}
+        merged["worker_running"] = bool(merged.get("worker_running"))
         merged["pending_user_message_count"] = int(merged.get("pending_user_message_count") or 0)
         merged["tool_calls_since_last_artifact_interact"] = int(merged.get("tool_calls_since_last_artifact_interact") or 0)
         merged["continuation_policy"] = self._normalize_continuation_policy(
@@ -5405,6 +5453,191 @@ class QuestService:
 
     def _write_runtime_state(self, quest_root: Path, payload: dict[str, Any]) -> None:
         write_json(self._runtime_state_path(quest_root), payload)
+
+    @staticmethod
+    def _runtime_event_summary_ref(*, quest_id: str, event_kind: str, emitted_at: str) -> str:
+        return f"quest-runtime::{quest_id}::{event_kind}::{emitted_at}"
+
+    @staticmethod
+    def _runtime_liveness_status_from_state(state: dict[str, Any]) -> str:
+        if bool(state.get("worker_running")):
+            return "live"
+        if str(state.get("active_run_id") or "").strip():
+            return "stale"
+        return "none"
+
+    def _runtime_event_snapshot(self, *, quest_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+        interaction_state = self._read_interaction_state(quest_root)
+        waiting_interaction_id = self._latest_waiting_interaction_id(list(interaction_state.get("open_requests") or []))
+        interaction_action = "reply_required" if waiting_interaction_id else None
+        active_interaction_id = str(state.get("active_interaction_id") or "").strip() or waiting_interaction_id
+        return {
+            "quest_status": str(state.get("status") or "").strip() or None,
+            "display_status": str(state.get("display_status") or "").strip() or None,
+            "active_run_id": str(state.get("active_run_id") or "").strip() or None,
+            "runtime_liveness_status": self._runtime_liveness_status_from_state(state),
+            "worker_running": bool(state.get("worker_running")),
+            "stop_reason": str(state.get("stop_reason") or "").strip() or None,
+            "continuation_policy": str(state.get("continuation_policy") or "").strip() or None,
+            "continuation_reason": str(state.get("continuation_reason") or "").strip() or None,
+            "pending_user_message_count": int(state.get("pending_user_message_count") or 0),
+            "interaction_action": interaction_action,
+            "interaction_requires_user_input": waiting_interaction_id is not None,
+            "active_interaction_id": active_interaction_id,
+            "last_transition_at": str(state.get("last_transition_at") or "").strip() or None,
+        }
+
+    def _runtime_event_transition(
+        self,
+        *,
+        quest_root: Path,
+        previous_state: dict[str, Any] | None,
+        current_state: dict[str, Any],
+        changed_fields: list[str],
+    ) -> dict[str, Any] | None:
+        if previous_state is None:
+            return None
+        return {
+            "changed_fields": list(changed_fields),
+            "previous": self._runtime_event_snapshot(quest_root=quest_root, state=previous_state),
+            "current": self._runtime_event_snapshot(quest_root=quest_root, state=current_state),
+        }
+
+    def _should_emit_runtime_event(self, changed_fields: list[str]) -> bool:
+        if not changed_fields:
+            return False
+        significant = {
+            "status",
+            "display_status",
+            "active_run_id",
+            "worker_running",
+            "stop_reason",
+            "active_interaction_id",
+            "continuation_policy",
+            "continuation_reason",
+        }
+        return bool(significant.intersection(changed_fields))
+
+    def _infer_runtime_event_kind(
+        self,
+        *,
+        previous_state: dict[str, Any] | None,
+        current_state: dict[str, Any],
+        changed_fields: list[str],
+    ) -> str:
+        previous_status = (
+            str(previous_state.get("status") or "").strip().lower()
+            if isinstance(previous_state, dict)
+            else ""
+        )
+        current_status = str(current_state.get("status") or "").strip().lower()
+        if current_status == "waiting_for_user":
+            return "runtime_waiting_for_user"
+        if "continuation_policy" in changed_fields or "continuation_reason" in changed_fields:
+            return "runtime_continuation_changed"
+        if previous_status == "stopped" and current_status == "active":
+            return "runtime_resumed"
+        if "status" in changed_fields or "display_status" in changed_fields or "active_run_id" in changed_fields:
+            return "runtime_state_changed"
+        if "worker_running" in changed_fields:
+            return "runtime_liveness_changed"
+        return "runtime_state_observed"
+
+    def _infer_runtime_event_summary(
+        self,
+        *,
+        quest_id: str,
+        previous_state: dict[str, Any] | None,
+        current_state: dict[str, Any],
+        changed_fields: list[str],
+    ) -> str:
+        previous_status = str((previous_state or {}).get("status") or "").strip() or "unknown"
+        current_status = str(current_state.get("status") or "").strip() or "unknown"
+        if "status" in changed_fields and previous_status != current_status:
+            return f"Quest {quest_id} runtime moved from `{previous_status}` to `{current_status}`."
+        previous_display = str((previous_state or {}).get("display_status") or "").strip() or "unknown"
+        current_display = str(current_state.get("display_status") or "").strip() or "unknown"
+        if "display_status" in changed_fields and previous_display != current_display:
+            return f"Quest {quest_id} runtime display status moved from `{previous_display}` to `{current_display}`."
+        previous_run = str((previous_state or {}).get("active_run_id") or "").strip() or "none"
+        current_run = str(current_state.get("active_run_id") or "").strip() or "none"
+        if "active_run_id" in changed_fields and previous_run != current_run:
+            return f"Quest {quest_id} active run changed from `{previous_run}` to `{current_run}`."
+        if "worker_running" in changed_fields:
+            return f"Quest {quest_id} worker_running changed to `{bool(current_state.get('worker_running'))}`."
+        return f"Quest {quest_id} runtime state changed."
+
+    def _emit_runtime_event(
+        self,
+        *,
+        quest_root: Path,
+        current_state: dict[str, Any],
+        previous_state: dict[str, Any] | None = None,
+        changed_fields: list[str] | None = None,
+        event_source: str,
+        event_kind: str,
+        summary: str,
+    ) -> QuestRuntimeEvent:
+        quest_id = str(current_state.get("quest_id") or quest_root.name).strip() or quest_root.name
+        emitted_at = utc_now()
+        record = QuestRuntimeEvent(
+            schema_version=1,
+            event_id=f"quest-runtime::{quest_id}::{event_kind}::{emitted_at}",
+            quest_id=quest_id,
+            emitted_at=emitted_at,
+            event_source=event_source,
+            event_kind=event_kind,
+            summary_ref=self._runtime_event_summary_ref(
+                quest_id=quest_id,
+                event_kind=event_kind,
+                emitted_at=emitted_at,
+            ),
+            status_snapshot=self._runtime_event_snapshot(quest_root=quest_root, state=current_state),
+            outer_loop_input=self._runtime_event_snapshot(quest_root=quest_root, state=current_state),
+            transition=self._runtime_event_transition(
+                quest_root=quest_root,
+                previous_state=previous_state,
+                current_state=current_state,
+                changed_fields=list(changed_fields or []),
+            ),
+            summary=summary,
+        )
+        artifact_path = runtime_event_record_path(quest_root=quest_root, record=record)
+        persisted = record.with_artifact_path(str(artifact_path))
+        payload = persisted.to_dict()
+        write_json(artifact_path, payload)
+        write_json(runtime_event_latest_path(quest_root), payload)
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": persisted.event_id,
+                "type": "quest.runtime_event",
+                "quest_id": quest_id,
+                "runtime_event_kind": persisted.event_kind,
+                "runtime_event_ref": persisted.ref().to_dict(),
+                "status": persisted.status_snapshot.get("quest_status"),
+                "runtime_liveness_status": persisted.status_snapshot.get("runtime_liveness_status"),
+                "summary": summary,
+                "created_at": emitted_at,
+            },
+        )
+        return persisted
+
+    def read_runtime_event(self, quest_id: str) -> dict[str, Any] | None:
+        quest_root = self._quest_root(quest_id)
+        path = runtime_event_latest_path(quest_root)
+        if not path.exists():
+            return None
+        payload = read_json(path, {})
+        if not isinstance(payload, dict) or not payload:
+            return None
+        return QuestRuntimeEvent.from_payload(payload).to_dict()
+
+    def read_runtime_event_ref(self, quest_id: str) -> QuestRuntimeEventRef | None:
+        payload = self.read_runtime_event(quest_id)
+        if payload is None:
+            return None
+        return QuestRuntimeEvent.from_payload(payload).ref()
 
     def update_runtime_state(
         self,
@@ -5435,30 +5668,45 @@ class QuestService:
         last_delivered_at: str | None | object = _UNSET,
         display_status: str | None | object = _UNSET,
         retry_state: dict[str, Any] | None | object = _UNSET,
+        worker_running: bool | object = _UNSET,
+        event_source: str | None | object = _UNSET,
+        event_kind: str | None | object = _UNSET,
+        event_summary: str | None | object = _UNSET,
     ) -> dict[str, Any]:
         with self._runtime_state_lock(quest_root):
             state = self._read_runtime_state(quest_root)
+            previous_state = dict(state)
             now = utc_now()
             status_changed = False
             run_changed = False
+            changed_fields: list[str] = []
+
+            def _set_field(name: str, value: Any) -> None:
+                nonlocal changed_fields
+                previous_value = state.get(name)
+                state[name] = value
+                if previous_value != value and name not in changed_fields:
+                    changed_fields.append(name)
 
             if status is not _UNSET:
                 normalized_status = str(status or state.get("status") or "idle")
-                state["status"] = normalized_status
+                _set_field("status", normalized_status)
                 status_changed = True
                 if display_status is _UNSET:
-                    state["display_status"] = normalized_status
+                    _set_field("display_status", normalized_status)
             if display_status is not _UNSET:
-                state["display_status"] = str(display_status or state.get("status") or "idle")
+                _set_field("display_status", str(display_status or state.get("status") or "idle"))
             if active_run_id is not _UNSET:
-                state["active_run_id"] = str(active_run_id).strip() if active_run_id else None
+                _set_field("active_run_id", str(active_run_id).strip() if active_run_id else None)
                 run_changed = True
+            if worker_running is not _UNSET:
+                _set_field("worker_running", bool(worker_running))
             if stop_reason is not _UNSET:
-                state["stop_reason"] = str(stop_reason).strip() if stop_reason else None
+                _set_field("stop_reason", str(stop_reason).strip() if stop_reason else None)
             elif status is not _UNSET and str(state.get("status") or "") not in {"stopped", "paused", "error", "completed"}:
-                state["stop_reason"] = None
+                _set_field("stop_reason", None)
             if active_interaction_id is not _UNSET:
-                state["active_interaction_id"] = str(active_interaction_id).strip() if active_interaction_id else None
+                _set_field("active_interaction_id", str(active_interaction_id).strip() if active_interaction_id else None)
             if last_artifact_interact_at is not _UNSET:
                 state["last_artifact_interact_at"] = last_artifact_interact_at
             if last_tool_activity_at is not _UNSET:
@@ -5469,7 +5717,7 @@ class QuestService:
                 state["tool_calls_since_last_artifact_interact"] = max(0, int(tool_calls_since_last_artifact_interact))
             continuation_changed = False
             if continuation_policy is not _UNSET:
-                state["continuation_policy"] = self._normalize_continuation_policy(continuation_policy)
+                _set_field("continuation_policy", self._normalize_continuation_policy(continuation_policy))
                 continuation_changed = True
             if continuation_anchor is not _UNSET:
                 normalized_anchor = str(continuation_anchor or "").strip() or None
@@ -5481,10 +5729,10 @@ class QuestService:
                         raise ValueError(
                             f"Unsupported continuation anchor `{normalized_anchor}`. Allowed values: {allowed}."
                         )
-                state["continuation_anchor"] = normalized_anchor
+                _set_field("continuation_anchor", normalized_anchor)
                 continuation_changed = True
             if continuation_reason is not _UNSET:
-                state["continuation_reason"] = str(continuation_reason or "").strip() or None
+                _set_field("continuation_reason", str(continuation_reason or "").strip() or None)
                 continuation_changed = True
             if continuation_updated_at is not _UNSET:
                 state["continuation_updated_at"] = str(continuation_updated_at or "").strip() or None
@@ -5514,7 +5762,7 @@ class QuestService:
                 state["retry_state"] = dict(retry_state) if isinstance(retry_state, dict) else None
             if last_transition_at is not _UNSET:
                 state["last_transition_at"] = last_transition_at
-            elif status_changed or run_changed:
+            elif self._should_emit_runtime_event(changed_fields):
                 state["last_transition_at"] = now
 
             self._write_runtime_state(quest_root, state)
@@ -5530,8 +5778,62 @@ class QuestService:
                         quest_data.pop("active_run_id", None)
                 quest_data["updated_at"] = now
                 write_yaml(quest_root / "quest.yaml", quest_data)
+            if self._should_emit_runtime_event(changed_fields):
+                resolved_event_source = (
+                    str(event_source).strip()
+                    if event_source is not _UNSET and str(event_source or "").strip()
+                    else "quest_runtime_state"
+                )
+                resolved_event_kind = (
+                    str(event_kind).strip()
+                    if event_kind is not _UNSET and str(event_kind or "").strip()
+                    else self._infer_runtime_event_kind(
+                        previous_state=previous_state,
+                        current_state=state,
+                        changed_fields=changed_fields,
+                    )
+                )
+                resolved_summary = (
+                    str(event_summary).strip()
+                    if event_summary is not _UNSET and str(event_summary or "").strip()
+                    else self._infer_runtime_event_summary(
+                        quest_id=str(state.get("quest_id") or quest_root.name),
+                        previous_state=previous_state,
+                        current_state=state,
+                        changed_fields=changed_fields,
+                    )
+                )
+                self._emit_runtime_event(
+                    quest_root=quest_root,
+                    current_state=state,
+                    previous_state=previous_state,
+                    changed_fields=changed_fields,
+                    event_source=resolved_event_source,
+                    event_kind=resolved_event_kind,
+                    summary=resolved_summary,
+                )
             self.schedule_projection_refresh(quest_root, kinds=("details",))
             return state
+
+    def emit_runtime_event(
+        self,
+        *,
+        quest_root: Path,
+        event_source: str,
+        event_kind: str,
+        summary: str,
+    ) -> QuestRuntimeEvent:
+        with self._runtime_state_lock(quest_root):
+            state = self._read_runtime_state(quest_root)
+            return self._emit_runtime_event(
+                quest_root=quest_root,
+                current_state=state,
+                previous_state=None,
+                changed_fields=[],
+                event_source=event_source,
+                event_kind=event_kind,
+                summary=summary,
+            )
 
     @staticmethod
     def _normalize_continuation_policy(value: object, *, default: str = "auto") -> str:

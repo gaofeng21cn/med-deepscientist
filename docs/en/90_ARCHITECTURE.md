@@ -88,6 +88,7 @@ Important quest state lives in:
 - `.ds/user_message_queue.json`
 - `.ds/events.jsonl`
 - `.ds/interaction_journal.jsonl`
+- `artifacts/reports/runtime_events/latest.json`
 
 The quest layout contract is defined in `src/deepscientist/quest/layout.py`. If it changes, update quest services, daemon handlers, UI/TUI consumers, and tests together.
 

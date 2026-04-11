@@ -66,6 +66,7 @@ This repository is responsible for keeping these boundaries explicit and auditab
 - runtime identity and fork metadata
 - daemon API shape expected by `MedAutoScience`
 - quest layout and worktree layout
+- quest-owned native runtime truth (`artifacts/reports/runtime_events/latest.json`)
 - controlled intake process for upstream absorption
 
 It is intentionally not trying to become a second full product strategy on top of upstream.

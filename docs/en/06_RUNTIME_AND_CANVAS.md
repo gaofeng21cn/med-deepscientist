@@ -391,6 +391,7 @@ During and after a run, continuity is reconstructed from durable files such as:
 - `SUMMARY.md`
 - `memory/*`
 - `artifacts/*`
+- `artifacts/reports/runtime_events/latest.json`
 - `.ds/events.jsonl`
 - `.ds/user_message_queue.json`
 - `.ds/interaction_journal.jsonl`
