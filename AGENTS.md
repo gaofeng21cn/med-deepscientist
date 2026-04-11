@@ -28,8 +28,8 @@
 - `docs/policies/`：稳定、长期保留的规则文档。
 - `docs/en/` 与 `docs/zh/`：公开用户文档。
 - `docs/references/`：repo-tracked 参考材料、审计材料、上游 intake 记录。
+- `docs/history/`：历史归档与退役材料，不作为当前活跃入口。
 - `docs/superpowers/`：本地 AI 过程文档，必须保持未跟踪。
-- OMX 已退场；仓库中的 OMX 内容若存在，只能作为历史残留，不得再写成活跃入口。
 
 ## 文档规则
 
@@ -52,8 +52,8 @@
 - 大改动、长链路工作、并行多 AI 开发，默认先基于最新 `main` 开独立 worktree，再在 worktree 内实现和验证。
 - 共享根 checkout 只用于轻量阅读、评审、吸收验证后提交、push 和清理，不应长期承担重型实现。
 - 若需要多条并行 lane，就创建多个 worktree，不要把多条长线塞进同一工作目录。
+- worktree 内实现和验证完成后，应尽快吸收回 `main`，并清理对应 worktree、分支与临时状态。
 
 ## 本地状态
 
 - `.codex/` 是本地 Codex 工具状态，必须保持未跟踪。
-- `.omx/` 只允许作为历史残留存在，必须保持未跟踪，且不得再作为当前 workflow 入口。
