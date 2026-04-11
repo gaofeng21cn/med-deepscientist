@@ -153,6 +153,11 @@ See:
 ## Documentation
 
 - [Docs index](docs/README.md)
+- [Project overview](docs/project.md)
+- [Current status](docs/status.md)
+- [Architecture](docs/architecture.md)
+- [Invariants](docs/invariants.md)
+- [Decisions](docs/decisions.md)
 - [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
 - [English docs index](docs/en/README.md)
 - [Chinese docs index](docs/zh/README.md)
