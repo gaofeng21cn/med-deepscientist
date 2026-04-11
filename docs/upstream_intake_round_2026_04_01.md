@@ -146,9 +146,9 @@ Commit `1ee5d05` (`Prevent flaky verification evidence from depending on process
 
 This keeps the repair local to the determinism seam that the regression test actually needs instead of mutating shared runtime state.
 
-### Closeout gate for this fix branch
+### Historical closeout gate for this fix branch
 
-Do not merge or clean up the fix worktree until all of the following are recorded:
+The following gate was the OMX-era closeout checklist used at that time. Keep it as historical context, not as an active workflow contract:
 
 1. **Fresh full green**
    - run `uv run pytest -q` from a clean fix worktree
@@ -165,20 +165,20 @@ Do not merge or clean up the fix worktree until all of the following are recorde
 5. **Report update**
    - include the fresh pytest evidence, the narrow-scope review verdict, and the final merge/cleanup outcome in the closeout note
 
-Until that full-green gate is met, treat this branch as an in-progress verification repair rather than a completed merge candidate.
+At that checkpoint, until the full-green gate was met, the branch was treated as an in-progress verification repair rather than a completed merge candidate.
 
-### Current checkpoint guidance
+### Historical checkpoint guidance
 
 #### 1. Submit / review recommendation
 
 - Review the runtime repair at `1ee5d05` as the material credibility fix.
-- Treat `fed6393` as the current documentation checkpoint for closeout guidance.
-- Treat `b9d52e3` as an intermediate worker checkpoint that is already subsumed by `fed6393`; it does not need separate merge-back handling.
-- Relative to local `main`, this fix branch also carries `d35c1c8` and `3016124`, so the final reviewer should acknowledge that the merge-back is effectively `main -> origin/main -> credibility repair -> closeout note`, not only a single-commit hotfix.
+- Treat `fed6393` as the documentation checkpoint that captured closeout guidance at that time.
+- Treat `b9d52e3` as an intermediate worker checkpoint already subsumed by `fed6393`; it did not need separate merge-back handling.
+- Relative to local `main`, that fix branch also carried `d35c1c8` and `3016124`, so the merge-back surface was `main -> origin/main -> credibility repair -> closeout note`, not only a single-commit hotfix.
 
 #### 2. Cleanup boundary
 
-- **Before merge-back:** keep the fix worktree, worker worktrees, and mailbox/state artifacts intact so the fresh verification evidence stays inspectable.
+- **Before merge-back:** keep the fix worktree, worker worktrees, and mailbox/state artifacts intact so the fresh verification evidence stayed inspectable.
 - **After merge-back:** remove the fix worktree and OMX team worker worktrees.
 - Preserve tracked repository history (`1ee5d05`, `fed6393`, and any final merge commit) and discard only temporary team-runtime state, detached worker checkpoints, and worktree directories.
 
@@ -198,8 +198,8 @@ Minimum report payload:
 - cleanup actions performed
 - any residual caveats if cleanup or merge ordering differed from plan
 
-#### 4. Remaining risks
+#### 4. Remaining risks at that time
 
-- `worker-1` still owns the only authoritative fresh full-suite proof; until that lands, this branch remains a candidate rather than a finished closeout.
-- `worker-2` still owns the independent narrow-scope / no-side-effect verdict; this note documents the expected review target but does not replace that review lane.
+- `worker-1` then owned the only authoritative fresh full-suite proof; until it landed, the branch remained a candidate rather than a finished closeout.
+- `worker-2` then owned the independent narrow-scope / no-side-effect verdict; this note documented the expected review target but did not replace that review lane.
 - Merging from local `main` without noticing its two-commit gap versus `origin/main` could misdescribe the true integration surface.

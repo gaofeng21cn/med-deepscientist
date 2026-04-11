@@ -1,6 +1,6 @@
 {
-  "baseline_name": "omx-project-installer",
-  "baseline_version": "0.5.2",
+  "baseline_name": "codex-direct-session",
+  "baseline_version": "offboarding-2026-04-11",
   "contract_layout": "single-project-truth",
   "scope": "project",
   "display_name": "Med Deepscientist",
@@ -8,69 +8,27 @@
   "managed_files": [
     "AGENTS.md",
     ".gitignore",
-    "contracts/project-truth/AGENTS.md",
-    ".codex/AGENTS.md"
+    "contracts/project-truth/AGENTS.md"
   ],
-  "updated_at": "2026-04-08T02:03:04.504749+00:00",
-  "preserved_existing_root": {
-    "backed_up": false,
-    "backup_path": "",
-    "adopted_to_contract": false
+  "updated_at": "2026-04-11T00:00:00+00:00",
+  "offboarding": {
+    "status": "completed",
+    "completed_at": "2026-04-11",
+    "mode": "omx_to_codex_direct",
+    "backup_path": "/Users/gaofeng/workspace/_omx_offboarding_backup/2026-04-11-codex-reset/med-deepscientist"
   },
-  "project_truth_migration": {
-    "migrated": false,
-    "source_path": "",
-    "removed_legacy_source": false
-  },
-  "legacy_cleanup": {
-    "removed": []
-  },
-  "gitignore_updated": true,
-  "update_policies": {
-    "root_agents": "auto",
-    "project_config": "auto"
-  },
-  "root_agents_state": {
-    "policy": "auto",
-    "source": "pre-setup-snapshot",
-    "sha256": "f48dda67683268fb8dfb47f798df636a882308cfa0e861a5d4fdfa05a327a15f"
-  },
-  "config_reconcile": {
-    "applied": false,
-    "user_config_present": true,
-    "project_config_present": true,
-    "keys_synced": [],
-    "tables_synced": [],
-    "managed_keys_synced": [],
-    "managed_tables_synced": [],
-    "restore_applied": true,
-    "restore_source": "pre-setup-snapshot",
-    "policy": "auto"
-  },
-  "legacy_alias_repair": {
-    "repaired": [
+  "historical_omx_reference": {
+    "source_baseline_name": "omx-project-installer",
+    "source_baseline_version": "0.5.2",
+    "retired_program_id": "med-deepscientist-mainline",
+    "retired_report_dir": ".omx/reports/med-deepscientist-mainline",
+    "legacy_alias_repaired": [
       "analyze",
       "build-fix",
       "tdd",
       "ecomode",
       "ultraqa",
       "swarm"
-    ],
-    "skipped": []
-  },
-  "continuous_program_scaffold": {
-    "enabled_by_default": true,
-    "program_id": "med-deepscientist-mainline",
-    "report_dir": ".omx/reports/med-deepscientist-mainline",
-    "created": [],
-    "preserved": [
-      "existing-custom-scaffold"
     ]
-  },
-  "program_pack": {
-    "id": "",
-    "description": "",
-    "created": [],
-    "preserved": []
   }
 }

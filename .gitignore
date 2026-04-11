@@ -53,6 +53,7 @@ dist.bak.*/
 /tmp-*.png
 /Codex
 docs/superpowers/
+# Historical local OMX artifacts (workflow retired on 2026-04-11).
 .omx/
 .codex/*
 !.codex/agents/

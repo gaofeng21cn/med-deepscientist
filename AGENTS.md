@@ -2,8 +2,6 @@
 
 This root `AGENTS.md` is the repository-native contract for direct sessions that enter from the project root, including Codex App and plain Codex sessions.
 
-If the repository is launched through OMX project-scope installation, OMX-specific orchestration lives in `.codex/AGENTS.md` and augments this file without replacing it.
-
 ## Scope
 
 Apply this file to the repository root and all descendants unless a deeper `AGENTS.md` overrides it for a narrower subtree.
@@ -12,6 +10,14 @@ Apply this file to the repository root and all descendants unless a deeper `AGEN
 
 The authoritative project truth contract lives at `contracts/project-truth/AGENTS.md`.
 Read that file first whenever repository-specific goals, architecture priorities, mutation rules, or domain constraints matter.
+
+## OMX Historical Reference
+
+OMX project-scope orchestration has been retired for this repository as of 2026-04-11.
+Any OMX-specific artifacts should be treated as historical reference only, not as active workflow control.
+
+Backup snapshot for the offboarding transition:
+`/Users/gaofeng/workspace/_omx_offboarding_backup/2026-04-11-codex-reset/med-deepscientist`
 
 ## Working Agreements
 
@@ -24,6 +30,5 @@ Read that file first whenever repository-specific goals, architecture priorities
 
 ## Local State
 
-- `.omx/` and `.codex/` are local tooling state and must remain untracked.
-- `.omx/local/AGENTS.local.md` is reserved for machine-specific private overlays.
-
+- `.omx/` is retained only for local historical artifacts from the retired OMX workflow and must remain untracked.
+- `.codex/` is local Codex tooling state and must remain untracked.
