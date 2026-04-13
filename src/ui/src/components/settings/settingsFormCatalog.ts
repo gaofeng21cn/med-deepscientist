@@ -537,9 +537,9 @@ export const runnerFields: SettingsField[] = [
     key: 'model',
     label: 'Default model',
     kind: 'text',
-    placeholder: 'gpt-5.4',
-    description: 'Default model used when the project or request does not override it.',
-    whereToGet: 'Use the model id accepted by the selected runner.',
+    placeholder: 'inherit',
+    description: 'Default model override used when the project or request does not override it. Leave `inherit` to follow the local Codex default.',
+    whereToGet: 'Use `inherit` to follow the local Codex default, or enter a model id accepted by the selected runner when you need an explicit override.',
   },
   {
     key: 'model_reasoning_effort',

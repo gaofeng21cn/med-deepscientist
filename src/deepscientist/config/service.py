@@ -492,7 +492,8 @@ This page edits `{home_text}/config/runners.yaml`.
 - set `codex.profile` only when your Codex CLI uses a named provider profile such as `m27`
 - when you launch DeepScientist ad hoc with a provider profile, you can also use `ds --codex-profile <name>`
 - when you want a one-off Codex binary override, you can also use `ds --codex /absolute/path/to/codex`
-- keep `codex.model_reasoning_effort: xhigh` unless you explicitly want a lighter default
+- keep `codex.model: inherit` unless you explicitly need a pinned model override
+- leave `codex.model_reasoning_effort` empty unless you explicitly need a pinned reasoning override
 - keep `codex.retry_on_failure: true` so transient Codex failures can resume automatically
 - keep retry timing near `10s / 6x / 1800s max` so Codex backs off exponentially and the last retry waits about 30 minutes
 - DeepScientist hard-limits one turn to at most `5` total attempts, even if the config says more
@@ -1183,13 +1184,13 @@ Use **Test** when the file exposes runtime dependencies.
     @staticmethod
     def _codex_should_inherit_model(model: object) -> bool:
         normalized = str(model or "").strip().lower()
-        return normalized in {"", "inherit", "default", "codex-default"}
+        return normalized in {"", "inherit", "default", "codex-default", "inherit_local_codex_default"}
 
     @staticmethod
     def _codex_requested_model(config: dict) -> str:
         raw_model = config.get("model")
         if raw_model is None:
-            return "gpt-5.4"
+            return "inherit"
         return str(raw_model).strip()
 
     @staticmethod
@@ -1365,7 +1366,7 @@ Use **Test** when the file exposes runtime dependencies.
         requested_reasoning_effort = (
             str(raw_reasoning_effort).strip()
             if raw_reasoning_effort is not None and str(raw_reasoning_effort).strip()
-            else ("xhigh" if raw_reasoning_effort is None else None)
+            else None
         )
         reasoning_effort, reasoning_effort_warning = normalize_codex_reasoning_effort(
             requested_reasoning_effort,

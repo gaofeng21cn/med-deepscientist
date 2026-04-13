@@ -697,7 +697,13 @@ def test_codex_probe_downgrades_xhigh_for_legacy_codex_cli(monkeypatch, temp_hom
 
     monkeypatch.setattr("deepscientist.config.service.subprocess.run", fake_run)
 
-    result = manager._probe_codex_runner({"binary": "codex", "model": "inherit"})
+    result = manager._probe_codex_runner(
+        {
+            "binary": "codex",
+            "model": "inherit",
+            "model_reasoning_effort": "xhigh",
+        }
+    )
 
     command = [str(part) for part in captured["command"]]
     assert result["ok"] is True

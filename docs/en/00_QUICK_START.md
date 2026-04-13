@@ -148,7 +148,7 @@ ds --codex /absolute/path/to/codex --codex-profile m27
 
 `m27` is the MiniMax profile name used consistently in this repo. MiniMax's own page currently uses `m21`, but the profile name is only a local alias; if you created a different name, use that same name in all commands.
 
-DeepScientist blocks startup until Codex can pass a real hello probe. By default, the runner model in `~/DeepScientist/config/runners.yaml` is `gpt-5.4`. If your profile expects the model to come from the profile itself, use `model: inherit` in `runners.yaml`, or simply launch with `--codex-profile <name>` and let that session inherit the profile-defined model.
+DeepScientist blocks startup until Codex can pass a real hello probe. By default, `~/DeepScientist/config/runners.yaml` now leaves the Codex model and reasoning settings inherited from your local Codex default. If your profile expects the model to come from the profile itself, keep `model: inherit` and leave `model_reasoning_effort` empty, or simply launch with `--codex-profile <name>` and let that session inherit the profile-defined settings.
 
 MiniMax note:
 

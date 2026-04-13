@@ -131,7 +131,7 @@ DeepScientist blocks startup until Codex passes a real startup hello probe. In t
 ~/DeepScientist/config/runners.yaml
 ```
 
-The default is `gpt-5.4`. If your Codex account or CLI config cannot access that model, DeepScientist now retries with the current Codex default model and persists `model: inherit` for future runs. If you still want a specific model, edit the runner config manually and rerun:
+The default is now to inherit the local Codex model and reasoning settings. If you still want a specific model, edit the runner config manually and rerun:
 
 ```bash
 ds doctor

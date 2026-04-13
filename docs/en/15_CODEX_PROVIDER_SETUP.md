@@ -53,7 +53,7 @@ codex:
   config_dir: ~/.codex
   profile: minimax
   model: inherit
-  model_reasoning_effort: xhigh
+  model_reasoning_effort: ""
   approval_policy: on-request
   sandbox_mode: workspace-write
 ```
@@ -61,6 +61,7 @@ codex:
 Important:
 
 - keep `model: inherit` for provider-backed Codex profiles unless you are certain the provider accepts the explicit model id you plan to send
+- leave `model_reasoning_effort` empty unless you intentionally need an explicit override
 - DeepScientist will reuse the same `~/.codex/config.toml` and environment that your terminal Codex already uses
 
 ## Provider matrix
@@ -95,7 +96,7 @@ codex:
   binary: codex
   config_dir: ~/.codex
   profile: ""
-  model: gpt-5.4
+  model: inherit
 ```
 
 ## MiniMax

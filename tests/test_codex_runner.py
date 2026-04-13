@@ -252,6 +252,35 @@ def test_codex_runner_omits_model_flag_when_request_uses_inherit(temp_home) -> N
     assert "--model" not in command
 
 
+def test_codex_runner_omits_model_flag_when_request_uses_inherit_local_codex_default(
+    temp_home,
+) -> None:  # type: ignore[no-untyped-def]
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=object(),  # type: ignore[arg-type]
+        prompt_builder=object(),  # type: ignore[arg-type]
+        artifact_service=object(),  # type: ignore[arg-type]
+    )
+    request = RunRequest(
+        quest_id="q-001",
+        quest_root=temp_home,
+        worktree_root=None,
+        run_id="run-001",
+        skill_id="baseline",
+        message="hello",
+        model="inherit_local_codex_default",
+        approval_policy="on-request",
+        sandbox_mode="workspace-write",
+        reasoning_effort="",
+    )
+
+    command = runner._build_command(request, "prompt", runner_config={})
+
+    assert "--model" not in command
+
+
 def test_codex_runner_includes_profile_when_runner_config_requests_it(temp_home) -> None:  # type: ignore[no-untyped-def]
     runner = CodexRunner(
         home=temp_home,

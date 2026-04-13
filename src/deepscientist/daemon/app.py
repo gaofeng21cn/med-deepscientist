@@ -2102,7 +2102,7 @@ class DaemonApp:
         turn_mode = self._turn_mode_for(snapshot, latest_user_message, turn_reason=turn_reason)
         skill_id = self._turn_skill_for(snapshot, latest_user_message, turn_reason=turn_reason, turn_mode=turn_mode)
         run_id = generate_id("run")
-        model = str(runner_cfg.get("model", "gpt-5.4"))
+        model = str(runner_cfg.get("model", "inherit"))
         run_message = ""
         claimed_message_id: str | None = None
         if turn_reason != "auto_continue":
@@ -2151,7 +2151,7 @@ class DaemonApp:
         reasoning_effort = (
             str(raw_reasoning_effort).strip()
             if raw_reasoning_effort is not None and str(raw_reasoning_effort).strip()
-            else ("xhigh" if raw_reasoning_effort is None else None)
+            else None
         )
         with self._turn_lock:
             if bool((self._turn_state.get(quest_id) or {}).get("stop_requested")):

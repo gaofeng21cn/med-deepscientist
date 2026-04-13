@@ -393,8 +393,8 @@ codex:
   binary: codex
   config_dir: ~/.codex
   profile: ""
-  model: gpt-5.4
-  model_reasoning_effort: xhigh
+  model: inherit
+  model_reasoning_effort: ""
   approval_policy: never
   sandbox_mode: danger-full-access
   retry_on_failure: true
@@ -455,20 +455,20 @@ claude:
 **`model`**
 
 - Type: `string`
-- Default: `codex=gpt-5.4`, `claude=inherit`
+- Default: `codex=inherit`, `claude=inherit`
 - UI label: `Default model`
-- Meaning: default model used when a project does not override it.
-- Startup note: DeepScientist's Codex readiness probe uses this configured model first. If your Codex account cannot access it, DeepScientist falls back to the current Codex default model and persists `model: inherit`.
+- Meaning: default model override used when a project does not override it.
+- Startup note: when set to `inherit`, DeepScientist omits `--model` and follows the current local Codex default model directly.
 - Provider-profile note: when `profile` is set, `model: inherit` is usually the right choice so the Codex profile itself controls the provider model.
 
 **`model_reasoning_effort`**
 
 - Type: `string`
-- Default: `codex=xhigh`
+- Default: `codex=""`
 - UI label: `Reasoning effort`
 - Allowed values: `""`, `minimal`, `low`, `medium`, `high`, `xhigh`
-- Meaning: default reasoning intensity.
-- Compatibility note: when DeepScientist detects a Codex CLI older than `0.63.0`, it automatically downgrades `xhigh` to `high` for the startup probe and runner command. This covers MiniMax's currently recommended `@openai/codex@0.57.0` path.
+- Meaning: default reasoning override. `""` omits the parameter and lets the local Codex default decide.
+- Compatibility note: when you explicitly set `xhigh` and DeepScientist detects a Codex CLI older than `0.63.0`, it automatically downgrades `xhigh` to `high` for the startup probe and runner command. This covers MiniMax's currently recommended `@openai/codex@0.57.0` path.
 
 **`approval_policy`**
 

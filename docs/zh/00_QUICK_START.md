@@ -148,7 +148,7 @@ ds --codex /absolute/path/to/codex --codex-profile m27
 
 这里的 `m27` 是本仓库统一使用的 MiniMax profile 示例名。MiniMax 官方页面当前示例名是 `m21`，但 profile 名只是本地别名；如果你自己用了别的名字，就把命令里的名字一起改掉。
 
-DeepScientist 会在启动前强制做一次真实的 Codex hello 探测。默认情况下，`~/DeepScientist/config/runners.yaml` 里的 runner 模型还是 `gpt-5.4`。如果你的 profile 希望模型由 profile 自己决定，请把 `runners.yaml` 里的 `model` 改成 `inherit`；或者直接使用 `--codex-profile <name>`，让这一轮启动自动继承 profile 对应的模型。
+DeepScientist 会在启动前强制做一次真实的 Codex hello 探测。默认情况下，`~/DeepScientist/config/runners.yaml` 现在会继承你本机 Codex 的默认模型与默认推理设置。如果你的 profile 希望模型完全由 profile 自己决定，请保持 `model: inherit` 且把 `model_reasoning_effort` 留空；或者直接使用 `--codex-profile <name>`，让这一轮启动自动继承 profile 对应的设置。
 
 MiniMax 额外说明：
 

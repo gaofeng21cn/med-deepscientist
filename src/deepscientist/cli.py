@@ -285,7 +285,7 @@ def run_command(home: Path, quest_id: str, skill_id: str, message: str, model: s
         run_id=f"run-{skill_id}-{quest_id[-4:]}",
         skill_id=skill_id,
         message=message,
-        model=model or runner_cfg.get("model", codex_cfg.get("model", "gpt-5.4")),
+        model=model or runner_cfg.get("model", codex_cfg.get("model", "inherit")),
         approval_policy=runner_cfg.get("approval_policy", codex_cfg.get("approval_policy", "on-request")),
         sandbox_mode=runner_cfg.get("sandbox_mode", codex_cfg.get("sandbox_mode", "workspace-write")),
     )

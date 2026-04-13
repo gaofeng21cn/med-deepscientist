@@ -162,8 +162,8 @@ def test_init_creates_required_files(temp_home: Path) -> None:
     assert config["connectors"]["system_enabled"]["whatsapp"] is True
     assert config["connectors"]["system_enabled"]["lingzhu"] is True
     assert runners["codex"]["profile"] == ""
-    assert runners["codex"]["model"] == "gpt-5.4"
-    assert runners["codex"]["model_reasoning_effort"] == "xhigh"
+    assert runners["codex"]["model"] == "inherit"
+    assert runners["codex"]["model_reasoning_effort"] == ""
     assert runners["codex"]["retry_initial_backoff_sec"] == 10.0
     assert runners["codex"]["retry_backoff_multiplier"] == 6.0
     assert runners["codex"]["retry_max_backoff_sec"] == 1800.0

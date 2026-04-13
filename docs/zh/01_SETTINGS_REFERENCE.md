@@ -407,8 +407,8 @@ codex:
   binary: codex
   config_dir: ~/.codex
   profile: ""
-  model: gpt-5.4
-  model_reasoning_effort: xhigh
+  model: inherit
+  model_reasoning_effort: ""
   approval_policy: never
   sandbox_mode: danger-full-access
   retry_on_failure: true
@@ -469,21 +469,20 @@ claude:
 **`model`**
 
 - 类型：`string`
-- 默认值：`codex=gpt-5.4`，`claude=inherit`
+- 默认值：`codex=inherit`，`claude=inherit`
 - 页面标签：`Default model`
-- 作用：项目和单次请求没有覆盖时的默认模型。
-- 启动说明：DeepScientist 的 Codex 就绪探测会优先使用这里配置的模型。如果你的 Codex 账号无法访问它，DeepScientist 会自动回退到当前 Codex 默认模型，并持久化为 `model: inherit`。
+- 作用：项目和单次请求没有覆盖时的默认模型覆盖值。
+- 启动说明：当这里是 `inherit` 时，DeepScientist 不会显式传 `--model`，而是直接继承当前本机 Codex 默认模型。
 - provider-profile 说明：当 `profile` 已设置时，通常推荐使用 `model: inherit`，让 Codex profile 自己决定 provider 侧模型。
 
 **`model_reasoning_effort`**
 
 - 类型：`string`
-- 默认值：`codex=xhigh`
+- 默认值：`codex=""`
 - 页面标签：`Reasoning effort`
 - 允许值：`""`、`minimal`、`low`、`medium`、`high`、`xhigh`
-- 作用：默认推理强度。
-- 推荐：当前仓库的 Codex 默认就是 `xhigh`。
-- 兼容性说明：当 DeepScientist 检测到 Codex CLI 低于 `0.63.0` 时，会在启动探测和实际 runner 命令里自动把 `xhigh` 降级成 `high`。这也覆盖了 MiniMax 当前推荐的 `@openai/codex@0.57.0` 路径。
+- 作用：默认推理强度覆盖值。`""` 表示不显式传这个参数，直接继承本机 Codex 默认设置。
+- 兼容性说明：当你显式设置 `xhigh` 且 DeepScientist 检测到 Codex CLI 低于 `0.63.0` 时，会在启动探测和实际 runner 命令里自动把 `xhigh` 降级成 `high`。这也覆盖了 MiniMax 当前推荐的 `@openai/codex@0.57.0` 路径。
 
 **`approval_policy`**
 

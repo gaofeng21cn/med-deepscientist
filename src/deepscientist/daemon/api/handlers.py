@@ -1783,7 +1783,7 @@ npm --prefix src/ui run build</pre>
         reasoning_effort = (
             str(raw_reasoning_effort).strip()
             if raw_reasoning_effort is not None and str(raw_reasoning_effort).strip()
-            else ("xhigh" if raw_reasoning_effort is None else None)
+            else None
         )
         request = RunRequest(
             quest_id=quest_id,
@@ -1792,7 +1792,7 @@ npm --prefix src/ui run build</pre>
             run_id=body.get("run_id") or generate_id("run"),
             skill_id=body.get("skill_id", "decision"),
             message=body.get("message", "").strip(),
-            model=body.get("model") or runner_cfg.get("model", "gpt-5.4"),
+            model=body.get("model") or runner_cfg.get("model", "inherit"),
             approval_policy=runner_cfg.get("approval_policy", "on-request"),
             sandbox_mode=runner_cfg.get("sandbox_mode", "workspace-write"),
             turn_reason=body.get("turn_reason") or "user_message",

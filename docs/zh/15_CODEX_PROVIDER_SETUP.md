@@ -53,7 +53,7 @@ codex:
   config_dir: ~/.codex
   profile: minimax
   model: inherit
-  model_reasoning_effort: xhigh
+  model_reasoning_effort: ""
   approval_policy: on-request
   sandbox_mode: workspace-write
 ```
@@ -61,6 +61,7 @@ codex:
 注意：
 
 - 对 provider-backed 的 Codex profile，建议优先使用 `model: inherit`
+- `model_reasoning_effort` 建议默认留空，除非你明确需要显式覆盖
 - 除非你非常确定该 provider 接受你要显式传入的模型名，否则不要再额外硬写一个模型
 - DeepScientist 会复用你终端里同一个 `~/.codex/config.toml` 与环境变量
 
@@ -96,7 +97,7 @@ codex:
   binary: codex
   config_dir: ~/.codex
   profile: ""
-  model: gpt-5.4
+  model: inherit
 ```
 
 ## MiniMax

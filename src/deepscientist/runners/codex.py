@@ -1009,7 +1009,13 @@ class CodexRunner:
                 "--skip-git-repo-check",
             ]
         )
-        if normalized_model.lower() not in {"", "inherit", "default", "codex-default"}:
+        if normalized_model.lower() not in {
+            "",
+            "inherit",
+            "default",
+            "codex-default",
+            "inherit_local_codex_default",
+        }:
             command.extend(["--model", normalized_model])
         if request.approval_policy:
             command.extend(["-c", f'approval_policy="{request.approval_policy}"'])
