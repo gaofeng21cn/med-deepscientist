@@ -120,6 +120,17 @@ def default_runners() -> dict:
             "env": {},
             "status": "reserved_todo",
         },
+        "hermes_native_proof": {
+            "enabled": True,
+            "config_dir": "~/.hermes",
+            "model": "inherit_local_hermes_default",
+            "model_reasoning_effort": "inherit_local_hermes_default",
+            "provider": "",
+            "base_url": "",
+            "api_mode": "",
+            "env": {},
+            "status": "experimental_proof",
+        },
     }
 
 

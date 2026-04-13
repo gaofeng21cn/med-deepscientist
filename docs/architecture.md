@@ -33,6 +33,13 @@
 - `src/deepscientist/runners/codex.py::CodexRunner._build_command()` 会只在显式 override 时追加 `--model` 或 reasoning 参数
 - 因此 repo-tracked 默认语义是“继承本机 Codex 默认配置”，而不是仓内固定 `gpt-5.4 / xhigh`
 
+当前还挂了一条同 contract 的 opt-in proof lane：
+
+- `src/deepscientist/runners/hermes_native_proof.py::HermesNativeProofRunner`
+- 选择方式是显式 `executor_kind = hermes_native_proof`
+- 真实执行入口是 `run_agent.AIAgent.run_conversation`
+- 该 lane 只用于证明 `Hermes-native` full agent loop contract 已可接入，不等价于默认执行器替换
+
 ### 3. Prompt / skill surface
 
 - `src/prompts/`
@@ -56,6 +63,8 @@
 - `MedAutoScience` 依赖的是协议与 durable surface，不是 prompt 细节或 UI 呈现细节。
 - 当前最底层 AI 调用装配面是 `CodexRunner._build_command()`，不是 daemon API body 里的 repo-local 模型 pin。
 - 默认 `model = "inherit"` 与空的 `model_reasoning_effort` 表示跟随本机 `Codex` 默认配置；只有显式 override 才会改变这一点。
+- opt-in `Hermes-native` lane 也遵循相同原则：默认读取本机 `Hermes` 配置，不在 repo 内 pin model / reasoning。
+- `executor_kind` 是稳定的 executor-adapter 选择面；默认值仍是 `codex_cli`，`hermes_native_proof` 只能显式请求。
 
 ## 文档分工
 

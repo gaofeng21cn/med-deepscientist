@@ -283,6 +283,14 @@ Stable run request fields:
 - `turn_reason`
 - `turn_intent`
 - `turn_mode`
+- `executor_kind`
+
+Stable `executor_kind` semantics:
+
+- default value is `codex_cli`
+- explicit `executor_kind=hermes_native_proof` routes to the `HermesNativeProofRunner`
+- `hermes_native_proof` is opt-in only; it must not silently replace the default `codex_cli` lane
+- `hermes_native_proof` must fail closed unless a real full agent loop is proved through tool events plus a valid final object response
 
 Stable `turn_reason` semantics:
 

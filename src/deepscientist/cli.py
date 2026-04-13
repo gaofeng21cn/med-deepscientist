@@ -22,7 +22,8 @@ from .network import configure_runtime_proxy, urlopen_with_proxy as urlopen
 from .prompts import PromptBuilder
 from .quest import QuestService
 from .registries import BaselineRegistry
-from .runners import CodexRunner, RunRequest, get_runner_factory, register_builtin_runners
+from .runners import CodexRunner, HermesNativeProofRunner, RunRequest, get_runner_factory, register_builtin_runners
+from .runners.base import resolve_runner_and_executor_kind
 from .runtime_tools import RuntimeToolService
 from .runtime_logs import JsonlLogger
 from .shared import ensure_dir, read_yaml
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--quest-id", required=True)
     run_parser.add_argument("--message", required=True)
     run_parser.add_argument("--model", default=None)
+    run_parser.add_argument("--executor", choices=("codex_cli", "hermes_native_proof"), default=None)
 
     ui_parser = subparsers.add_parser("ui")
     ui_parser.add_argument("--mode", choices=("web", "tui", "both"), default="web")
@@ -241,7 +243,14 @@ def daemon_command(home: Path, host: str | None, port: int | None) -> int:
     return 0
 
 
-def run_command(home: Path, quest_id: str, skill_id: str, message: str, model: str | None) -> int:
+def run_command(
+    home: Path,
+    quest_id: str,
+    skill_id: str,
+    message: str,
+    model: str | None,
+    executor: str | None,
+) -> int:
     ensure_home_layout(home)
     config_manager = ConfigManager(home)
     config_manager.ensure_files()
@@ -258,8 +267,27 @@ def run_command(home: Path, quest_id: str, skill_id: str, message: str, model: s
         prompt_builder=PromptBuilder(repo_root(), home),
         artifact_service=ArtifactService(home),
     )
-    register_builtin_runners(codex_runner=runner)
-    runner_name = str(config.get("default_runner", "codex")).strip().lower()
+    hermes_native_proof_runner = HermesNativeProofRunner(
+        home=home,
+        repo_root=repo_root(),
+        logger=logger,
+        prompt_builder=PromptBuilder(repo_root(), home),
+        artifact_service=ArtifactService(home),
+        config=runners.get("hermes_native_proof", {}),
+    )
+    register_builtin_runners(
+        codex_runner=runner,
+        hermes_native_proof_runner=hermes_native_proof_runner,
+    )
+    try:
+        runner_name, executor_kind = resolve_runner_and_executor_kind(
+            requested_runner=None,
+            requested_executor_kind=executor,
+            default_runner=str(config.get("default_runner", "codex")).strip().lower(),
+        )
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "message": str(exc)}, ensure_ascii=False, indent=2))
+        return 1
     runner_cfg = runners.get(runner_name, {})
     if runner_cfg.get("enabled") is False:
         print(
@@ -288,6 +316,7 @@ def run_command(home: Path, quest_id: str, skill_id: str, message: str, model: s
         model=model or runner_cfg.get("model", codex_cfg.get("model", "inherit")),
         approval_policy=runner_cfg.get("approval_policy", codex_cfg.get("approval_policy", "on-request")),
         sandbox_mode=runner_cfg.get("sandbox_mode", codex_cfg.get("sandbox_mode", "workspace-write")),
+        executor_kind=executor_kind,
     )
     result = selected_runner.run(request)
     if result.output_text:
@@ -304,6 +333,7 @@ def run_command(home: Path, quest_id: str, skill_id: str, message: str, model: s
                 "run_root": str(result.run_root),
                 "output_text": result.output_text,
                 "stderr_text": result.stderr_text,
+                **({"proof": result.proof} if result.proof is not None else {}),
             },
             ensure_ascii=False,
             indent=2,
@@ -527,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "daemon":
         return daemon_command(home, args.host, args.port)
     if args.command == "run":
-        return run_command(home, args.quest_id, args.skill_id, args.message, args.model)
+        return run_command(home, args.quest_id, args.skill_id, args.message, args.model, args.executor)
     if args.command == "ui":
         return ui_command(home, args.mode)
     if args.command == "note":

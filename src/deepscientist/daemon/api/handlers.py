@@ -16,6 +16,7 @@ from ...memory import MemoryService
 from ...quest import QuestService
 from ...shared import generate_id, read_json, read_text, resolve_within, run_command, sha256_text, utc_now
 from ...runners import RunRequest
+from ...runners.base import resolve_runner_and_executor_kind
 from ..runtime_contract import (
     build_artifact_completion_contract,
     build_quest_control_contract,
@@ -1761,7 +1762,17 @@ npm --prefix src/ui run build</pre>
         config = self.app.config_manager.load_named("config")
         runners = self.app.config_manager.load_runners_config()
         snapshot = self.app.quest_service.snapshot(quest_id)
-        runner_name = str(body.get("runner") or snapshot.get("runner") or config.get("default_runner", "codex")).strip().lower()
+        try:
+            runner_name, executor_kind = resolve_runner_and_executor_kind(
+                requested_runner=body.get("runner") or (None if "executor_kind" in body else snapshot.get("runner")),
+                requested_executor_kind=body.get("executor_kind"),
+                default_runner=str(config.get("default_runner", "codex")).strip().lower(),
+            )
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "message": str(exc),
+            }
         runner_cfg = runners.get(runner_name, {})
         if runner_cfg.get("enabled") is False:
             return {
@@ -1797,6 +1808,7 @@ npm --prefix src/ui run build</pre>
             sandbox_mode=runner_cfg.get("sandbox_mode", "workspace-write"),
             turn_reason=body.get("turn_reason") or "user_message",
             reasoning_effort=reasoning_effort,
+            executor_kind=executor_kind,
         )
         result = runner.run(request)
         if result.output_text:
@@ -1813,11 +1825,13 @@ npm --prefix src/ui run build</pre>
             "runner": runner_name,
             "run_id": result.run_id,
             "model": result.model,
+            "executor_kind": executor_kind,
             "exit_code": result.exit_code,
             "history_root": str(result.history_root),
             "run_root": str(result.run_root),
             "output_text": result.output_text,
             "stderr_text": result.stderr_text,
+            **({"proof": result.proof} if result.proof is not None else {}),
         }
 
     def memory(self, query: dict[str, list[str]]) -> list[dict]:

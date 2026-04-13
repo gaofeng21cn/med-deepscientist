@@ -3820,6 +3820,52 @@ def test_run_create_allows_explicit_none_reasoning_effort(temp_home: Path) -> No
     assert captured["reasoning_effort"] is None
 
 
+def test_run_create_routes_hermes_native_executor_kind_to_proof_runner(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("run create hermes native proof quest")
+    quest_id = quest["quest_id"]
+    captured: dict[str, object] = {}
+
+    class FakeHermesRunner:
+        def run(self, request):
+            captured["executor_kind"] = request.executor_kind
+            captured["model"] = request.model
+            history_root = ensure_dir(request.quest_root / ".ds" / "hermes_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model="gpt-5.4",
+                output_text="Hermes proof completed.",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+                proof={"full_agent_loop_proved": True},
+            )
+
+    app.runners["hermes_native_proof"] = FakeHermesRunner()
+
+    payload = app.handlers.run_create(
+        quest_id,
+        {
+            "message": "Run once with Hermes proof.",
+            "skill_id": "decision",
+            "executor_kind": "hermes_native_proof",
+        },
+    )
+
+    assert payload["ok"] is True
+    assert payload["runner"] == "hermes_native_proof"
+    assert payload["executor_kind"] == "hermes_native_proof"
+    assert payload["proof"] == {"full_agent_loop_proved": True}
+    assert captured["executor_kind"] == "hermes_native_proof"
+
+
 def test_connector_outbound_events_are_persisted_to_quest_stream(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)

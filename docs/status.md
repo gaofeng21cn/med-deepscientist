@@ -5,6 +5,7 @@
 - 仓库角色：`MedAutoScience` 的受控 runtime 分支
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
 - 当前执行真相：最底层 AI 执行继续通过 `CodexRunner -> codex exec autonomous agent loop` 落地；默认 `model / reasoning` 继承本机 `Codex` 默认配置，而不是 repo-local pin 固定型号
+- 当前 opt-in proof lane：显式 `executor_kind = hermes_native_proof` 时，可路由到 `HermesNativeProofRunner -> run_agent.AIAgent.run_conversation`；它只接受真实 full agent loop proof，不接受 chat-only relay
 - OMX 状态：已退场，仅允许历史残留
 
 ## 当前主线
@@ -25,6 +26,14 @@
   - 只有显式 override 才会把 `--model` 或 reasoning effort 传给 CLI
 
 这意味着本仓当前并不是“自己直接打一发 chat completion”，而是把任务交给本机 `Codex` 的 autonomous agent loop 去执行。
+
+当前新增的 `Hermes-native` 入口只是 experimental opt-in proof lane：
+
+- 默认 runner / executor 不变，仍是 `codex` / `codex_cli`
+- 只有显式请求 `executor_kind = hermes_native_proof` 时才会走 Hermes proof runner
+- proof runner 默认继承本机 `~/.hermes/config.yaml` 的 model / provider / api_mode / reasoning
+- 允许用 `DEEPSCIENTIST_HERMES_*` 环境变量显式 override
+- 只要没有工具事件、没有完成 full agent loop、或 final response 不是合法 object，就必须 fail-closed
 
 ## 当前优先事项
 

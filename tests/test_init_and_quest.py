@@ -167,6 +167,10 @@ def test_init_creates_required_files(temp_home: Path) -> None:
     assert runners["codex"]["retry_initial_backoff_sec"] == 10.0
     assert runners["codex"]["retry_backoff_multiplier"] == 6.0
     assert runners["codex"]["retry_max_backoff_sec"] == 1800.0
+    assert runners["hermes_native_proof"]["enabled"] is True
+    assert runners["hermes_native_proof"]["config_dir"] == "~/.hermes"
+    assert runners["hermes_native_proof"]["model"] == "inherit_local_hermes_default"
+    assert runners["hermes_native_proof"]["model_reasoning_effort"] == "inherit_local_hermes_default"
 
 
 def test_legacy_codex_retry_profile_is_upgraded_when_loading_normalized_runners(temp_home: Path) -> None:
