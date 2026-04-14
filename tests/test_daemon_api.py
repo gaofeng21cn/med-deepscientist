@@ -4625,6 +4625,101 @@ def test_submit_user_message_reconciles_stale_active_turn_and_starts_new_run(tem
     )
 
 
+def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_message(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("queue-only resume quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(quest_root, policy="none")
+
+    app.quest_service.append_message(
+        quest_id,
+        role="user",
+        content="Old history user message.",
+        source="web-react",
+    )
+    queue_payload = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+    queue_payload["pending"] = []
+    write_json(quest_root / ".ds" / "user_message_queue.json", queue_payload)
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        pending_user_message_count=0,
+    )
+
+    injected_message = "Queue-only controller intervention should be executed first."
+    queue_payload = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+    queue_payload["pending"] = [
+        {
+            "message_id": "msg-controller-001",
+            "source": "codex-publication-gate",
+            "conversation_id": "local:default",
+            "content": injected_message,
+            "created_at": utc_now(),
+            "reply_to_interaction_id": None,
+            "attachments": [],
+            "status": "queued",
+        }
+    ]
+    write_json(quest_root / ".ds" / "user_message_queue.json", queue_payload)
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        pending_user_message_count=1,
+    )
+
+    class QueueResumeRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[str] = []
+
+        def run(self, request):
+            self.requests.append(request.message)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text=f"Processed: {request.message}",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = QueueResumeRunner()
+    app.runners["codex"] = runner
+
+    payload = app.resume_quest(quest_id, source="runtime_watch")
+
+    assert payload["started"] is True
+    assert payload["queued"] is False
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if runner.requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("resume did not start a turn from the pending queue message")
+
+    assert runner.requests == [injected_message]
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        queue_payload = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+        if not queue_payload.get("pending"):
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("pending queue message was not claimed by the resumed run")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["pending_user_message_count"] == 0
+
+
 def test_run_quest_turn_clears_active_run_when_assistant_append_fails(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,

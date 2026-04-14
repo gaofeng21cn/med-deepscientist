@@ -2104,7 +2104,7 @@ class DaemonApp:
         runtime_status = str(snapshot.get("runtime_status") or snapshot.get("status") or "").strip()
         if runtime_status in {"stopped", "paused", "completed", "error"} and not snapshot.get("active_run_id"):
             return
-        latest_user_message = self._latest_user_message(quest_id)
+        latest_user_message = self._latest_runnable_user_message(quest_id, turn_reason=turn_reason)
         if turn_reason != "auto_continue" and latest_user_message is None:
             return
 
@@ -2119,7 +2119,10 @@ class DaemonApp:
         claimed_message_id: str | None = None
         if turn_reason != "auto_continue":
             run_message = str((latest_user_message or {}).get("content") or "").strip()
-            claimed_message_id = str((latest_user_message or {}).get("id") or "").strip() or None
+            claimed_message_id = (
+                str((latest_user_message or {}).get("id") or (latest_user_message or {}).get("message_id") or "").strip()
+                or None
+            )
             if not run_message:
                 return
 
@@ -2617,6 +2620,33 @@ class DaemonApp:
             if str(item.get("role") or "") == "user":
                 return item
         return None
+
+    def _latest_runnable_user_message(self, quest_id: str, *, turn_reason: str) -> dict | None:
+        latest_history_message = self._latest_user_message(quest_id)
+        quest_root = self.quest_service._quest_root(quest_id)
+        queue_message = None
+        pending_messages = self.quest_service._read_message_queue(quest_root).get("pending") or []
+        for item in reversed(pending_messages):
+            if isinstance(item, dict):
+                queue_message = item
+                break
+        if queue_message is not None and (
+            str(turn_reason or "").strip() == "queued_user_messages" or latest_history_message is None
+        ):
+            return {
+                "id": str(queue_message.get("message_id") or "").strip() or None,
+                "role": "user",
+                "content": str(queue_message.get("content") or ""),
+                "source": str(queue_message.get("source") or "local"),
+                "created_at": queue_message.get("created_at"),
+                "reply_to_interaction_id": queue_message.get("reply_to_interaction_id"),
+                "attachments": [
+                    dict(item)
+                    for item in (queue_message.get("attachments") or [])
+                    if isinstance(item, dict)
+                ],
+            }
+        return latest_history_message
 
     @staticmethod
     def _runner_binary_issue(runner_name: str, runner: object) -> str | None:
