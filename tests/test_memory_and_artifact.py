@@ -4899,6 +4899,150 @@ def test_paper_decision_record_refreshes_stale_status_and_summary(temp_home: Pat
     assert "Bibliography entries: `21`" in refreshed_summary
 
 
+def test_paper_decision_sync_prefers_continuation_route_over_local_finalize_recommendation(
+    temp_home: Path,
+    monkeypatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper continuation sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Continuation Route Outline",
+        detailed_outline={
+            "title": "Continuation Route Outline",
+            "research_questions": ["RQ-continuation-route"],
+            "experimental_designs": ["EXP-continuation-route"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_branch = str(quest_service.snapshot(quest["quest_id"]).get("current_workspace_branch") or "paper")
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n\nRoute maintenance.\n", encoding="utf-8")
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": paper_branch,
+            "selected_outline_ref": "outline-001",
+            "status": "bundle_ready",
+        },
+    )
+
+    monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        artifact,
+        "_paper_contract_health_payload",
+        lambda *args, **kwargs: {
+            "contract_ok": True,
+            "writing_ready": True,
+            "audit_package_ready": True,
+            "finalize_ready": True,
+            "bundle_present": True,
+            "delivery_state": "bundle_ready",
+            "closure_state": "delivery_ready",
+            "delivered_at": None,
+            "keep_bundle_fixed_by_default": False,
+            "selected_outline_ref": "outline-001",
+            "section_count": 1,
+            "ready_section_count": 1,
+            "ledger_item_count": 1,
+            "unresolved_required_count": 0,
+            "unmapped_completed_count": 0,
+            "open_supplementary_count": 0,
+            "reference_materialization_ready": True,
+            "bibliography_ready": True,
+            "bibliography_entry_count": 32,
+            "references_path": None,
+            "literature_ready": True,
+            "literature_record_count": 32,
+            "literature_record_counts": {},
+            "literature_record_paths": [],
+            "reference_gate": "ready",
+            "surface_consistency_ok": True,
+            "surface_counts": [],
+            "citation_usage_ready": True,
+            "draft_available": True,
+            "draft_citation_count": 16,
+            "draft_unique_citation_count": 16,
+            "draft_citation_keys": [],
+            "cited_bibliography_ready": True,
+            "cited_bibliography_entry_count": 16,
+            "minimum_cited_bibliography_entries": 12,
+            "citation_key_resolution_ok": True,
+            "unresolved_citation_key_count": 0,
+            "unresolved_citation_keys": [],
+            "citation_usage_by_section": [],
+            "review_outputs_ready": True,
+            "review_report_path": None,
+            "review_revision_log_path": None,
+            "proofing_outputs_ready": True,
+            "proofing_report_path": None,
+            "proofing_language_issues_path": None,
+            "submission_checklist_ready": True,
+            "submission_checklist_path": None,
+            "submission_blocking_item_count": 0,
+            "submission_blocking_items": [],
+            "final_claim_ledger_ready": False,
+            "final_claim_ledger_path": None,
+            "finalize_resume_packet_ready": False,
+            "finalize_resume_packet_path": None,
+            "completion_approval_ready": False,
+            "completion_blocking_reasons": [],
+            "blocking_reasons": [],
+            "recommended_next_stage": "finalize",
+            "recommended_action": "finalize_paper_line",
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "unresolved_required_items": [],
+            "unmapped_completed_items": [],
+        },
+    )
+
+    quest_service.update_settings(quest["quest_id"], active_anchor="finalize")
+
+    recorded = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "good",
+            "action": "write",
+            "next_stage": "write",
+            "reason": "Continue with manuscript-facing maintenance instead of staying parked on finalize.",
+            "summary": "Route returns to write/review.",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    refreshed_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    refreshed_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert recorded["ok"] is True
+    assert snapshot["active_anchor"] == "write"
+    assert snapshot["continuation_anchor"] == "write"
+    assert f"Current Quest Route: `write` / `continue` on `{paper_branch}`." in refreshed_status
+    assert "- Recommended Next Stage: `finalize`" in refreshed_status
+    assert "- Recommended Action: `finalize_paper_line`" in refreshed_status
+    assert "- Continuation Anchor: `write`" in refreshed_status
+    assert "- Next step: `write` / `continue`" in refreshed_summary
+    assert "- Paper-line local recommendation: `finalize` / `finalize_paper_line`" in refreshed_summary
+
+
 def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -5763,6 +5907,237 @@ def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checkl
         "paper-line recommendations are subordinate until publication gate allows write"
     )
     assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
+
+
+def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_surface_is_missing(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact missing submission minimal quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Missing Submission Minimal Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-missing-submission-minimal",
+            "paper_branch": "paper/artifact-missing-submission-minimal",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Missing Submission Minimal Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-missing-submission-minimal",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["submission_checklist_ready"] is True
+    assert health["submission_checklist_handoff_ready"] is True
+    assert health["submission_minimal_ready"] is False
+    assert health["submission_minimal_manifest_path"] is None
+    assert health["submission_minimal_docx_present"] is False
+    assert health["submission_minimal_pdf_present"] is False
+    assert health["audit_package_ready"] is True
+    assert health["finalize_ready"] is False
+    assert health["closure_state"] == "audit_ready_with_blockers"
+    assert health["delivery_state"] == "audit_ready"
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission-minimal package is incomplete" in " ".join(health["blocking_reasons"])
+
+
+def test_paper_line_state_sync_matches_public_contract_health_for_completed_maintenance_slices(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper line state sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Maintenance Slice Sync Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-maintenance-sync",
+            "paper_branch": "paper/maintenance-sync",
+            "selected_outline_ref": "outline-001",
+            "title": "Maintenance Slice Sync Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/maintenance-sync",
+            "selected_outline_ref": "outline-001",
+            "status": "bundle_ready",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "selected_outline_ref": "outline-001",
+            "items": [],
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+
+    campaign_id = "analysis-maintenance-sync"
+    campaign_manifest_root = quest_root / ".ds" / "analysis_campaigns"
+    campaign_manifest_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        campaign_manifest_root / f"{campaign_id}.json",
+        {
+            "campaign_id": campaign_id,
+            "selected_outline_ref": "outline-001",
+            "paper_line_id": "paper-line-maintenance-sync",
+            "paper_line_branch": "paper/maintenance-sync",
+            "slices": [
+                {
+                    "slice_id": "maint-check",
+                    "item_id": "EXP-MAINT-001",
+                    "section_id": "publication-gate",
+                    "status": "completed",
+                    "title": "Maintenance gate check",
+                }
+            ],
+        },
+    )
+    campaign_results_root = quest_root / "experiments" / "analysis-results" / campaign_id
+    campaign_results_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        campaign_results_root / "todo_manifest.json",
+        {
+            "selected_outline_ref": "outline-001",
+            "todo_items": [
+                {
+                    "slice_id": "maint-check",
+                    "title": "Maintenance gate check",
+                    "status": "completed",
+                    "section_id": "publication-gate",
+                    "item_id": "EXP-MAINT-001",
+                    "paper_placement": "appendix",
+                }
+            ],
+        },
+    )
+    (campaign_results_root / "maint-check.md").write_text(
+        "# Maintenance gate check\n\nThis slice is a publication-gate maintenance witness.\n",
+        encoding="utf-8",
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["contract_ok"] is True
+    assert health["writing_ready"] is True
+    assert health["unmapped_completed_count"] == 0
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+
+    state = artifact._write_paper_line_state(quest_root)
+    persisted = read_json(quest_root / "paper" / "paper_line_state.json", {})
+    status_text = (quest_root / "status.md").read_text(encoding="utf-8")
+    summary_text = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert state["contract_ok"] == health["contract_ok"]
+    assert state["writing_ready"] == health["writing_ready"]
+    assert state["unmapped_completed_count"] == health["unmapped_completed_count"]
+    assert state["recommended_action"] == health["recommended_action"]
+    assert persisted["contract_ok"] == health["contract_ok"]
+    assert persisted["unmapped_completed_count"] == health["unmapped_completed_count"]
+    assert "sync_paper_contract" not in status_text
+    assert "completed analysis remains unmapped into the paper contract" not in summary_text
 
 
 def test_read_quest_documents_accepts_single_name_string(temp_home: Path) -> None:

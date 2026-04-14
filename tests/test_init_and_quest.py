@@ -162,15 +162,11 @@ def test_init_creates_required_files(temp_home: Path) -> None:
     assert config["connectors"]["system_enabled"]["whatsapp"] is True
     assert config["connectors"]["system_enabled"]["lingzhu"] is True
     assert runners["codex"]["profile"] == ""
-    assert runners["codex"]["model"] == "inherit"
-    assert runners["codex"]["model_reasoning_effort"] == ""
+    assert runners["codex"]["model"] == "gpt-5.4"
+    assert runners["codex"]["model_reasoning_effort"] == "xhigh"
     assert runners["codex"]["retry_initial_backoff_sec"] == 10.0
     assert runners["codex"]["retry_backoff_multiplier"] == 6.0
     assert runners["codex"]["retry_max_backoff_sec"] == 1800.0
-    assert runners["hermes_native_proof"]["enabled"] is True
-    assert runners["hermes_native_proof"]["config_dir"] == "~/.hermes"
-    assert runners["hermes_native_proof"]["model"] == "inherit_local_hermes_default"
-    assert runners["hermes_native_proof"]["model_reasoning_effort"] == "inherit_local_hermes_default"
 
 
 def test_legacy_codex_retry_profile_is_upgraded_when_loading_normalized_runners(temp_home: Path) -> None:
@@ -922,6 +918,37 @@ def test_snapshot_keeps_bundle_not_ready_when_submission_checklist_has_blocking_
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "finish_proofing_and_submission_checks"
     assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
+
+
+def test_snapshot_blocks_finalize_when_submission_minimal_surface_is_missing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper missing submission minimal quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["submission_checklist_ready"] is True
+    assert health["submission_checklist_handoff_ready"] is True
+    assert health["submission_minimal_ready"] is False
+    assert health["submission_minimal_manifest_path"] is None
+    assert health["submission_minimal_docx_present"] is False
+    assert health["submission_minimal_pdf_present"] is False
+    assert health["audit_package_ready"] is True
+    assert health["finalize_ready"] is False
+    assert health["closure_state"] == "audit_ready_with_blockers"
+    assert health["delivery_state"] == "audit_ready"
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission-minimal package is incomplete" in " ".join(health["blocking_reasons"])
 
 
 def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_not_clear(temp_home: Path) -> None:

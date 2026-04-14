@@ -3891,265 +3891,79 @@ class ArtifactService:
         workspace_root: Path | None = None,
         pending_slices: int | None = None,
     ) -> dict[str, Any]:
-        gate_status = self._paper_bundle_gate_status(quest_root, workspace_root=workspace_root)
-        paper_root = self._paper_root(quest_root, workspace_root=workspace_root, create=True)
-        bundle_manifest_path = paper_root / "paper_bundle_manifest.json"
-        bundle_manifest = read_json(bundle_manifest_path, {}) if bundle_manifest_path.exists() else {}
-        bundle_manifest = bundle_manifest if isinstance(bundle_manifest, dict) else {}
-        submission_checklist_path = paper_root / "review" / "submission_checklist.json"
-        submission_checklist = read_json(submission_checklist_path, {}) if submission_checklist_path.exists() else {}
-        submission_checklist = submission_checklist if isinstance(submission_checklist, dict) else {}
-        unresolved_required_items = [
-            dict(item) for item in (gate_status.get("unresolved_required_items") or []) if isinstance(item, dict)
-        ]
-        unmapped_completed_items = [
-            dict(item) for item in (gate_status.get("unmapped_completed_items") or []) if isinstance(item, dict)
-        ]
-        reference_materialization = self.quest_service._paper_reference_materialization_payload(
+        resolved_workspace_root = workspace_root or self.quest_service.active_workspace_root(quest_root)
+        paper_contract = self.quest_service._paper_contract_payload(quest_root, resolved_workspace_root)
+        paper_evidence = self.quest_service._paper_evidence_payload(quest_root, resolved_workspace_root)
+        analysis_inventory = self.quest_service._analysis_inventory_payload(quest_root, resolved_workspace_root)
+        paper_lines, active_paper_line_ref = self.quest_service._paper_lines_payload(
             quest_root,
-            workspace_root=workspace_root,
+            resolved_workspace_root,
         )
-        citation_usage = self.quest_service._paper_citation_usage_payload(
-            quest_root,
-            workspace_root=workspace_root,
+        payload = self.quest_service._paper_contract_health_payload(
+            quest_root=quest_root,
+            paper_contract=paper_contract,
+            paper_evidence=paper_evidence,
+            analysis_inventory=analysis_inventory,
+            paper_lines=paper_lines,
+            active_paper_line_ref=active_paper_line_ref,
         )
-        closure_evidence = self.quest_service._paper_closure_evidence_payload(
-            quest_root,
-            workspace_root=workspace_root,
-        )
-        reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
-        citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
-        reference_gate = (
-            dict(reference_materialization.get("reference_gate") or {})
-            if isinstance(reference_materialization.get("reference_gate"), dict)
-            else {}
-        )
-        surface_consistency_ok = bool(reference_materialization.get("surface_consistency_ok", True))
-        normalized_pending_slices = max(0, int(pending_slices or 0))
-        blocking_reasons: list[str] = []
-        if unmapped_completed_items:
-            blocking_reasons.append("completed analysis remains unmapped into the paper contract")
-        if unresolved_required_items:
-            blocking_reasons.append("required outline items are still unresolved")
-        if normalized_pending_slices > 0:
-            blocking_reasons.append("paper-facing supplementary slices are still pending")
-        if not surface_consistency_ok:
-            blocking_reasons.append("quest root and active worktree reference surfaces are inconsistent")
-        if not bool(reference_materialization.get("bibliography_ready")):
-            blocking_reasons.append(
-                "paper bibliography has "
-                f"{int(reference_materialization.get('bibliography_entry_count') or 0)} entries; "
-                f"at least {int(reference_gate.get('minimum_bibliography_entries') or 0)} verified references are required"
-            )
-        if not bool(reference_materialization.get("literature_ready")):
-            blocking_reasons.append(
-                "literature materialization is below gate: "
-                f"total={int(reference_materialization.get('literature_record_count') or 0)}, "
-                f"pubmed={int((reference_materialization.get('literature_record_counts') or {}).get('pubmed') or 0)}; "
-                f"requires total>={int(reference_gate.get('minimum_total_literature_records') or 0)}, "
-                f"pubmed>={int(reference_gate.get('minimum_pubmed_records') or 0)}"
-            )
-        if not bool(citation_usage.get("draft_available")):
-            blocking_reasons.append("paper draft file is missing from the active writing workspace")
-        if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("cited_bibliography_ready")):
-            blocking_reasons.append(
-                "paper draft cites "
-                f"{int(citation_usage.get('cited_bibliography_entry_count') or 0)} verified references; "
-                f"at least {int(citation_usage.get('minimum_cited_bibliography_entries') or 0)} in-text references are required"
-            )
-        if bool(citation_usage.get("draft_available")) and not bool(citation_usage.get("citation_key_resolution_ok")):
-            unresolved_preview = ", ".join(str(item) for item in (citation_usage.get("unresolved_citation_keys") or [])[:6])
-            blocking_reasons.append(
-                "paper draft cites keys absent from references.bib"
-                + (f": {unresolved_preview}" if unresolved_preview else "")
-            )
-        if not bool(closure_evidence.get("review_outputs_ready")):
-            blocking_reasons.append(
-                "skeptical review outputs are missing "
-                "(`paper/review/review.md`, `paper/review/revision_log.md`)"
-            )
-        if not bool(closure_evidence.get("proofing_outputs_ready")):
-            blocking_reasons.append(
-                "proofing outputs are missing "
-                "(`paper/proofing/proofing_report.md`, `paper/proofing/language_issues.md`)"
-            )
-        if not bool(closure_evidence.get("submission_checklist_ready")):
-            blocking_reasons.append(
-                "submission packaging checklist is missing "
-                "(`paper/review/submission_checklist.json`)"
-            )
-        elif int(closure_evidence.get("submission_blocking_item_count") or 0) > 0:
-            blocking_reasons.append(
-                "submission packaging checklist still has "
-                f"{int(closure_evidence.get('submission_blocking_item_count') or 0)} blocking item(s)"
-            )
-
-        if unmapped_completed_items:
-            recommended_next_stage = "write"
-            recommended_action = "sync_paper_contract"
-        elif unresolved_required_items or normalized_pending_slices > 0:
-            recommended_next_stage = "analysis-campaign"
-            recommended_action = "complete_required_supplementary"
-        elif not surface_consistency_ok:
-            recommended_next_stage = "write"
-            recommended_action = "synchronize_reference_materials"
-        elif not reference_materialization_ready:
-            recommended_next_stage = "write"
-            recommended_action = "materialize_reference_materials"
-        elif not citation_usage_ready:
-            recommended_next_stage = "write"
-            recommended_action = "revise_paper_citations"
-        elif not bundle_manifest_path.exists():
-            recommended_next_stage = "write"
-            recommended_action = "prepare_bundle"
-        elif not bool(closure_evidence.get("review_outputs_ready")):
-            recommended_next_stage = "review"
-            recommended_action = "run_skeptical_audit"
-        elif (
-            not bool(closure_evidence.get("proofing_outputs_ready"))
-            or not bool(closure_evidence.get("submission_checklist_ready"))
-            or int(closure_evidence.get("submission_blocking_item_count") or 0) > 0
-        ):
-            recommended_next_stage = "write"
-            recommended_action = "finish_proofing_and_submission_checks"
-        else:
-            recommended_next_stage = "finalize"
-            recommended_action = "finalize_paper_line"
-
-        contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and normalized_pending_slices == 0 and reference_materialization_ready and citation_usage_ready
-        overall_status = str(submission_checklist.get("overall_status") or bundle_manifest.get("status") or "").strip().lower()
-        delivered_at = str(
-            bundle_manifest.get("paper_delivered_to_user_at")
-            or bundle_manifest.get("delivered_at")
-            or submission_checklist.get("paper_delivered_to_user_at")
-            or ""
-        ).strip() or None
-        bundle_present = bundle_manifest_path.exists()
-        review_outputs_ready = bool(closure_evidence.get("review_outputs_ready"))
-        proofing_outputs_ready = bool(closure_evidence.get("proofing_outputs_ready"))
-        submission_checklist_ready = bool(closure_evidence.get("submission_checklist_ready"))
-        submission_blocking_item_count = int(closure_evidence.get("submission_blocking_item_count") or 0)
-        audit_package_ready = (
-            bundle_present
-            and review_outputs_ready
-            and proofing_outputs_ready
-            and submission_checklist_ready
-        )
-        submission_ready_for_delivery = audit_package_ready and submission_blocking_item_count == 0
-        delivery_state = "not_ready"
-        closure_state = "bundle_not_ready"
-        keep_bundle_fixed_by_default = False
-        if audit_package_ready and submission_blocking_item_count > 0:
-            delivery_state = "audit_ready"
-            closure_state = "audit_ready_with_blockers"
-        elif submission_ready_for_delivery:
-            delivery_state = "bundle_ready"
-            closure_state = "delivery_ready"
-        if delivered_at or "delivered" in overall_status:
-            delivery_state = "delivered"
-            closure_state = "delivered_continue_research" if "continue" in overall_status else "delivered_parked"
-            keep_bundle_fixed_by_default = True
-        finalize_ready = writing_ready and submission_ready_for_delivery
-        completion_blocking_reasons = list(blocking_reasons)
-        if not bool(closure_evidence.get("final_claim_ledger_ready")):
-            completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
-        if not bool(closure_evidence.get("finalize_resume_packet_ready")):
-            completion_blocking_reasons.append("finalize handoff packet is missing (`handoffs/finalize_resume_packet.md`)")
-        completion_approval_ready = (
-            finalize_ready
-            and bool(closure_evidence.get("final_claim_ledger_ready"))
-            and bool(closure_evidence.get("finalize_resume_packet_ready"))
-        )
-        recommendation_scope = "paper_line_local_only"
-        global_stage_authority = "publication_gate"
-        global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
-
-        return {
-            "contract_ok": contract_ok,
-            "writing_ready": writing_ready,
-            "audit_package_ready": audit_package_ready,
-            "finalize_ready": finalize_ready,
-            "bundle_present": bundle_present,
-            "delivery_state": delivery_state,
-            "closure_state": closure_state,
-            "delivered_at": delivered_at,
-            "keep_bundle_fixed_by_default": keep_bundle_fixed_by_default,
-            "selected_outline_ref": gate_status.get("selected_outline_ref"),
-            "section_count": int(gate_status.get("section_count") or 0),
-            "ready_section_count": int(gate_status.get("ready_section_count") or 0),
-            "ledger_item_count": int(gate_status.get("ledger_item_count") or 0),
-            "unresolved_required_count": len(unresolved_required_items),
-            "unmapped_completed_count": len(unmapped_completed_items),
-            "open_supplementary_count": normalized_pending_slices,
-            "reference_materialization_ready": reference_materialization_ready,
-            "bibliography_ready": bool(reference_materialization.get("bibliography_ready")),
-            "bibliography_entry_count": int(reference_materialization.get("bibliography_entry_count") or 0),
-            "references_path": str(reference_materialization.get("references_path") or "").strip() or None,
-            "literature_ready": bool(reference_materialization.get("literature_ready")),
-            "literature_record_count": int(reference_materialization.get("literature_record_count") or 0),
-            "literature_record_counts": dict(reference_materialization.get("literature_record_counts") or {}),
-            "literature_record_paths": list(reference_materialization.get("literature_record_paths") or []),
-            "reference_gate": reference_gate,
-            "surface_consistency_ok": surface_consistency_ok,
-            "surface_counts": list(reference_materialization.get("surface_counts") or []),
-            "citation_usage_ready": citation_usage_ready,
-            "draft_available": bool(citation_usage.get("draft_available")),
-            "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),
-            "draft_unique_citation_count": int(citation_usage.get("draft_unique_citation_count") or 0),
-            "draft_citation_keys": list(citation_usage.get("draft_citation_keys") or []),
-            "cited_bibliography_ready": bool(citation_usage.get("cited_bibliography_ready")),
-            "cited_bibliography_entry_count": int(citation_usage.get("cited_bibliography_entry_count") or 0),
-            "minimum_cited_bibliography_entries": int(citation_usage.get("minimum_cited_bibliography_entries") or 0),
-            "citation_key_resolution_ok": bool(citation_usage.get("citation_key_resolution_ok")),
-            "unresolved_citation_key_count": int(citation_usage.get("unresolved_citation_key_count") or 0),
-            "unresolved_citation_keys": list(citation_usage.get("unresolved_citation_keys") or []),
-            "citation_usage_by_section": list(citation_usage.get("citation_usage_by_section") or []),
-            "review_outputs_ready": bool(closure_evidence.get("review_outputs_ready")),
-            "review_report_path": str(closure_evidence.get("review_report_path") or "").strip() or None,
-            "review_revision_log_path": str(closure_evidence.get("review_revision_log_path") or "").strip() or None,
-            "proofing_outputs_ready": bool(closure_evidence.get("proofing_outputs_ready")),
-            "proofing_report_path": str(closure_evidence.get("proofing_report_path") or "").strip() or None,
-            "proofing_language_issues_path": str(closure_evidence.get("proofing_language_issues_path") or "").strip() or None,
-            "submission_checklist_ready": bool(closure_evidence.get("submission_checklist_ready")),
-            "submission_checklist_path": str(closure_evidence.get("submission_checklist_path") or "").strip() or None,
-            "submission_blocking_item_count": int(closure_evidence.get("submission_blocking_item_count") or 0),
-            "submission_blocking_items": list(closure_evidence.get("submission_blocking_items") or []),
-            "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
-            "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
-            "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
-            "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
-            "completion_approval_ready": completion_approval_ready,
-            "completion_blocking_reasons": completion_blocking_reasons,
-            "blocking_reasons": blocking_reasons,
-            "recommended_next_stage": recommended_next_stage,
-            "recommended_action": recommended_action,
-            "recommendation_scope": recommendation_scope,
-            "global_stage_authority": global_stage_authority,
-            "global_stage_rule": global_stage_rule,
-            "unresolved_required_items": unresolved_required_items[:12],
-            "unmapped_completed_items": unmapped_completed_items[:12],
-        }
+        health = dict(payload or {})
+        if pending_slices is not None:
+            health["open_supplementary_count"] = max(0, int(pending_slices or 0))
+        health.setdefault("ok", bool(health.get("contract_ok")))
+        return health
 
     @staticmethod
     def _paper_line_state_label(value: bool) -> str:
         return "ready" if value else "blocked"
 
-    def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
-        blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+    def _paper_line_route_projection(self, payload: dict[str, Any]) -> dict[str, Any]:
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
+        local_stage = str(payload.get("recommended_next_stage") or "write").strip() or "write"
+        local_action = str(payload.get("recommended_action") or "continue").strip() or "continue"
+        continuation_anchor = str(payload.get("continuation_anchor") or "").strip() or None
+        active_anchor = str(payload.get("active_anchor") or "").strip() or None
+        continuation_stage = continuation_anchor or active_anchor
+        if (
+            recommendation_scope == "paper_line_local_only"
+            and continuation_stage
+            and continuation_stage != local_stage
+        ):
+            return {
+                "headline_label": "Current Quest Route",
+                "display_stage": continuation_stage,
+                "display_action": "continue",
+                "local_stage": local_stage,
+                "local_action": local_action,
+                "continuation_anchor": continuation_anchor,
+                "route_source": "quest_continuation",
+            }
         headline_label = (
             "Paper Line Local Recommendation"
             if recommendation_scope == "paper_line_local_only"
             else "Paper Line Status"
         )
+        return {
+            "headline_label": headline_label,
+            "display_stage": local_stage,
+            "display_action": local_action,
+            "local_stage": local_stage,
+            "local_action": local_action,
+            "continuation_anchor": continuation_anchor,
+            "route_source": "paper_line_local",
+        }
+
+    def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
+        blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
+        route = self._paper_line_route_projection(payload)
         lines = [
             "# Status",
             "",
             (
-                f"{headline_label}: "
-                f"`{str(payload.get('recommended_next_stage') or 'write').strip() or 'write'}` / "
-                f"`{str(payload.get('recommended_action') or 'continue').strip() or 'continue'}` on "
+                f"{route['headline_label']}: "
+                f"`{str(route.get('display_stage') or 'write').strip() or 'write'}` / "
+                f"`{str(route.get('display_action') or 'continue').strip() or 'continue'}` on "
                 f"`{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`."
             ),
             "",
@@ -4170,8 +3984,9 @@ class ArtifactService:
             f"- Supplementary Pending: `{int(payload.get('open_supplementary_count') or 0)}`",
             f"- Bibliography Entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
             f"- Literature Records: `{int(payload.get('literature_record_count') or 0)}`",
-            f"- Recommended Next Stage: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}`",
-            f"- Recommended Action: `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            f"- Recommended Next Stage: `{str(route.get('local_stage') or 'none').strip() or 'none'}`",
+            f"- Recommended Action: `{str(route.get('local_action') or 'none').strip() or 'none'}`",
+            f"- Continuation Anchor: `{str(route.get('continuation_anchor') or 'none').strip() or 'none'}`",
             f"- Recommendation Scope: `{recommendation_scope}`",
             f"- Global Stage Authority: `{str(payload.get('global_stage_authority') or 'none').strip() or 'none'}`",
             f"- Global Stage Rule: `{str(payload.get('global_stage_rule') or 'none').strip() or 'none'}`",
@@ -4187,6 +4002,7 @@ class ArtifactService:
 
     def _render_paper_line_summary_markdown(self, payload: dict[str, Any]) -> str:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        route = self._paper_line_route_projection(payload)
         lines = [
             "# Summary",
             "",
@@ -4202,12 +4018,21 @@ class ArtifactService:
             f"- Reference materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
             f"- Bibliography entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
             f"- Literature records: `{int(payload.get('literature_record_count') or 0)}`",
-            f"- Next step: `{str(payload.get('recommended_next_stage') or 'none').strip() or 'none'}` / `{str(payload.get('recommended_action') or 'none').strip() or 'none'}`",
+            f"- Next step: `{str(route.get('display_stage') or 'none').strip() or 'none'}` / `{str(route.get('display_action') or 'none').strip() or 'none'}`",
             f"- Recommendation scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
             "",
             "## Current Blockers",
             "",
         ]
+        if route.get("route_source") == "quest_continuation":
+            lines.insert(
+                9,
+                (
+                    f"- Paper-line local recommendation: "
+                    f"`{str(route.get('local_stage') or 'none').strip() or 'none'}` / "
+                    f"`{str(route.get('local_action') or 'none').strip() or 'none'}`"
+                ),
+            )
         if blocking_reasons:
             lines.extend(f"- {item}" for item in blocking_reasons)
         else:
@@ -4238,6 +4063,7 @@ class ArtifactService:
         source_idea_id: str | None = None,
     ) -> dict[str, Any]:
         state = self.quest_service.read_research_state(quest_root)
+        snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
         selected_outline_path, selected_outline = self._read_selected_outline_for_sync(
             quest_root,
             workspace_root=workspace_root,
@@ -4319,6 +4145,9 @@ class ArtifactService:
             "recommendation_scope": str(health.get("recommendation_scope") or "").strip() or None,
             "global_stage_authority": str(health.get("global_stage_authority") or "").strip() or None,
             "global_stage_rule": str(health.get("global_stage_rule") or "").strip() or None,
+            "active_anchor": str(snapshot.get("active_anchor") or "").strip() or None,
+            "continuation_policy": str(snapshot.get("continuation_policy") or "").strip() or None,
+            "continuation_anchor": str(snapshot.get("continuation_anchor") or "").strip() or None,
             "draft_status": "present" if draft_path.exists() else "missing",
             "bundle_status": "present" if bundle_path.exists() else "missing",
             "reference_materialization_ready": bool(health.get("reference_materialization_ready")),
@@ -9013,9 +8842,6 @@ class ArtifactService:
             or str(runtime_refs.get("latest_main_run_id") or "").strip()
             or None
         )
-        active_idea_id = str(resolved_idea_id or "").strip()
-        if not active_idea_id:
-            raise ValueError("An active idea is required before starting an analysis campaign.")
         if not slices:
             raise ValueError("At least one analysis slice is required.")
         campaign_id = generate_id("analysis")
@@ -9042,6 +8868,9 @@ class ArtifactService:
             or active_anchor == "write"
             or campaign_origin_kind in {"write", "paper", "rebuttal", "revision"}
         )
+        active_idea_id = str(resolved_idea_id or "").strip() or None
+        if not active_idea_id and not writing_facing:
+            raise ValueError("An active idea is required before starting an analysis campaign.")
         if writing_facing:
             if not resolved_outline_ref:
                 raise ValueError(
@@ -9113,6 +8942,9 @@ class ArtifactService:
                     source_run_id=resolved_parent_run_id,
                     source_idea_id=active_idea_id,
                 )
+        analysis_namespace = active_idea_id
+        if not analysis_namespace and writing_facing:
+            analysis_namespace = f"paper-line-{slugify(paper_line_id or paper_line_branch or parent_branch, 'paper-line')}"
         slice_contexts: list[dict[str, Any]] = []
         inventory_entries: list[dict[str, Any]] = []
         for index, raw in enumerate(slices, start=1):
@@ -9126,7 +8958,7 @@ class ArtifactService:
                 ),
                 normalized_todo_items[index - 1] if index - 1 < len(normalized_todo_items) else {},
             )
-            branch = f"analysis/{active_idea_id}/{campaign_id}-{slugify(slice_id, 'slice')}"
+            branch = f"analysis/{analysis_namespace}/{campaign_id}-{slugify(slice_id, 'slice')}"
             worktree_root = canonical_worktree_root(quest_root, f"analysis-{campaign_id}-{slice_id}")
             ensure_branch(quest_root, branch, start_point=parent_branch, checkout=False)
             create_worktree(

@@ -2706,6 +2706,38 @@ class QuestService:
                     normalized.append(text)
             return normalized
 
+        def _normalized_status_values(payload: dict[str, Any]) -> tuple[str, ...]:
+            values: list[str] = []
+            for key in ("overall_status", "package_status", "status"):
+                normalized = str(payload.get(key) or "").strip().lower()
+                if normalized:
+                    values.append(normalized)
+            return tuple(values)
+
+        def _submission_checklist_handoff_ready(payload: dict[str, Any]) -> bool:
+            explicit_value = payload.get("handoff_ready")
+            if isinstance(explicit_value, bool):
+                return explicit_value
+            statuses = _normalized_status_values(payload)
+            return any(
+                "ready_for_submission" in value or value == "submission_ready"
+                for value in statuses
+                if "not_submission_ready" not in value and "nonfinal" not in value
+            )
+
+        def _resolve_workspace_relative_path(raw_path: str) -> str | None:
+            normalized = str(raw_path or "").strip()
+            if not normalized:
+                return None
+            candidate = Path(normalized).expanduser()
+            if candidate.is_absolute():
+                return str(candidate) if candidate.exists() else None
+            for root in roots:
+                resolved = (root / candidate).resolve()
+                if resolved.exists():
+                    return str(resolved)
+            return None
+
         review_report_path = _first_existing([paper_root / "review" / "review.md" for paper_root in paper_roots])
         review_revision_log_path = _first_existing([paper_root / "review" / "revision_log.md" for paper_root in paper_roots])
         proofing_report_path = _first_existing([paper_root / "proofing" / "proofing_report.md" for paper_root in paper_roots])
@@ -2726,6 +2758,36 @@ class QuestService:
         if not isinstance(submission_checklist, dict):
             submission_checklist = {}
         submission_blocking_items = _normalize_blocking_items(submission_checklist)
+        submission_minimal_manifest_path = _first_existing(
+            [paper_root / "submission_minimal" / "submission_manifest.json" for paper_root in paper_roots]
+        )
+        submission_minimal_manifest = (
+            read_json(Path(submission_minimal_manifest_path), {})
+            if submission_minimal_manifest_path
+            else {}
+        )
+        if not isinstance(submission_minimal_manifest, dict):
+            submission_minimal_manifest = {}
+        manuscript_payload = (
+            dict(submission_minimal_manifest.get("manuscript") or {})
+            if isinstance(submission_minimal_manifest.get("manuscript"), dict)
+            else {}
+        )
+        submission_minimal_docx_path = _resolve_workspace_relative_path(str(manuscript_payload.get("docx_path") or ""))
+        if submission_minimal_docx_path is None:
+            submission_minimal_docx_path = _first_existing(
+                [paper_root / "submission_minimal" / "manuscript.docx" for paper_root in paper_roots]
+            )
+        submission_minimal_pdf_path = _resolve_workspace_relative_path(str(manuscript_payload.get("pdf_path") or ""))
+        if submission_minimal_pdf_path is None:
+            submission_minimal_pdf_path = _first_existing(
+                [paper_root / "submission_minimal" / "paper.pdf" for paper_root in paper_roots]
+            )
+        submission_checklist_handoff_ready = _submission_checklist_handoff_ready(submission_checklist)
+        submission_checklist_status = (
+            str(submission_checklist.get("overall_status") or submission_checklist.get("status") or "").strip() or None
+        )
+        submission_checklist_package_status = str(submission_checklist.get("package_status") or "").strip() or None
 
         return {
             "review_outputs_ready": bool(review_report_path and review_revision_log_path),
@@ -2736,8 +2798,21 @@ class QuestService:
             "proofing_language_issues_path": proofing_language_issues_path,
             "submission_checklist_ready": bool(submission_checklist_path),
             "submission_checklist_path": submission_checklist_path,
+            "submission_checklist_handoff_ready": submission_checklist_handoff_ready,
+            "submission_checklist_status": submission_checklist_status,
+            "submission_checklist_package_status": submission_checklist_package_status,
             "submission_blocking_item_count": len(submission_blocking_items),
             "submission_blocking_items": submission_blocking_items,
+            "submission_minimal_manifest_path": submission_minimal_manifest_path,
+            "submission_minimal_docx_path": submission_minimal_docx_path,
+            "submission_minimal_pdf_path": submission_minimal_pdf_path,
+            "submission_minimal_docx_present": bool(submission_minimal_docx_path),
+            "submission_minimal_pdf_present": bool(submission_minimal_pdf_path),
+            "submission_minimal_ready": bool(
+                submission_minimal_manifest_path
+                and submission_minimal_docx_path
+                and submission_minimal_pdf_path
+            ),
             "final_claim_ledger_ready": bool(final_claim_ledger_path),
             "final_claim_ledger_path": final_claim_ledger_path,
             "finalize_resume_packet_ready": bool(finalize_resume_packet_path),
@@ -2897,18 +2972,32 @@ class QuestService:
         review_outputs_ready = bool(closure_evidence.get("review_outputs_ready"))
         proofing_outputs_ready = bool(closure_evidence.get("proofing_outputs_ready"))
         submission_checklist_ready = bool(closure_evidence.get("submission_checklist_ready"))
+        submission_checklist_handoff_ready = bool(closure_evidence.get("submission_checklist_handoff_ready"))
+        submission_checklist_status = str(closure_evidence.get("submission_checklist_status") or "").strip() or None
+        submission_checklist_package_status = (
+            str(closure_evidence.get("submission_checklist_package_status") or "").strip() or None
+        )
         submission_blocking_item_count = int(closure_evidence.get("submission_blocking_item_count") or 0)
+        submission_minimal_manifest_path = str(closure_evidence.get("submission_minimal_manifest_path") or "").strip() or None
+        submission_minimal_docx_present = bool(closure_evidence.get("submission_minimal_docx_present"))
+        submission_minimal_pdf_present = bool(closure_evidence.get("submission_minimal_pdf_present"))
+        submission_minimal_ready = bool(closure_evidence.get("submission_minimal_ready"))
         audit_package_ready = (
             bundle_status == "present"
             and review_outputs_ready
             and proofing_outputs_ready
             and submission_checklist_ready
         )
-        submission_ready_for_delivery = audit_package_ready and submission_blocking_item_count == 0
+        submission_ready_for_delivery = (
+            audit_package_ready
+            and submission_blocking_item_count == 0
+            and submission_checklist_handoff_ready
+            and submission_minimal_ready
+        )
         closure_state = "bundle_not_ready"
         delivery_state = "not_ready"
         keep_bundle_fixed_by_default = False
-        if audit_package_ready and submission_blocking_item_count > 0:
+        if audit_package_ready and not submission_ready_for_delivery:
             closure_state = "audit_ready_with_blockers"
             delivery_state = "audit_ready"
         elif submission_ready_for_delivery:
@@ -2947,6 +3036,8 @@ class QuestService:
             not bool(closure_evidence.get("proofing_outputs_ready"))
             or not bool(closure_evidence.get("submission_checklist_ready"))
             or int(closure_evidence.get("submission_blocking_item_count") or 0) > 0
+            or not submission_checklist_handoff_ready
+            or not submission_minimal_ready
         ):
             recommended_next_stage = "write"
             recommended_action = "finish_proofing_and_submission_checks"
@@ -3010,6 +3101,25 @@ class QuestService:
             blocking_reasons.append(
                 "submission packaging checklist still has "
                 f"{submission_blocking_item_count} blocking item(s)"
+            )
+        elif not submission_checklist_handoff_ready:
+            status_bits = [item for item in (submission_checklist_status, submission_checklist_package_status) if item]
+            blocking_reasons.append(
+                "submission packaging checklist is not marked handoff-ready"
+                + (f" ({', '.join(status_bits)})" if status_bits else "")
+            )
+        if not submission_minimal_ready:
+            missing_parts: list[str] = []
+            if not submission_minimal_manifest_path:
+                missing_parts.append("submission_manifest.json")
+            if not submission_minimal_docx_present:
+                missing_parts.append("manuscript.docx")
+            if not submission_minimal_pdf_present:
+                missing_parts.append("paper.pdf")
+            blocking_reasons.append(
+                "submission-minimal package is incomplete (`paper/submission_minimal/`"
+                + (f"; missing: {', '.join(missing_parts)}" if missing_parts else "")
+                + ")"
             )
 
         finalize_ready = (
@@ -3096,8 +3206,15 @@ class QuestService:
             "proofing_language_issues_path": str(closure_evidence.get("proofing_language_issues_path") or "").strip() or None,
             "submission_checklist_ready": bool(closure_evidence.get("submission_checklist_ready")),
             "submission_checklist_path": str(closure_evidence.get("submission_checklist_path") or "").strip() or None,
+            "submission_checklist_handoff_ready": submission_checklist_handoff_ready,
+            "submission_checklist_status": submission_checklist_status,
+            "submission_checklist_package_status": submission_checklist_package_status,
             "submission_blocking_item_count": int(closure_evidence.get("submission_blocking_item_count") or 0),
             "submission_blocking_items": list(closure_evidence.get("submission_blocking_items") or []),
+            "submission_minimal_manifest_path": submission_minimal_manifest_path,
+            "submission_minimal_docx_present": submission_minimal_docx_present,
+            "submission_minimal_pdf_present": submission_minimal_pdf_present,
+            "submission_minimal_ready": submission_minimal_ready,
             "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
             "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),

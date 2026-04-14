@@ -1143,3 +1143,90 @@ def test_git_branch_canvas_parents_writing_facing_analysis_to_paper_line(temp_ho
     assert nodes[analysis_branch]["paper_line_branch"] == paper_branch
     assert nodes[paper_branch]["workflow_state"]["analysis_state"] == "active"
     assert nodes[paper_branch]["workflow_state"]["writing_state"] == "blocked_by_analysis"
+
+
+def test_writing_facing_analysis_campaign_can_launch_from_paper_only_line_without_active_idea(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper-only analysis quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    _confirm_local_baseline(artifact, quest_root, baseline_id="baseline-paper-only-analysis")
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Paper Only Analysis Outline",
+        detailed_outline={
+            "title": "Paper Only Analysis Outline",
+            "research_questions": ["RQ-paper-only"],
+            "experimental_designs": ["Exp-paper-only"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Open the paper line without an upstream idea branch.",
+    )
+
+    snapshot = quest_service.snapshot(quest_id)
+    assert snapshot["active_idea_id"] is None
+    assert snapshot["current_workspace_branch"] == "paper/main"
+
+    campaign = artifact.create_analysis_campaign(
+        quest_root,
+        campaign_title="Paper-only campaign",
+        campaign_goal="Launch a writing-facing follow-up slice from the active paper line.",
+        selected_outline_ref="outline-001",
+        research_questions=["RQ-paper-only"],
+        experimental_designs=["Exp-paper-only"],
+        todo_items=[
+            {
+                "exp_id": "EXP-PAPER-ONLY-001",
+                "todo_id": "todo-paper-only",
+                "slice_id": "slice-paper-only",
+                "title": "Paper-only slice",
+                "research_question": "RQ-paper-only",
+                "experimental_design": "Exp-paper-only",
+                "tier": "main_required",
+                "paper_placement": "main_text",
+                "paper_role": "main_text",
+                "section_id": "paper-only-check",
+                "item_id": "AN-PAPER-ONLY-001",
+                "claim_links": ["C-paper-only"],
+                "completion_condition": "Finish the paper-only supplementary slice.",
+            }
+        ],
+        slices=[
+            {
+                "slice_id": "slice-paper-only",
+                "title": "Paper-only slice",
+                "goal": "Keep one paper-facing slice pending without an active idea.",
+                "required_changes": "Preserve the paper-facing comparison surface.",
+                "metric_contract": "Use the same accuracy contract.",
+                "section_id": "paper-only-check",
+                "item_id": "AN-PAPER-ONLY-001",
+                "paper_role": "main_text",
+                "claim_links": ["C-paper-only"],
+            }
+        ],
+    )
+
+    app = DaemonApp(temp_home)
+    branches = app.handlers.git_branches(quest_id)
+    nodes = {item["ref"]: item for item in branches["nodes"]}
+    analysis_branch = campaign["slices"][0]["branch"]
+    paper_branch = str(campaign["manifest"]["paper_line_branch"] or "").strip()
+
+    assert campaign["parent_branch"] == "main"
+    assert campaign["manifest"]["active_idea_id"] is None
+    assert paper_branch == "paper/main"
+    assert branches["active_workspace_ref"] == analysis_branch
+    assert nodes[analysis_branch]["parent_ref"] == paper_branch
+    assert nodes[analysis_branch]["paper_line_branch"] == paper_branch
+    assert nodes[paper_branch]["workflow_state"]["analysis_state"] == "active"
