@@ -4754,6 +4754,52 @@ def test_artifact_interact_allows_completion_approval_in_autonomous_mode(temp_ho
     assert snapshot_after["pending_decisions"]
 
 
+def test_completion_approval_waiting_request_stays_active_after_threaded_progress(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create(
+        "completion approval waiting request stays active",
+        startup_contract={"decision_policy": "autonomous"},
+    )
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    request = artifact.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest appears complete. May I end it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+    )
+    assert request["status"] == "ok"
+
+    snapshot_waiting = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_waiting["status"] == "waiting_for_user"
+    assert snapshot_waiting["active_interaction_id"] == request["interaction_id"]
+
+    progress = artifact.interact(
+        quest_root,
+        kind="progress",
+        message="我正在核对最终收口状态，不会改变当前等待审批口。",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+    )
+    assert progress["status"] == "ok"
+    assert progress["reply_mode"] == "threaded"
+
+    snapshot_after_progress = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_after_progress["status"] == "waiting_for_user"
+    assert snapshot_after_progress["waiting_interaction_id"] == request["interaction_id"]
+    assert snapshot_after_progress["default_reply_interaction_id"] == request["interaction_id"]
+    assert snapshot_after_progress["active_interaction_id"] == request["interaction_id"]
+
+    runtime_state = json.loads((quest_root / ".ds" / "runtime_state.json").read_text(encoding="utf-8"))
+    assert runtime_state["active_interaction_id"] == request["interaction_id"]
+
+
 def test_artifact_interact_blocks_completion_approval_for_incomplete_paper_finalize_gate(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -4812,6 +4858,82 @@ def test_artifact_interact_blocks_completion_approval_for_incomplete_paper_final
     assert request["reply_mode"] == "none"
     assert request["interaction_id"] is None
     assert "skeptical review outputs are missing" in str(request["guidance"])
+    snapshot_after = quest_service.snapshot(quest["quest_id"])
+    assert snapshot_after["status"] != "waiting_for_user"
+    assert not snapshot_after["pending_decisions"]
+
+
+def test_artifact_record_blocks_completion_approval_for_incomplete_paper_finalize_gate(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create(
+        "autonomous incomplete paper completion approval record quest",
+        startup_contract={"decision_policy": "autonomous"},
+    )
+    quest_root = Path(quest["quest_root"])
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Incomplete Finalize Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-incomplete-finalize-gate-record",
+            "paper_branch": "paper/incomplete-finalize-gate-record",
+            "selected_outline_ref": "outline-001",
+            "title": "Incomplete Finalize Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-02T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/incomplete-finalize-gate-record",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+    artifact = ArtifactService(temp_home)
+
+    decision_dir = quest_root / "artifacts" / "decisions"
+    decision_paths_before = sorted(str(path) for path in decision_dir.glob("*.json"))
+
+    result = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "title": "Request completion approval too early",
+            "summary": "The paper line looks complete enough to ask for completion approval.",
+            "verdict": "pending_user",
+            "action": "request_user_decision",
+            "reason": "Trying to end the quest before review/proofing/finalize outputs exist.",
+            "reply_mode": "blocking",
+            "expects_reply": True,
+            "reply_schema": {"decision_type": "quest_completion_approval"},
+            "options": [
+                {"id": "approve", "label": "Approve", "description": "End the quest now."},
+                {"id": "continue", "label": "Continue", "description": "Keep working."},
+            ],
+        },
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "completion_gate_blocked"
+    assert result["artifact_id"] is None
+    assert "skeptical review outputs are missing" in str(result["guidance"])
+    assert sorted(str(path) for path in decision_dir.glob("*.json")) == decision_paths_before
     snapshot_after = quest_service.snapshot(quest["quest_id"])
     assert snapshot_after["status"] != "waiting_for_user"
     assert not snapshot_after["pending_decisions"]
@@ -5036,11 +5158,151 @@ def test_paper_decision_sync_prefers_continuation_route_over_local_finalize_reco
     assert snapshot["active_anchor"] == "write"
     assert snapshot["continuation_anchor"] == "write"
     assert f"Current Quest Route: `write` / `continue` on `{paper_branch}`." in refreshed_status
-    assert "- Recommended Next Stage: `finalize`" in refreshed_status
-    assert "- Recommended Action: `finalize_paper_line`" in refreshed_status
+    assert "- Paper-Line Local Recommendation: `finalize`" in refreshed_status
+    assert "- Paper-Line Local Action: `finalize_paper_line`" in refreshed_status
+    assert "- Quest-Level Next Stage: `write`" in refreshed_status
+    assert "- Quest-Level Next Action: `continue`" in refreshed_status
     assert "- Continuation Anchor: `write`" in refreshed_status
-    assert "- Next step: `write` / `continue`" in refreshed_summary
+    assert "- Quest-level next step: `write` / `continue`" in refreshed_summary
     assert "- Paper-line local recommendation: `finalize` / `finalize_paper_line`" in refreshed_summary
+
+
+def test_paper_decision_sync_preserves_stop_action_for_quest_route(
+    temp_home: Path,
+    monkeypatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper stop sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Stop Route Outline",
+        detailed_outline={
+            "title": "Stop Route Outline",
+            "research_questions": ["RQ-stop-route"],
+            "experimental_designs": ["EXP-stop-route"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_branch = str(quest_service.snapshot(quest["quest_id"]).get("current_workspace_branch") or "paper")
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n\nStop-route maintenance.\n", encoding="utf-8")
+
+    monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        artifact,
+        "_paper_contract_health_payload",
+        lambda *args, **kwargs: {
+            "contract_ok": False,
+            "writing_ready": False,
+            "audit_package_ready": False,
+            "finalize_ready": False,
+            "bundle_present": False,
+            "delivery_state": "not_ready",
+            "closure_state": "bundle_not_ready",
+            "delivered_at": None,
+            "keep_bundle_fixed_by_default": False,
+            "selected_outline_ref": "outline-001",
+            "section_count": 1,
+            "ready_section_count": 0,
+            "ledger_item_count": 0,
+            "unresolved_required_count": 1,
+            "unmapped_completed_count": 0,
+            "open_supplementary_count": 0,
+            "reference_materialization_ready": True,
+            "bibliography_ready": True,
+            "bibliography_entry_count": 20,
+            "references_path": None,
+            "literature_ready": True,
+            "literature_record_count": 20,
+            "literature_record_counts": {},
+            "literature_record_paths": [],
+            "reference_gate": "ready",
+            "surface_consistency_ok": True,
+            "surface_counts": [],
+            "citation_usage_ready": True,
+            "draft_available": True,
+            "draft_citation_count": 0,
+            "draft_unique_citation_count": 0,
+            "draft_citation_keys": [],
+            "cited_bibliography_ready": True,
+            "cited_bibliography_entry_count": 20,
+            "minimum_cited_bibliography_entries": 20,
+            "citation_key_resolution_ok": True,
+            "unresolved_citation_key_count": 0,
+            "unresolved_citation_keys": [],
+            "citation_usage_by_section": [],
+            "review_outputs_ready": False,
+            "review_report_path": None,
+            "review_revision_log_path": None,
+            "proofing_outputs_ready": False,
+            "proofing_report_path": None,
+            "proofing_language_issues_path": None,
+            "submission_checklist_ready": False,
+            "submission_checklist_path": None,
+            "submission_blocking_item_count": 0,
+            "submission_blocking_items": [],
+            "final_claim_ledger_ready": False,
+            "final_claim_ledger_path": None,
+            "finalize_resume_packet_ready": False,
+            "finalize_resume_packet_path": None,
+            "completion_approval_ready": False,
+            "completion_blocking_reasons": [],
+            "blocking_reasons": ["required outline items are still unresolved"],
+            "recommended_next_stage": "analysis-campaign",
+            "recommended_action": "complete_required_supplementary",
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "unresolved_required_items": [{"section_id": "main-results", "item_id": "main_transportability_run"}],
+            "unmapped_completed_items": [],
+        },
+    )
+
+    quest_service.update_settings(quest["quest_id"], active_anchor="decision")
+
+    recorded = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "blocked",
+            "action": "stop",
+            "next_stage": "decision",
+            "reason": "Current publication gate blocks write and new search, so this line should stop.",
+            "summary": "Route stops on the current evidence line.",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    refreshed_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    refreshed_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert recorded["ok"] is True
+    assert snapshot["active_anchor"] == "decision"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert f"Current Quest Route: `decision` / `stop` on `{paper_branch}`." in refreshed_status
+    assert "- Paper-Line Local Recommendation: `analysis-campaign`" in refreshed_status
+    assert "- Paper-Line Local Action: `complete_required_supplementary`" in refreshed_status
+    assert "- Quest-Level Next Stage: `decision`" in refreshed_status
+    assert "- Quest-Level Next Action: `stop`" in refreshed_status
+    assert "- Continuation Anchor: `decision`" in refreshed_status
+    assert "- Quest-level next step: `decision` / `stop`" in refreshed_summary
+    assert "- Paper-line local recommendation: `analysis-campaign` / `complete_required_supplementary`" in refreshed_summary
 
 
 def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp_home: Path) -> None:

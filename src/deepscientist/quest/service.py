@@ -1753,6 +1753,123 @@ class QuestService:
                 requirements["require_surface_sync"] = bool(overrides.get("require_surface_sync"))
         return requirements
 
+    @staticmethod
+    def _resolve_managed_study_root(
+        *,
+        quest_root: Path,
+        paper_root: Path,
+        reporting_contract: dict[str, Any],
+    ) -> Path | None:
+        raw_path = str(
+            reporting_contract.get("study_root")
+            or reporting_contract.get("study_root_ref")
+            or ""
+        ).strip()
+        if not raw_path:
+            return None
+        candidate = Path(raw_path).expanduser()
+        if candidate.is_absolute():
+            return candidate.resolve(strict=False)
+        for base in (paper_root, paper_root.parent, quest_root):
+            resolved = (base / candidate).resolve(strict=False)
+            if resolved.exists():
+                return resolved
+        return (paper_root / candidate).resolve(strict=False)
+
+    def _managed_publication_gate_payload(
+        self,
+        quest_root: Path,
+        *,
+        paper_root: Path | None,
+    ) -> dict[str, Any]:
+        default_payload = {
+            "status": "not_configured",
+            "clear": True,
+            "summary": "managed publication gate is not configured for this paper line",
+            "study_root": None,
+            "publication_eval_path": None,
+            "gap_summaries": [],
+            "recommended_action_types": [],
+        }
+        if paper_root is None:
+            return default_payload
+
+        contract_path = paper_root / "medical_reporting_contract.json"
+        reporting_contract = read_json(contract_path, {}) if contract_path.exists() else {}
+        if not isinstance(reporting_contract, dict) or not reporting_contract:
+            return default_payload
+
+        study_root = self._resolve_managed_study_root(
+            quest_root=quest_root,
+            paper_root=paper_root,
+            reporting_contract=reporting_contract,
+        )
+        if study_root is None:
+            return default_payload
+
+        publication_eval_path = study_root / "artifacts" / "publication_eval" / "latest.json"
+        if not publication_eval_path.exists():
+            return {
+                "status": "missing",
+                "clear": False,
+                "summary": "managed publication gate evaluation is missing",
+                "study_root": str(study_root),
+                "publication_eval_path": str(publication_eval_path),
+                "gap_summaries": [],
+                "recommended_action_types": [],
+            }
+
+        payload = read_json(publication_eval_path, {})
+        if not isinstance(payload, dict) or not payload:
+            return {
+                "status": "invalid",
+                "clear": False,
+                "summary": "managed publication gate payload is invalid",
+                "study_root": str(study_root),
+                "publication_eval_path": str(publication_eval_path),
+                "gap_summaries": [],
+                "recommended_action_types": [],
+            }
+
+        verdict = dict(payload.get("verdict") or {}) if isinstance(payload.get("verdict"), dict) else {}
+        overall_verdict = str(verdict.get("overall_verdict") or "").strip().lower()
+        summary = str(verdict.get("summary") or "").strip()
+        gaps = [dict(item) for item in (payload.get("gaps") or []) if isinstance(item, dict)]
+        recommended_actions = [
+            dict(item) for item in (payload.get("recommended_actions") or []) if isinstance(item, dict)
+        ]
+        gap_summaries = [
+            str(item.get("summary") or "").strip()
+            for item in gaps
+            if str(item.get("summary") or "").strip()
+        ]
+        recommended_action_types = [
+            str(item.get("action_type") or "").strip()
+            for item in recommended_actions
+            if str(item.get("action_type") or "").strip()
+        ]
+        if not overall_verdict or not summary:
+            return {
+                "status": "invalid",
+                "clear": False,
+                "summary": "managed publication gate payload is invalid",
+                "study_root": str(study_root),
+                "publication_eval_path": str(publication_eval_path),
+                "gap_summaries": gap_summaries,
+                "recommended_action_types": recommended_action_types,
+            }
+
+        status = "clear" if overall_verdict in {"clear", "ready", "pass", "approved"} else overall_verdict
+        return {
+            "status": status,
+            "clear": status == "clear",
+            "summary": summary,
+            "study_root": str(study_root),
+            "publication_eval_path": str(publication_eval_path),
+            "gap_summaries": gap_summaries,
+            "recommended_action_types": recommended_action_types,
+        }
+
     def _paper_reference_materialization_payload(
         self,
         quest_root: Path,
@@ -2387,17 +2504,25 @@ class QuestService:
                     for item in (campaign_manifest.get("slices") or [])
                     if isinstance(item, dict) and str(item.get("slice_id") or "").strip()
                 }
+                control_filenames = {"campaign.md", "summary.md", "plan.md", "checklist.md"}
                 slice_files = []
                 for path in sorted(campaign_dir.glob("*.md")):
-                    if path.name in {"campaign.md", "SUMMARY.md"}:
+                    if path.name.lower() in control_filenames:
                         continue
                     slice_files.append(path)
+                todo_items_by_slice_id = {
+                    str(item.get("slice_id") or "").strip(): dict(item)
+                    for item in todo_items
+                    if isinstance(item, dict) and str(item.get("slice_id") or "").strip()
+                }
                 slices: list[dict[str, Any]] = []
                 for index, path in enumerate(slice_files):
-                    matched_todo = todo_items[index] if index < len(todo_items) and isinstance(todo_items[index], dict) else {}
-                    slice_id = str(matched_todo.get("slice_id") or path.stem).strip() or path.stem
+                    manifest_slice = dict(manifest_slices.get(path.stem) or {})
+                    slice_id = str(manifest_slice.get("slice_id") or path.stem).strip() or path.stem
+                    matched_todo = dict(todo_items_by_slice_id.get(slice_id) or {})
+                    if not matched_todo and index < len(todo_items) and isinstance(todo_items[index], dict):
+                        matched_todo = dict(todo_items[index])
                     title = str(matched_todo.get("title") or path.stem).strip() or path.stem
-                    manifest_slice = dict(manifest_slices.get(slice_id) or {})
                     slices.append(
                         {
                             "slice_id": slice_id,
@@ -2941,6 +3066,21 @@ class QuestService:
         )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
+        paper_root = (
+            Path(str(paper_contract.get("paper_root") or "")).resolve(strict=False)
+            if str(paper_contract.get("paper_root") or "").strip()
+            else None
+        )
+        managed_publication_gate = self._managed_publication_gate_payload(
+            quest_root,
+            paper_root=paper_root,
+        )
+        managed_publication_gate_status = str(managed_publication_gate.get("status") or "").strip() or "not_configured"
+        managed_publication_gate_clear = bool(managed_publication_gate.get("clear"))
+        managed_publication_gate_summary = (
+            str(managed_publication_gate.get("summary") or "").strip()
+            or "managed publication gate status is unavailable"
+        )
         reference_gate = (
             dict(reference_materialization.get("reference_gate") or {})
             if isinstance(reference_materialization.get("reference_gate"), dict)
@@ -2993,6 +3133,7 @@ class QuestService:
             and submission_blocking_item_count == 0
             and submission_checklist_handoff_ready
             and submission_minimal_ready
+            and managed_publication_gate_clear
         )
         closure_state = "bundle_not_ready"
         delivery_state = "not_ready"
@@ -3121,6 +3262,27 @@ class QuestService:
                 + (f"; missing: {', '.join(missing_parts)}" if missing_parts else "")
                 + ")"
             )
+        if not managed_publication_gate_clear:
+            gap_preview = ", ".join(
+                item for item in (managed_publication_gate.get("gap_summaries") or [])[:4] if item
+            )
+            if managed_publication_gate_status == "missing":
+                blocking_reasons.append(
+                    "managed publication gate evaluation is missing"
+                    + (
+                        f" (`{managed_publication_gate.get('publication_eval_path')}`)"
+                        if managed_publication_gate.get("publication_eval_path")
+                        else ""
+                    )
+                )
+            elif managed_publication_gate_status == "invalid":
+                blocking_reasons.append(f"managed publication gate payload is invalid: {managed_publication_gate_summary}")
+            else:
+                blocking_reasons.append(
+                    "managed publication gate blocks completion"
+                    + (f": {managed_publication_gate_summary}" if managed_publication_gate_summary else "")
+                    + (f" (gaps: {gap_preview})" if gap_preview else "")
+                )
 
         finalize_ready = (
             writing_ready
@@ -3139,6 +3301,9 @@ class QuestService:
         recommendation_scope = "paper_line_local_only"
         global_stage_authority = "publication_gate"
         global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
+        if not managed_publication_gate_clear and recommended_next_stage == "finalize":
+            recommended_next_stage = "write"
+            recommended_action = "return_to_publishability_gate"
 
         return {
             "paper_line_id": active_line_id,
@@ -3219,6 +3384,15 @@ class QuestService:
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
             "finalize_resume_packet_ready": bool(closure_evidence.get("finalize_resume_packet_ready")),
             "finalize_resume_packet_path": str(closure_evidence.get("finalize_resume_packet_path") or "").strip() or None,
+            "managed_publication_gate_status": managed_publication_gate_status,
+            "managed_publication_gate_clear": managed_publication_gate_clear,
+            "managed_publication_gate_summary": managed_publication_gate_summary,
+            "managed_publication_eval_path": str(managed_publication_gate.get("publication_eval_path") or "").strip() or None,
+            "managed_study_root": str(managed_publication_gate.get("study_root") or "").strip() or None,
+            "managed_publication_gate_gap_summaries": list(managed_publication_gate.get("gap_summaries") or []),
+            "managed_publication_gate_recommended_action_types": list(
+                managed_publication_gate.get("recommended_action_types") or []
+            ),
             "completion_approval_ready": completion_approval_ready,
             "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,
@@ -6196,7 +6370,7 @@ class QuestService:
         connector_hints: dict[str, Any] | None = None,
         created_at: str | None = None,
         counts_as_visible: bool = True,
-    ) -> dict[str, Any]:
+        ) -> dict[str, Any]:
         timestamp = created_at or utc_now()
         payload = {
             "event_id": generate_id("evt"),
@@ -6214,9 +6388,14 @@ class QuestService:
             "created_at": timestamp,
         }
         append_jsonl(self._interaction_journal_path(quest_root), payload)
+        interaction_state = self._read_interaction_state(quest_root)
+        waiting_interaction_id = self._latest_waiting_interaction_id(list(interaction_state.get("open_requests") or []))
+        active_interaction_id = interaction_id or artifact_id
+        if str(reply_mode or "").strip() != "blocking" and waiting_interaction_id:
+            active_interaction_id = waiting_interaction_id
         runtime_updates: dict[str, Any] = {
             "quest_root": quest_root,
-            "active_interaction_id": interaction_id or artifact_id,
+            "active_interaction_id": active_interaction_id,
             "last_tool_activity_at": timestamp,
             "last_tool_activity_name": "artifact.interact",
             "tool_calls_since_last_artifact_interact": 0,

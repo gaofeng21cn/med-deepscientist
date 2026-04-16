@@ -3917,6 +3917,36 @@ class ArtifactService:
     def _paper_line_state_label(value: bool) -> str:
         return "ready" if value else "blocked"
 
+    def _continuation_display_action(
+        self,
+        quest_root: Path,
+        *,
+        continuation_reason: str | None,
+        workspace_root: Path | None = None,
+    ) -> str:
+        reason = str(continuation_reason or "").strip()
+        if not reason.startswith("decision:"):
+            return "continue"
+        artifact_id = reason.split(":", 1)[1].strip()
+        if not artifact_id:
+            return "continue"
+        roots: list[Path] = []
+        resolved_workspace = self._workspace_root_for(quest_root, workspace_root)
+        if resolved_workspace not in roots:
+            roots.append(resolved_workspace)
+        if quest_root not in roots:
+            roots.append(quest_root)
+        for root in roots:
+            record = read_json(self._artifact_path(root, "decision", artifact_id), {})
+            if not isinstance(record, dict) or not record:
+                continue
+            action = str(record.get("action") or "").strip()
+            if action in {"stop", "reset", "request_user_decision"}:
+                return action
+            if action:
+                return "continue"
+        return "continue"
+
     def _paper_line_route_projection(self, payload: dict[str, Any]) -> dict[str, Any]:
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
         local_stage = str(payload.get("recommended_next_stage") or "write").strip() or "write"
@@ -3932,7 +3962,7 @@ class ArtifactService:
             return {
                 "headline_label": "Current Quest Route",
                 "display_stage": continuation_stage,
-                "display_action": "continue",
+                "display_action": str(payload.get("continuation_display_action") or "continue").strip() or "continue",
                 "local_stage": local_stage,
                 "local_action": local_action,
                 "continuation_anchor": continuation_anchor,
@@ -3957,6 +3987,12 @@ class ArtifactService:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
         route = self._paper_line_route_projection(payload)
+        route_source = str(route.get("route_source") or "").strip()
+        local_stage_label = "Recommended Next Stage"
+        local_action_label = "Recommended Action"
+        if route_source == "quest_continuation":
+            local_stage_label = "Paper-Line Local Recommendation"
+            local_action_label = "Paper-Line Local Action"
         lines = [
             "# Status",
             "",
@@ -3984,8 +4020,8 @@ class ArtifactService:
             f"- Supplementary Pending: `{int(payload.get('open_supplementary_count') or 0)}`",
             f"- Bibliography Entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
             f"- Literature Records: `{int(payload.get('literature_record_count') or 0)}`",
-            f"- Recommended Next Stage: `{str(route.get('local_stage') or 'none').strip() or 'none'}`",
-            f"- Recommended Action: `{str(route.get('local_action') or 'none').strip() or 'none'}`",
+            f"- {local_stage_label}: `{str(route.get('local_stage') or 'none').strip() or 'none'}`",
+            f"- {local_action_label}: `{str(route.get('local_action') or 'none').strip() or 'none'}`",
             f"- Continuation Anchor: `{str(route.get('continuation_anchor') or 'none').strip() or 'none'}`",
             f"- Recommendation Scope: `{recommendation_scope}`",
             f"- Global Stage Authority: `{str(payload.get('global_stage_authority') or 'none').strip() or 'none'}`",
@@ -3994,6 +4030,15 @@ class ArtifactService:
             "## Blocking Reasons",
             "",
         ]
+        if route_source == "quest_continuation":
+            lines.insert(
+                21,
+                f"- Quest-Level Next Action: `{str(route.get('display_action') or 'none').strip() or 'none'}`",
+            )
+            lines.insert(
+                21,
+                f"- Quest-Level Next Stage: `{str(route.get('display_stage') or 'none').strip() or 'none'}`",
+            )
         if blocking_reasons:
             lines.extend(f"- {item}" for item in blocking_reasons)
         else:
@@ -4003,6 +4048,10 @@ class ArtifactService:
     def _render_paper_line_summary_markdown(self, payload: dict[str, Any]) -> str:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
         route = self._paper_line_route_projection(payload)
+        route_source = str(route.get("route_source") or "").strip()
+        next_step_label = "Next step"
+        if route_source == "quest_continuation":
+            next_step_label = "Quest-level next step"
         lines = [
             "# Summary",
             "",
@@ -4018,13 +4067,13 @@ class ArtifactService:
             f"- Reference materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
             f"- Bibliography entries: `{int(payload.get('bibliography_entry_count') or 0)}`",
             f"- Literature records: `{int(payload.get('literature_record_count') or 0)}`",
-            f"- Next step: `{str(route.get('display_stage') or 'none').strip() or 'none'}` / `{str(route.get('display_action') or 'none').strip() or 'none'}`",
+            f"- {next_step_label}: `{str(route.get('display_stage') or 'none').strip() or 'none'}` / `{str(route.get('display_action') or 'none').strip() or 'none'}`",
             f"- Recommendation scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
             "",
             "## Current Blockers",
             "",
         ]
-        if route.get("route_source") == "quest_continuation":
+        if route_source == "quest_continuation":
             lines.insert(
                 9,
                 (
@@ -4148,6 +4197,7 @@ class ArtifactService:
             "active_anchor": str(snapshot.get("active_anchor") or "").strip() or None,
             "continuation_policy": str(snapshot.get("continuation_policy") or "").strip() or None,
             "continuation_anchor": str(snapshot.get("continuation_anchor") or "").strip() or None,
+            "continuation_reason": str(snapshot.get("continuation_reason") or "").strip() or None,
             "draft_status": "present" if draft_path.exists() else "missing",
             "bundle_status": "present" if bundle_path.exists() else "missing",
             "reference_materialization_ready": bool(health.get("reference_materialization_ready")),
@@ -4160,6 +4210,11 @@ class ArtifactService:
             "literature_record_paths": list(health.get("literature_record_paths") or []),
             "updated_at": utc_now(),
         }
+        payload["continuation_display_action"] = self._continuation_display_action(
+            quest_root,
+            continuation_reason=payload.get("continuation_reason"),
+            workspace_root=workspace_root,
+        )
         for paper_sync_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
             write_json(paper_sync_root / "paper_line_state.json", payload)
         self._write_paper_line_sync_documents(quest_root, payload, workspace_root=workspace_root)
@@ -6733,6 +6788,36 @@ class ArtifactService:
             }
 
         write_root = self._workspace_root_for(quest_root, workspace_root)
+        if (
+            str(payload.get("kind") or "").strip() == "decision"
+            and str(payload.get("action") or "").strip() == "request_user_decision"
+            and self._interaction_decision_type(payload) == QUEST_COMPLETION_DECISION_TYPE
+        ):
+            completion_gate_block = self._completion_approval_gate_block(quest_root)
+            if completion_gate_block is not None:
+                self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
+                return {
+                    "ok": False,
+                    "status": str(completion_gate_block.get("status") or "completion_gate_blocked"),
+                    "artifact_id": None,
+                    "path": None,
+                    "guidance": completion_gate_block.get("guidance"),
+                    "guidance_vm": {},
+                    "next_anchor": None,
+                    "recommended_skill_reads": [],
+                    "suggested_artifact_calls": [],
+                    "next_instruction": completion_gate_block.get("guidance"),
+                    "graph": None,
+                    "recorded": None,
+                    "record": None,
+                    "workspace_root": str(write_root),
+                    "artifact_path": None,
+                    "checkpoint": None,
+                    "baseline_registry_entry": None,
+                    "blocking_reasons": list(completion_gate_block.get("blocking_reasons") or []),
+                    "decision_policy": completion_gate_block.get("decision_policy"),
+                    "decision_type": completion_gate_block.get("decision_type"),
+                }
         semantic_key = self._semantic_record_key(quest_root, payload, workspace_root=write_root)
         suppress_equivalent = (
             bool(payload.get("suppress_if_semantically_equivalent"))
@@ -8202,6 +8287,57 @@ class ArtifactService:
         if value in {"autonomous", "user_gated"}:
             return value
         return "user_gated"
+
+    def _completion_approval_gate_block(self, quest_root: Path) -> dict[str, Any] | None:
+        snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        paper_gate_enforced = any(
+            bool(paper_health.get(key))
+            for key in (
+                "selected_outline_ref",
+                "bundle_present",
+                "draft_available",
+                "review_outputs_ready",
+                "proofing_outputs_ready",
+                "submission_checklist_ready",
+            )
+        )
+        if not paper_gate_enforced or bool(paper_health.get("completion_approval_ready")):
+            return None
+
+        blocking_reasons = [
+            str(item).strip()
+            for item in (
+                paper_health.get("completion_blocking_reasons")
+                or paper_health.get("blocking_reasons")
+                or []
+            )
+            if str(item).strip()
+        ]
+        guidance = self.quest_service.localized_copy(
+            quest_root=quest_root,
+            zh=(
+                "paper line 还没到可以请求 completion approval 的状态。"
+                + (f" 当前阻塞：{'; '.join(blocking_reasons[:4])}。" if blocking_reasons else "")
+                + " 请先补齐缺失的 review/proofing/finalize 产物，再决定是否请求结题批准。"
+            ),
+            en=(
+                "The paper line is not yet ready for completion approval."
+                + (f" Current blockers: {'; '.join(blocking_reasons[:4])}." if blocking_reasons else "")
+                + " Finish the missing review/proofing/finalize outputs before asking to complete the quest."
+            ),
+        )
+        return {
+            "status": "completion_gate_blocked",
+            "guidance": guidance,
+            "blocking_reasons": blocking_reasons,
+            "decision_policy": self._decision_policy(quest_root),
+            "decision_type": QUEST_COMPLETION_DECISION_TYPE,
+        }
 
     def record_main_experiment(
         self,
@@ -11232,48 +11368,10 @@ class ArtifactService:
         decision_policy = self._decision_policy(quest_root)
         decision_type = self._interaction_decision_type({"reply_schema": reply_schema_resolved})
         if kind == "decision_request" and decision_type == QUEST_COMPLETION_DECISION_TYPE:
-            snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
-            paper_health = (
-                dict(snapshot.get("paper_contract_health") or {})
-                if isinstance(snapshot.get("paper_contract_health"), dict)
-                else {}
-            )
-            paper_gate_enforced = any(
-                bool(paper_health.get(key))
-                for key in (
-                    "selected_outline_ref",
-                    "bundle_present",
-                    "draft_available",
-                    "review_outputs_ready",
-                    "proofing_outputs_ready",
-                    "submission_checklist_ready",
-                )
-            )
-            if paper_gate_enforced and not bool(paper_health.get("completion_approval_ready")):
-                blocking_reasons = [
-                    str(item).strip()
-                    for item in (
-                        paper_health.get("completion_blocking_reasons")
-                        or paper_health.get("blocking_reasons")
-                        or []
-                    )
-                    if str(item).strip()
-                ]
-                guidance = self.quest_service.localized_copy(
-                    quest_root=quest_root,
-                    zh=(
-                        "paper line 还没到可以请求 completion approval 的状态。"
-                        + (f" 当前阻塞：{'; '.join(blocking_reasons[:4])}。" if blocking_reasons else "")
-                        + " 请先补齐缺失的 review/proofing/finalize 产物，再决定是否请求结题批准。"
-                    ),
-                    en=(
-                        "The paper line is not yet ready for completion approval."
-                        + (f" Current blockers: {'; '.join(blocking_reasons[:4])}." if blocking_reasons else "")
-                        + " Finish the missing review/proofing/finalize outputs before asking to complete the quest."
-                    ),
-                )
+            completion_gate_block = self._completion_approval_gate_block(quest_root)
+            if completion_gate_block is not None:
                 return {
-                    "status": "completion_gate_blocked",
+                    "status": str(completion_gate_block.get("status") or "completion_gate_blocked"),
                     "artifact_id": None,
                     "interaction_id": None,
                     "expects_reply": False,
@@ -11290,16 +11388,16 @@ class ArtifactService:
                     "recent_inbound_messages": [],
                     "delivery_batch": None,
                     "recent_interaction_records": self.quest_service.latest_artifact_interaction_records(quest_root, limit=10),
-                    "agent_instruction": guidance,
+                    "agent_instruction": completion_gate_block.get("guidance"),
                     "queued_message_count_before_delivery": 0,
                     "queued_message_count_after_delivery": 0,
                     "open_request_count": 0,
                     "active_request": None,
                     "default_reply_interaction_id": None,
-                    "decision_policy": decision_policy,
-                    "decision_type": decision_type,
-                    "guidance": guidance,
-                    "blocking_reasons": blocking_reasons,
+                    "decision_policy": completion_gate_block.get("decision_policy", decision_policy),
+                    "decision_type": completion_gate_block.get("decision_type", decision_type),
+                    "guidance": completion_gate_block.get("guidance"),
+                    "blocking_reasons": list(completion_gate_block.get("blocking_reasons") or []),
                 }
         if (
             kind == "decision_request"
