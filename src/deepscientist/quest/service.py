@@ -1942,6 +1942,40 @@ class QuestService:
             for item in (reporting_contract.get("recommended_main_text_figures") or [])
             if isinstance(item, dict)
         ]
+        if not display_ambition and minimum_main_text_figures == 0 and not recommended_main_text_figures:
+            study_archetype = str(reporting_contract.get("study_archetype") or "").strip().lower()
+            manuscript_family = str(reporting_contract.get("manuscript_family") or "").strip().lower()
+            endpoint_type = str(reporting_contract.get("endpoint_type") or "").strip().lower()
+            if (
+                study_archetype == "survey_trend_analysis"
+                and manuscript_family == "clinical_observation"
+                and endpoint_type == "descriptive"
+            ):
+                display_ambition = "strong"
+                minimum_main_text_figures = 4
+                recommended_main_text_figures = [
+                    {
+                        "catalog_id": "F2",
+                        "display_kind": "figure",
+                        "story_role": "result_primary",
+                        "narrative_purpose": "historical_to_current_patient_migration",
+                        "tier": "core",
+                    },
+                    {
+                        "catalog_id": "F3",
+                        "display_kind": "figure",
+                        "story_role": "result_alignment",
+                        "narrative_purpose": "clinician_surface_and_guideline_alignment",
+                        "tier": "core",
+                    },
+                    {
+                        "catalog_id": "F4",
+                        "display_kind": "figure",
+                        "story_role": "result_interpretive",
+                        "narrative_purpose": "divergence_decomposition_or_robustness",
+                        "tier": "core",
+                    },
+                ]
         recommended_main_text_figure_ids = [
             str(item.get("catalog_id") or "").strip()
             for item in recommended_main_text_figures
