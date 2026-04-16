@@ -951,6 +951,91 @@ def test_snapshot_blocks_finalize_when_submission_minimal_surface_is_missing(tem
     assert "submission-minimal package is incomplete" in " ".join(health["blocking_reasons"])
 
 
+def test_snapshot_routes_back_to_write_when_result_display_surface_is_setup_only(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper display sufficiency quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "clinical_observation",
+            "reporting_guideline_family": "STROBE",
+            "display_shell_plan": [
+                {
+                    "display_id": "cohort_flow",
+                    "display_kind": "figure",
+                    "requirement_key": "cohort_flow_figure",
+                    "catalog_id": "F1",
+                },
+                {
+                    "display_id": "baseline_characteristics",
+                    "display_kind": "table",
+                    "requirement_key": "table1_baseline_characteristics",
+                    "catalog_id": "T1",
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "historical-to-current-patient-migration",
+                    "section_title": "Historical-to-current patient migration",
+                    "research_question": "Did patient treatment use migrate?",
+                    "direct_answer": "Yes.",
+                    "supporting_display_items": ["F1", "T1"],
+                    "key_quantitative_findings": ["Biologic use increased."],
+                    "clinical_meaning": "Patterns shifted.",
+                    "boundary": "Descriptive only.",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "expand_result_display_surface"
+    assert "main-text results sections still rely only on study-setup displays" in " ".join(health["blocking_reasons"])
+
+
 def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_not_clear(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

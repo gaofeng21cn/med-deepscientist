@@ -1776,6 +1776,111 @@ class QuestService:
                 return resolved
         return (paper_root / candidate).resolve(strict=False)
 
+    @staticmethod
+    def _medical_reporting_display_story_roles(reporting_contract: object) -> dict[str, str]:
+        if not isinstance(reporting_contract, dict):
+            return {}
+        story_roles: dict[str, str] = {}
+        display_shell_plan = reporting_contract.get("display_shell_plan")
+        if not isinstance(display_shell_plan, list):
+            return story_roles
+        for item in display_shell_plan:
+            if not isinstance(item, dict):
+                continue
+            catalog_id = str(item.get("catalog_id") or "").strip()
+            if not catalog_id:
+                continue
+            story_role = str(item.get("story_role") or "").strip()
+            if not story_role:
+                requirement_key = str(item.get("requirement_key") or "").strip()
+                if "::" in requirement_key:
+                    requirement_key = requirement_key.rsplit("::", 1)[-1]
+                if requirement_key in {"cohort_flow_figure", "table1_baseline_characteristics"}:
+                    story_role = "study_setup"
+                else:
+                    story_role = "result_evidence"
+            story_roles[catalog_id] = story_role
+        return story_roles
+
+    @staticmethod
+    def _main_text_figure_ids(figure_catalog: object) -> set[str]:
+        if not isinstance(figure_catalog, dict):
+            return set()
+        figure_ids: set[str] = set()
+        for item in figure_catalog.get("figures", []) or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("paper_role") or "").strip() != "main_text":
+                continue
+            figure_id = str(item.get("figure_id") or "").strip()
+            if figure_id:
+                figure_ids.add(figure_id)
+        return figure_ids
+
+    @staticmethod
+    def _table_ids_from_catalog(table_catalog: object) -> set[str]:
+        if not isinstance(table_catalog, dict):
+            return set()
+        table_ids: set[str] = set()
+        for item in table_catalog.get("tables", []) or []:
+            if not isinstance(item, dict):
+                continue
+            table_id = str(item.get("table_id") or "").strip()
+            if table_id:
+                table_ids.add(table_id)
+        return table_ids
+
+    def _results_display_surface_setup_only_sections(
+        self,
+        *,
+        paper_root: Path | None,
+    ) -> list[str]:
+        if paper_root is None:
+            return []
+        reporting_contract = read_json(paper_root / "medical_reporting_contract.json", {})
+        results_narrative_map = read_json(paper_root / "results_narrative_map.json", {})
+        figure_catalog = read_json(paper_root / "figure_catalog.json", {})
+        table_catalog = read_json(paper_root / "table_catalog.json", {})
+        display_story_roles = self._medical_reporting_display_story_roles(reporting_contract)
+        if not display_story_roles or not isinstance(results_narrative_map, dict):
+            return []
+        materialized_display_ids = self._main_text_figure_ids(figure_catalog) | self._table_ids_from_catalog(table_catalog)
+        if not materialized_display_ids:
+            return []
+
+        sections_with_display_support: list[tuple[int, str, bool]] = []
+        for index, section in enumerate(results_narrative_map.get("sections", []) or []):
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("section_id") or section.get("section_title") or index).strip() or str(index)
+            supporting_items = [
+                str(item or "").strip()
+                for item in (section.get("supporting_display_items") or [])
+                if str(item or "").strip()
+            ]
+            known_items = [
+                item
+                for item in supporting_items
+                if item in materialized_display_ids and item in display_story_roles
+            ]
+            if not known_items:
+                continue
+            has_result_facing_display = any(display_story_roles.get(item) != "study_setup" for item in known_items)
+            sections_with_display_support.append((index, section_id, has_result_facing_display))
+
+        first_result_facing_index = next(
+            (index for index, _, has_result_facing_display in sections_with_display_support if has_result_facing_display),
+            None,
+        )
+        setup_only_sections: list[str] = []
+        for index, section_id, has_result_facing_display in sections_with_display_support:
+            if has_result_facing_display:
+                continue
+            if first_result_facing_index is not None and index < first_result_facing_index:
+                continue
+            setup_only_sections.append(section_id)
+        return setup_only_sections
+
     def _managed_publication_gate_payload(
         self,
         quest_root: Path,
@@ -3071,6 +3176,10 @@ class QuestService:
             if str(paper_contract.get("paper_root") or "").strip()
             else None
         )
+        results_display_surface_setup_only_sections = self._results_display_surface_setup_only_sections(
+            paper_root=paper_root,
+        )
+        results_display_surface_ready = not results_display_surface_setup_only_sections
         managed_publication_gate = self._managed_publication_gate_payload(
             quest_root,
             paper_root=paper_root,
@@ -3088,7 +3197,13 @@ class QuestService:
         )
         surface_consistency_ok = bool(reference_materialization.get("surface_consistency_ok", True))
         contract_ok = not unresolved_required_items and not unmapped_completed_items
-        writing_ready = contract_ok and not blocking_pending_slices and reference_materialization_ready and citation_usage_ready
+        writing_ready = (
+            contract_ok
+            and not blocking_pending_slices
+            and reference_materialization_ready
+            and citation_usage_ready
+            and results_display_surface_ready
+        )
         draft_path = str((paper_contract.get("paths") or {}).get("draft") or "").strip()
         draft_status = str(active_line.get("draft_status") or "").strip() or ("present" if draft_path else "missing")
         bundle_status = str(active_line.get("bundle_status") or "").strip() or (
@@ -3167,6 +3282,9 @@ class QuestService:
         elif not citation_usage_ready:
             recommended_next_stage = "write"
             recommended_action = "revise_paper_citations"
+        elif not results_display_surface_ready:
+            recommended_next_stage = "write"
+            recommended_action = "expand_result_display_surface"
         elif bundle_status != "present":
             recommended_next_stage = "write"
             recommended_action = "prepare_bundle"
@@ -3223,6 +3341,8 @@ class QuestService:
                 "paper draft cites keys absent from references.bib"
                 + (f": {unresolved_preview}" if unresolved_preview else "")
             )
+        if results_display_surface_setup_only_sections:
+            blocking_reasons.append("main-text results sections still rely only on study-setup displays")
         if not review_outputs_ready:
             blocking_reasons.append(
                 "skeptical review outputs are missing "
@@ -3352,6 +3472,8 @@ class QuestService:
             "surface_consistency_ok": surface_consistency_ok,
             "surface_counts": list(reference_materialization.get("surface_counts") or []),
             "citation_usage_ready": citation_usage_ready,
+            "results_display_surface_ready": results_display_surface_ready,
+            "results_display_surface_setup_only_sections": results_display_surface_setup_only_sections,
             "draft_available": bool(citation_usage.get("draft_available")),
             "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),
             "draft_unique_citation_count": int(citation_usage.get("draft_unique_citation_count") or 0),
