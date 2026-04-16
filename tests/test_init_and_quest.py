@@ -1036,6 +1036,146 @@ def test_snapshot_routes_back_to_write_when_result_display_surface_is_setup_only
     assert "main-text results sections still rely only on study-setup displays" in " ".join(health["blocking_reasons"])
 
 
+def test_snapshot_routes_back_to_write_when_display_frontier_is_below_contract_ambition(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper display frontier quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "clinical_observation",
+            "reporting_guideline_family": "STROBE",
+            "display_ambition": "strong",
+            "minimum_main_text_figures": 4,
+            "recommended_main_text_figures": [
+                {
+                    "catalog_id": "F2",
+                    "display_kind": "figure",
+                    "story_role": "result_primary",
+                    "narrative_purpose": "historical_to_current_patient_migration",
+                    "tier": "core",
+                },
+                {
+                    "catalog_id": "F3",
+                    "display_kind": "figure",
+                    "story_role": "result_alignment",
+                    "narrative_purpose": "clinician_surface_and_guideline_alignment",
+                    "tier": "core",
+                },
+                {
+                    "catalog_id": "F4",
+                    "display_kind": "figure",
+                    "story_role": "result_interpretive",
+                    "narrative_purpose": "divergence_decomposition_or_robustness",
+                    "tier": "core",
+                },
+            ],
+            "display_shell_plan": [
+                {
+                    "display_id": "cohort_flow",
+                    "display_kind": "figure",
+                    "requirement_key": "cohort_flow_figure",
+                    "catalog_id": "F1",
+                    "story_role": "study_setup",
+                },
+                {
+                    "display_id": "treatment_class_comparison",
+                    "display_kind": "table",
+                    "requirement_key": "table2_treatment_class_comparison",
+                    "catalog_id": "T2",
+                    "story_role": "result_primary",
+                },
+                {
+                    "display_id": "practical_factor_comparison",
+                    "display_kind": "table",
+                    "requirement_key": "table3_practical_factor_comparison",
+                    "catalog_id": "T3",
+                    "story_role": "result_interpretive",
+                },
+                {
+                    "display_id": "preferred_class_sensitivity",
+                    "display_kind": "table",
+                    "requirement_key": "table4_preferred_class_sensitivity",
+                    "catalog_id": "T4",
+                    "story_role": "result_sensitivity",
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "historical-to-current-patient-migration",
+                    "section_title": "Historical-to-current patient migration",
+                    "research_question": "Did patient treatment use migrate?",
+                    "direct_answer": "Yes.",
+                    "supporting_display_items": ["T2"],
+                    "key_quantitative_findings": ["Biologic use increased."],
+                    "clinical_meaning": "Patterns shifted.",
+                    "boundary": "Descriptive only.",
+                },
+                {
+                    "section_id": "clinician-surface-and-guideline-alignment",
+                    "section_title": "Clinician preference and guideline alignment",
+                    "research_question": "Did clinician preference align?",
+                    "direct_answer": "Mostly.",
+                    "supporting_display_items": ["T2", "T3"],
+                    "key_quantitative_findings": ["IL-17 alignment remained close."],
+                    "clinical_meaning": "Directionally aligned.",
+                    "boundary": "Descriptive only.",
+                },
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {"table_id": "T2", "title": "Treatment class comparison"},
+                {"table_id": "T3", "title": "Practical factor comparison"},
+                {"table_id": "T4", "title": "Preferred class sensitivity"},
+            ]
+        },
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["results_display_surface_ready"] is True
+    assert health["display_strength_ready"] is False
+    assert health["active_main_text_figure_count"] == 1
+    assert health["minimum_main_text_figures"] == 4
+    assert health["missing_recommended_main_text_figure_ids"] == ["F2", "F3", "F4"]
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "expand_result_display_frontier"
+    assert "main-text figure ambition remains below contract target" in " ".join(health["blocking_reasons"])
+
+
 def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_not_clear(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

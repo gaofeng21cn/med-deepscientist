@@ -1777,6 +1777,22 @@ class QuestService:
         return (paper_root / candidate).resolve(strict=False)
 
     @staticmethod
+    def _read_paper_catalog(
+        *,
+        paper_root: Path | None,
+        root_filename: str,
+        nested_relative_path: str,
+    ) -> dict[str, Any]:
+        if paper_root is None:
+            return {}
+        for candidate in (paper_root / root_filename, paper_root / nested_relative_path):
+            if candidate.exists():
+                payload = read_json(candidate, {})
+                if isinstance(payload, dict):
+                    return payload
+        return {}
+
+    @staticmethod
     def _medical_reporting_display_story_roles(reporting_contract: object) -> dict[str, str]:
         if not isinstance(reporting_contract, dict):
             return {}
@@ -1839,8 +1855,16 @@ class QuestService:
             return []
         reporting_contract = read_json(paper_root / "medical_reporting_contract.json", {})
         results_narrative_map = read_json(paper_root / "results_narrative_map.json", {})
-        figure_catalog = read_json(paper_root / "figure_catalog.json", {})
-        table_catalog = read_json(paper_root / "table_catalog.json", {})
+        figure_catalog = self._read_paper_catalog(
+            paper_root=paper_root,
+            root_filename="figure_catalog.json",
+            nested_relative_path="figures/figure_catalog.json",
+        )
+        table_catalog = self._read_paper_catalog(
+            paper_root=paper_root,
+            root_filename="table_catalog.json",
+            nested_relative_path="tables/table_catalog.json",
+        )
         display_story_roles = self._medical_reporting_display_story_roles(reporting_contract)
         if not display_story_roles or not isinstance(results_narrative_map, dict):
             return []
@@ -1880,6 +1904,82 @@ class QuestService:
                 continue
             setup_only_sections.append(section_id)
         return setup_only_sections
+
+    def _display_frontier_payload(
+        self,
+        *,
+        paper_root: Path | None,
+    ) -> dict[str, Any]:
+        default_payload = {
+            "display_ambition": None,
+            "display_strength_ready": True,
+            "active_main_text_figure_count": 0,
+            "minimum_main_text_figures": 0,
+            "recommended_main_text_figure_ids": [],
+            "missing_recommended_main_text_figure_ids": [],
+            "display_frontier_gaps": [],
+        }
+        if paper_root is None:
+            return default_payload
+
+        reporting_contract = read_json(paper_root / "medical_reporting_contract.json", {})
+        if not isinstance(reporting_contract, dict) or not reporting_contract:
+            return default_payload
+
+        figure_catalog = self._read_paper_catalog(
+            paper_root=paper_root,
+            root_filename="figure_catalog.json",
+            nested_relative_path="figures/figure_catalog.json",
+        )
+        active_main_text_figure_ids = sorted(self._main_text_figure_ids(figure_catalog))
+        display_ambition = str(reporting_contract.get("display_ambition") or "").strip().lower() or None
+        try:
+            minimum_main_text_figures = max(0, int(reporting_contract.get("minimum_main_text_figures") or 0))
+        except (TypeError, ValueError):
+            minimum_main_text_figures = 0
+        recommended_main_text_figures = [
+            dict(item)
+            for item in (reporting_contract.get("recommended_main_text_figures") or [])
+            if isinstance(item, dict)
+        ]
+        recommended_main_text_figure_ids = [
+            str(item.get("catalog_id") or "").strip()
+            for item in recommended_main_text_figures
+            if str(item.get("catalog_id") or "").strip()
+            and str(item.get("display_kind") or "").strip().lower() == "figure"
+            and str(item.get("tier") or "").strip().lower() != "opportunistic"
+        ]
+        missing_recommended_main_text_figure_ids = [
+            catalog_id
+            for catalog_id in recommended_main_text_figure_ids
+            if catalog_id not in active_main_text_figure_ids
+        ]
+        ambition_enabled = bool(
+            display_ambition and display_ambition != "baseline"
+            or minimum_main_text_figures > 1
+            or recommended_main_text_figure_ids
+        )
+        display_frontier_gaps: list[str] = []
+        if ambition_enabled and minimum_main_text_figures > 0 and len(active_main_text_figure_ids) < minimum_main_text_figures:
+            display_frontier_gaps.append(
+                "main-text figure ambition remains below contract target "
+                f"({len(active_main_text_figure_ids)}/{minimum_main_text_figures})"
+            )
+        if ambition_enabled and missing_recommended_main_text_figure_ids:
+            display_frontier_gaps.append(
+                "recommended main-text figure slots are still missing: "
+                + ", ".join(missing_recommended_main_text_figure_ids)
+            )
+
+        return {
+            "display_ambition": display_ambition,
+            "display_strength_ready": not display_frontier_gaps,
+            "active_main_text_figure_count": len(active_main_text_figure_ids),
+            "minimum_main_text_figures": minimum_main_text_figures,
+            "recommended_main_text_figure_ids": recommended_main_text_figure_ids,
+            "missing_recommended_main_text_figure_ids": missing_recommended_main_text_figure_ids,
+            "display_frontier_gaps": display_frontier_gaps,
+        }
 
     def _managed_publication_gate_payload(
         self,
@@ -3180,6 +3280,8 @@ class QuestService:
             paper_root=paper_root,
         )
         results_display_surface_ready = not results_display_surface_setup_only_sections
+        display_frontier = self._display_frontier_payload(paper_root=paper_root)
+        display_strength_ready = bool(display_frontier.get("display_strength_ready", True))
         managed_publication_gate = self._managed_publication_gate_payload(
             quest_root,
             paper_root=paper_root,
@@ -3203,6 +3305,7 @@ class QuestService:
             and reference_materialization_ready
             and citation_usage_ready
             and results_display_surface_ready
+            and display_strength_ready
         )
         draft_path = str((paper_contract.get("paths") or {}).get("draft") or "").strip()
         draft_status = str(active_line.get("draft_status") or "").strip() or ("present" if draft_path else "missing")
@@ -3285,6 +3388,9 @@ class QuestService:
         elif not results_display_surface_ready:
             recommended_next_stage = "write"
             recommended_action = "expand_result_display_surface"
+        elif not display_strength_ready:
+            recommended_next_stage = "write"
+            recommended_action = "expand_result_display_frontier"
         elif bundle_status != "present":
             recommended_next_stage = "write"
             recommended_action = "prepare_bundle"
@@ -3343,6 +3449,11 @@ class QuestService:
             )
         if results_display_surface_setup_only_sections:
             blocking_reasons.append("main-text results sections still rely only on study-setup displays")
+        blocking_reasons.extend(
+            str(item).strip()
+            for item in (display_frontier.get("display_frontier_gaps") or [])
+            if str(item).strip()
+        )
         if not review_outputs_ready:
             blocking_reasons.append(
                 "skeptical review outputs are missing "
@@ -3474,6 +3585,15 @@ class QuestService:
             "citation_usage_ready": citation_usage_ready,
             "results_display_surface_ready": results_display_surface_ready,
             "results_display_surface_setup_only_sections": results_display_surface_setup_only_sections,
+            "display_ambition": display_frontier.get("display_ambition"),
+            "display_strength_ready": display_strength_ready,
+            "active_main_text_figure_count": int(display_frontier.get("active_main_text_figure_count") or 0),
+            "minimum_main_text_figures": int(display_frontier.get("minimum_main_text_figures") or 0),
+            "recommended_main_text_figure_ids": list(display_frontier.get("recommended_main_text_figure_ids") or []),
+            "missing_recommended_main_text_figure_ids": list(
+                display_frontier.get("missing_recommended_main_text_figure_ids") or []
+            ),
+            "display_frontier_gaps": list(display_frontier.get("display_frontier_gaps") or []),
             "draft_available": bool(citation_usage.get("draft_available")),
             "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),
             "draft_unique_citation_count": int(citation_usage.get("draft_unique_citation_count") or 0),
