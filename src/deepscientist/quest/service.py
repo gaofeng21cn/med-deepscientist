@@ -1610,6 +1610,35 @@ class QuestService:
         except OSError:
             return 0.0
 
+    def _paper_surface_rank(self, paper_root: Path) -> tuple[int, float]:
+        if not paper_root.exists() or not paper_root.is_dir():
+            return (-1, -1.0)
+        selected_outline = paper_root / "selected_outline.json"
+        bundle_manifest = paper_root / "paper_bundle_manifest.json"
+        draft = paper_root / "draft.md"
+        claim_map = paper_root / "claim_evidence_map.json"
+        evidence_ledger = paper_root / "evidence_ledger.json"
+        score = 0
+        if selected_outline.exists():
+            score += 4
+        if bundle_manifest.exists():
+            score += 5
+        if draft.exists():
+            score += 2
+        if claim_map.exists():
+            score += 3
+        if evidence_ledger.exists():
+            score += 3
+        latest = max(
+            self._path_mtime(selected_outline),
+            self._path_mtime(bundle_manifest),
+            self._path_mtime(draft),
+            self._path_mtime(claim_map),
+            self._path_mtime(evidence_ledger),
+            self._path_mtime(paper_root),
+        )
+        return (score, latest)
+
     def _best_paper_root(self, quest_root: Path, workspace_root: Path) -> Path | None:
         best_root: Path | None = None
         best_rank: tuple[int, float] = (-1, -1.0)
@@ -1617,23 +1646,7 @@ class QuestService:
             paper_root = candidate / "paper"
             if not paper_root.exists() or not paper_root.is_dir():
                 continue
-            selected_outline = paper_root / "selected_outline.json"
-            bundle_manifest = paper_root / "paper_bundle_manifest.json"
-            draft = paper_root / "draft.md"
-            score = 0
-            if selected_outline.exists():
-                score += 4
-            if bundle_manifest.exists():
-                score += 5
-            if draft.exists():
-                score += 2
-            latest = max(
-                self._path_mtime(selected_outline),
-                self._path_mtime(bundle_manifest),
-                self._path_mtime(draft),
-                self._path_mtime(paper_root),
-            )
-            rank = (score, latest)
+            rank = self._paper_surface_rank(paper_root)
             if rank > best_rank:
                 best_rank = rank
                 best_root = paper_root
@@ -2008,13 +2021,21 @@ class QuestService:
         target_paper_root = resolved_quest_root / "paper"
         target_literature_root = resolved_quest_root / "literature"
 
-        paper_changed = self._surface_tree_signature(source_paper_root) != self._surface_tree_signature(target_paper_root)
+        paper_source_root = source_paper_root
+        paper_target_root = target_paper_root
+        paper_sync_direction = "active_to_canonical"
+        if self._paper_surface_rank(target_paper_root) > self._paper_surface_rank(source_paper_root):
+            paper_source_root = target_paper_root
+            paper_target_root = source_paper_root
+            paper_sync_direction = "canonical_to_active"
+
+        paper_changed = self._surface_tree_signature(paper_source_root) != self._surface_tree_signature(paper_target_root)
         literature_changed = self._surface_tree_signature(source_literature_root) != self._surface_tree_signature(target_literature_root)
 
         if paper_changed:
             self._sync_surface_tree(
-                source_paper_root,
-                target_paper_root,
+                paper_source_root,
+                paper_target_root,
                 preserved_paths={"medical_analysis_contract.json", "medical_reporting_contract.json"},
             )
         if literature_changed:
@@ -2025,6 +2046,7 @@ class QuestService:
             "skipped": False,
             "paper_changed": paper_changed,
             "literature_changed": literature_changed,
+            "paper_sync_direction": paper_sync_direction,
             "source_workspace_root": str(resolved_workspace_root),
             "quest_root": str(resolved_quest_root),
         }
