@@ -637,6 +637,8 @@ def test_prompt_builder_mentions_decision_request_options_and_timeout(temp_home:
     assert "Hugging Face key/token" in prompt
     assert "do not invent placeholders" in prompt
     assert "sleep 3600" in prompt
+    assert "sleep 1800" in prompt
+    assert "publication gate currently owns progression" in prompt
 
 
 def test_prompt_builder_mentions_algorithm_first_mode_when_paper_disabled(temp_home: Path) -> None:

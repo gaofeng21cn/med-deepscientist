@@ -298,6 +298,8 @@ def test_shared_interaction_contract_covers_blocking_and_mailbox_rules() -> None
     assert "wait up to 1 day" in text
     assert "missing external credential or secret" in text
     assert "sleep 3600" in text
+    assert "sleep 1800" in text
+    assert "publication gate currently owns progression" in text
     assert "highest-priority user instruction bundle" in text
     assert "Immediately follow any non-empty mailbox poll" in text
     assert "real user-visible progress" in text
