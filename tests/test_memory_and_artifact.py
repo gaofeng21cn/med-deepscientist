@@ -157,6 +157,43 @@ def _write_citation_rich_draft(paper_root: Path, *, count: int = 20) -> None:
     )
 
 
+def _materialize_submission_minimal_projection(
+    paper_root: Path,
+    *,
+    include_display_exports: bool,
+) -> None:
+    submission_root = paper_root / "submission_minimal"
+    submission_root.mkdir(parents=True, exist_ok=True)
+    (submission_root / "manuscript.docx").write_text("docx", encoding="utf-8")
+    (submission_root / "paper.pdf").write_text("%PDF-1.4\n", encoding="utf-8")
+    package_files = [
+        {"path": "paper/submission_minimal/submission_manifest.json", "role": "manifest"},
+        {"path": "paper/submission_minimal/paper.pdf", "role": "pdf"},
+        {"path": "paper/submission_minimal/manuscript.docx", "role": "docx"},
+    ]
+    if include_display_exports:
+        (submission_root / "figures").mkdir(parents=True, exist_ok=True)
+        (submission_root / "tables").mkdir(parents=True, exist_ok=True)
+        (submission_root / "figures" / "F1.png").write_text("figure", encoding="utf-8")
+        (submission_root / "tables" / "T1.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+        package_files.extend(
+            [
+                {"path": "paper/submission_minimal/figures/F1.png", "role": "figure"},
+                {"path": "paper/submission_minimal/tables/T1.csv", "role": "table"},
+            ]
+        )
+    write_json(
+        submission_root / "submission_manifest.json",
+        {
+            "manuscript": {
+                "docx_path": "paper/submission_minimal/manuscript.docx",
+                "pdf_path": "paper/submission_minimal/paper.pdf",
+            },
+            "package_files": package_files,
+        },
+    )
+
+
 def test_confirm_baseline_writes_metric_contract_json_and_exposes_path(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -6259,6 +6296,130 @@ def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_surfa
     assert "submission-minimal package is incomplete" in " ".join(health["blocking_reasons"])
 
 
+def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_omits_display_exports(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact missing submission display exports quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Missing Submission Display Exports Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-missing-submission-display-exports",
+            "paper_branch": "paper/artifact-missing-submission-display-exports",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Missing Submission Display Exports Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-missing-submission-display-exports",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    (paper_root / "final_claim_ledger.md").write_text(
+        "# Final Claim Ledger\n\nAll claims closed.\n",
+        encoding="utf-8",
+    )
+    (quest_root / "handoffs" / "finalize_resume_packet.md").write_text(
+        "# Finalize Resume Packet\n\nReady.\n",
+        encoding="utf-8",
+    )
+    _materialize_submission_minimal_projection(paper_root, include_display_exports=False)
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["submission_minimal_ready"] is False
+    assert health["submission_minimal_docx_present"] is True
+    assert health["submission_minimal_pdf_present"] is True
+    assert health["submission_minimal_expected_main_text_figure_count"] == 1
+    assert health["submission_minimal_materialized_main_text_figure_count"] == 0
+    assert health["submission_minimal_missing_main_text_figure_ids"] == ["F1"]
+    assert health["submission_minimal_expected_table_count"] == 1
+    assert health["submission_minimal_materialized_table_count"] == 0
+    assert health["submission_minimal_missing_table_ids"] == ["T1"]
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission-minimal package is missing figure exports for the active display set" in " ".join(
+        health["blocking_reasons"]
+    )
+    assert "submission-minimal package is missing table exports for the active display set" in " ".join(
+        health["blocking_reasons"]
+    )
+
+
 def test_get_paper_contract_health_routes_back_to_write_when_result_display_surface_is_setup_only(
     temp_home: Path,
 ) -> None:
@@ -6397,6 +6558,154 @@ def test_get_paper_contract_health_routes_back_to_write_when_result_display_surf
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "expand_result_display_surface"
     assert "main-text results sections still rely only on study-setup displays" in " ".join(health["blocking_reasons"])
+
+
+def test_get_paper_contract_health_accepts_result_display_when_catalog_materializes_main_text_figure_outside_contract_shell_plan(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact display sufficiency fallback quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Display Sufficiency Fallback Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-display-sufficiency-fallback",
+            "paper_branch": "paper/display-sufficiency-fallback",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Display Sufficiency Fallback Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/display-sufficiency-fallback",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(temp_home / "studies" / "001-risk"),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "clinical_observation",
+            "reporting_guideline_family": "STROBE",
+            "display_shell_plan": [
+                {
+                    "display_id": "cohort_flow",
+                    "display_kind": "figure",
+                    "requirement_key": "cohort_flow_figure",
+                    "catalog_id": "S1",
+                },
+                {
+                    "display_id": "baseline_characteristics",
+                    "display_kind": "table",
+                    "requirement_key": "table1_baseline_characteristics",
+                    "catalog_id": "T1",
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "claim_evidence_map.json",
+        {"claims": []},
+    )
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "selected_outline_ref": "outline-001",
+            "items": [],
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "results-local-architecture",
+                    "section_title": "Local architecture",
+                    "research_question": "What does the local structure show?",
+                    "direct_answer": "The local structure is already supported by a result-facing figure.",
+                    "supporting_display_items": ["S1", "F1", "T1"],
+                    "key_quantitative_findings": ["Result-facing figure exists."],
+                    "clinical_meaning": "Result display is present.",
+                    "boundary": "Descriptive only.",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figures" / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "S1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                },
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Architecture summary",
+                },
+            ]
+        },
+    )
+    write_json(
+        paper_root / "tables" / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["recommended_action"] != "expand_result_display_surface"
+    assert "main-text results sections still rely only on study-setup displays" not in " ".join(
+        health["blocking_reasons"]
+    )
 
 
 def test_paper_line_state_sync_matches_public_contract_health_for_completed_maintenance_slices(

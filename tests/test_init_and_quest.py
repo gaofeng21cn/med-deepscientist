@@ -130,6 +130,42 @@ def _materialize_ready_paper_line_for_publication_gate(
     return paper_root
 
 
+def _materialize_submission_minimal_projection(
+    paper_root: Path,
+    *,
+    include_display_exports: bool,
+) -> None:
+    submission_root = ensure_dir(paper_root / "submission_minimal")
+    write_text(submission_root / "manuscript.docx", "docx")
+    write_text(submission_root / "paper.pdf", "%PDF-1.4\n")
+    package_files = [
+        {"path": "paper/submission_minimal/submission_manifest.json", "role": "manifest"},
+        {"path": "paper/submission_minimal/paper.pdf", "role": "pdf"},
+        {"path": "paper/submission_minimal/manuscript.docx", "role": "docx"},
+    ]
+    if include_display_exports:
+        ensure_dir(submission_root / "figures")
+        ensure_dir(submission_root / "tables")
+        write_text(submission_root / "figures" / "F1.png", "figure")
+        write_text(submission_root / "tables" / "T1.csv", "a,b\n1,2\n")
+        package_files.extend(
+            [
+                {"path": "paper/submission_minimal/figures/F1.png", "role": "figure"},
+                {"path": "paper/submission_minimal/tables/T1.csv", "role": "table"},
+            ]
+        )
+    write_json(
+        submission_root / "submission_manifest.json",
+        {
+            "manuscript": {
+                "docx_path": "paper/submission_minimal/manuscript.docx",
+                "pdf_path": "paper/submission_minimal/paper.pdf",
+            },
+            "package_files": package_files,
+        },
+    )
+
+
 def test_init_creates_required_files(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
@@ -951,6 +987,65 @@ def test_snapshot_blocks_finalize_when_submission_minimal_surface_is_missing(tem
     assert "submission-minimal package is incomplete" in " ".join(health["blocking_reasons"])
 
 
+def test_snapshot_blocks_finalize_when_submission_minimal_omits_display_exports(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper missing submission display exports quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    _materialize_submission_minimal_projection(paper_root, include_display_exports=False)
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Main architecture figure",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline table",
+                }
+            ]
+        },
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["submission_minimal_ready"] is False
+    assert health["submission_minimal_docx_present"] is True
+    assert health["submission_minimal_pdf_present"] is True
+    assert health["submission_minimal_expected_main_text_figure_count"] == 1
+    assert health["submission_minimal_materialized_main_text_figure_count"] == 0
+    assert health["submission_minimal_missing_main_text_figure_ids"] == ["F1"]
+    assert health["submission_minimal_expected_table_count"] == 1
+    assert health["submission_minimal_materialized_table_count"] == 0
+    assert health["submission_minimal_missing_table_ids"] == ["T1"]
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission-minimal package is missing figure exports for the active display set" in " ".join(
+        health["blocking_reasons"]
+    )
+    assert "submission-minimal package is missing table exports for the active display set" in " ".join(
+        health["blocking_reasons"]
+    )
+
+
 def test_snapshot_routes_back_to_write_when_result_display_surface_is_setup_only(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -1276,6 +1371,99 @@ def test_snapshot_prefers_richer_nested_figure_catalog_over_legacy_root_projecti
     assert health["minimum_main_text_figures"] == 4
     assert health["missing_recommended_main_text_figure_ids"] == ["F2", "F3", "F4"]
     assert health["recommended_action"] == "expand_result_display_frontier"
+
+
+def test_snapshot_accepts_result_display_when_catalog_materializes_main_text_figure_outside_contract_shell_plan(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper display sufficiency fallback quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "clinical_observation",
+            "reporting_guideline_family": "STROBE",
+            "display_shell_plan": [
+                {
+                    "display_id": "cohort_flow",
+                    "display_kind": "figure",
+                    "requirement_key": "cohort_flow_figure",
+                    "catalog_id": "S1",
+                },
+                {
+                    "display_id": "baseline_characteristics",
+                    "display_kind": "table",
+                    "requirement_key": "table1_baseline_characteristics",
+                    "catalog_id": "T1",
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "results-local-architecture",
+                    "section_title": "Local architecture",
+                    "research_question": "What does the local structure show?",
+                    "direct_answer": "The local structure is already supported by a result-facing figure.",
+                    "supporting_display_items": ["S1", "F1", "T1"],
+                    "key_quantitative_findings": ["Result-facing figure exists."],
+                    "clinical_meaning": "Result display is present.",
+                    "boundary": "Descriptive only.",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figures" / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "S1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                },
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Architecture summary",
+                },
+            ]
+        },
+    )
+    write_json(
+        paper_root / "tables" / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["recommended_action"] != "expand_result_display_surface"
+    assert "main-text results sections still rely only on study-setup displays" not in " ".join(
+        health["blocking_reasons"]
+    )
 
 
 def test_snapshot_infers_display_frontier_from_legacy_survey_trend_contract(temp_home: Path) -> None:

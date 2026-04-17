@@ -1795,13 +1795,18 @@ class QuestService:
         return {}
 
     @staticmethod
-    def _medical_reporting_display_story_roles(reporting_contract: object) -> dict[str, str]:
+    def _medical_reporting_display_story_roles(
+        reporting_contract: object,
+        *,
+        figure_catalog: object | None = None,
+        table_catalog: object | None = None,
+    ) -> dict[str, str]:
         if not isinstance(reporting_contract, dict):
             return {}
         story_roles: dict[str, str] = {}
         display_shell_plan = reporting_contract.get("display_shell_plan")
         if not isinstance(display_shell_plan, list):
-            return story_roles
+            display_shell_plan = []
         for item in display_shell_plan:
             if not isinstance(item, dict):
                 continue
@@ -1818,6 +1823,10 @@ class QuestService:
                 else:
                     story_role = "result_evidence"
             story_roles[catalog_id] = story_role
+        for catalog_id in QuestService._main_text_figure_ids(figure_catalog):
+            story_roles.setdefault(catalog_id, "result_evidence")
+        for catalog_id in QuestService._table_ids_from_catalog(table_catalog):
+            story_roles.setdefault(catalog_id, "result_evidence")
         return story_roles
 
     @staticmethod
@@ -1848,6 +1857,19 @@ class QuestService:
                 table_ids.add(table_id)
         return table_ids
 
+    @staticmethod
+    def _catalog_ids_materialized_in_package(catalog_ids: set[str], package_paths: list[str]) -> set[str]:
+        matched: set[str] = set()
+        normalized_paths = [PurePosixPath(path).as_posix() for path in package_paths if str(path).strip()]
+        for catalog_id in catalog_ids:
+            pattern = re.compile(rf"(^|[^A-Za-z0-9]){re.escape(catalog_id)}([^A-Za-z0-9]|$)")
+            for raw_path in normalized_paths:
+                path = PurePosixPath(raw_path)
+                if pattern.search(path.name) or pattern.search(path.stem) or pattern.search(raw_path):
+                    matched.add(catalog_id)
+                    break
+        return matched
+
     def _results_display_surface_setup_only_sections(
         self,
         *,
@@ -1867,7 +1889,11 @@ class QuestService:
             root_filename="table_catalog.json",
             nested_relative_path="tables/table_catalog.json",
         )
-        display_story_roles = self._medical_reporting_display_story_roles(reporting_contract)
+        display_story_roles = self._medical_reporting_display_story_roles(
+            reporting_contract,
+            figure_catalog=figure_catalog,
+            table_catalog=table_catalog,
+        )
         if not display_story_roles or not isinstance(results_narrative_map, dict):
             return []
         materialized_display_ids = self._main_text_figure_ids(figure_catalog) | self._table_ids_from_catalog(table_catalog)
@@ -3134,6 +3160,15 @@ class QuestService:
         )
         if not isinstance(submission_minimal_manifest, dict):
             submission_minimal_manifest = {}
+        submission_minimal_package_paths: list[str] = []
+        for item in submission_minimal_manifest.get("package_files") or []:
+            if not isinstance(item, dict):
+                continue
+            path_value = str(item.get("path") or "").strip()
+            if not path_value:
+                continue
+            if _resolve_workspace_relative_path(path_value) is not None:
+                submission_minimal_package_paths.append(path_value)
         manuscript_payload = (
             dict(submission_minimal_manifest.get("manuscript") or {})
             if isinstance(submission_minimal_manifest.get("manuscript"), dict)
@@ -3149,6 +3184,31 @@ class QuestService:
             submission_minimal_pdf_path = _first_existing(
                 [paper_root / "submission_minimal" / "paper.pdf" for paper_root in paper_roots]
             )
+        primary_paper_root = paper_roots[0] if paper_roots else None
+        figure_catalog = self._read_paper_catalog(
+            paper_root=primary_paper_root,
+            root_filename="figure_catalog.json",
+            nested_relative_path="figures/figure_catalog.json",
+        )
+        table_catalog = self._read_paper_catalog(
+            paper_root=primary_paper_root,
+            root_filename="table_catalog.json",
+            nested_relative_path="tables/table_catalog.json",
+        )
+        expected_main_text_figure_ids = self._main_text_figure_ids(figure_catalog)
+        expected_table_ids = self._table_ids_from_catalog(table_catalog)
+        materialized_main_text_figure_ids = self._catalog_ids_materialized_in_package(
+            expected_main_text_figure_ids,
+            submission_minimal_package_paths,
+        )
+        materialized_table_ids = self._catalog_ids_materialized_in_package(
+            expected_table_ids,
+            submission_minimal_package_paths,
+        )
+        submission_minimal_display_exports_ready = (
+            materialized_main_text_figure_ids == expected_main_text_figure_ids
+            and materialized_table_ids == expected_table_ids
+        )
         submission_checklist_handoff_ready = _submission_checklist_handoff_ready(submission_checklist)
         submission_checklist_status = (
             str(submission_checklist.get("overall_status") or submission_checklist.get("status") or "").strip() or None
@@ -3174,10 +3234,19 @@ class QuestService:
             "submission_minimal_pdf_path": submission_minimal_pdf_path,
             "submission_minimal_docx_present": bool(submission_minimal_docx_path),
             "submission_minimal_pdf_present": bool(submission_minimal_pdf_path),
+            "submission_minimal_expected_main_text_figure_count": len(expected_main_text_figure_ids),
+            "submission_minimal_materialized_main_text_figure_count": len(materialized_main_text_figure_ids),
+            "submission_minimal_missing_main_text_figure_ids": sorted(
+                expected_main_text_figure_ids - materialized_main_text_figure_ids
+            ),
+            "submission_minimal_expected_table_count": len(expected_table_ids),
+            "submission_minimal_materialized_table_count": len(materialized_table_ids),
+            "submission_minimal_missing_table_ids": sorted(expected_table_ids - materialized_table_ids),
             "submission_minimal_ready": bool(
                 submission_minimal_manifest_path
                 and submission_minimal_docx_path
                 and submission_minimal_pdf_path
+                and submission_minimal_display_exports_ready
             ),
             "final_claim_ledger_ready": bool(final_claim_ledger_path),
             "final_claim_ledger_path": final_claim_ledger_path,
@@ -3376,6 +3445,22 @@ class QuestService:
         submission_minimal_docx_present = bool(closure_evidence.get("submission_minimal_docx_present"))
         submission_minimal_pdf_present = bool(closure_evidence.get("submission_minimal_pdf_present"))
         submission_minimal_ready = bool(closure_evidence.get("submission_minimal_ready"))
+        submission_minimal_expected_main_text_figure_count = int(
+            closure_evidence.get("submission_minimal_expected_main_text_figure_count") or 0
+        )
+        submission_minimal_materialized_main_text_figure_count = int(
+            closure_evidence.get("submission_minimal_materialized_main_text_figure_count") or 0
+        )
+        submission_minimal_missing_main_text_figure_ids = list(
+            closure_evidence.get("submission_minimal_missing_main_text_figure_ids") or []
+        )
+        submission_minimal_expected_table_count = int(
+            closure_evidence.get("submission_minimal_expected_table_count") or 0
+        )
+        submission_minimal_materialized_table_count = int(
+            closure_evidence.get("submission_minimal_materialized_table_count") or 0
+        )
+        submission_minimal_missing_table_ids = list(closure_evidence.get("submission_minimal_missing_table_ids") or [])
         audit_package_ready = (
             bundle_status == "present"
             and review_outputs_ready
@@ -3529,6 +3614,18 @@ class QuestService:
                 + (f"; missing: {', '.join(missing_parts)}" if missing_parts else "")
                 + ")"
             )
+            if submission_minimal_manifest_path and submission_minimal_missing_main_text_figure_ids:
+                blocking_reasons.append(
+                    "submission-minimal package is missing figure exports for the active display set "
+                    f"({submission_minimal_materialized_main_text_figure_count}/"
+                    f"{submission_minimal_expected_main_text_figure_count} main-text figures materialized)"
+                )
+            if submission_minimal_manifest_path and submission_minimal_missing_table_ids:
+                blocking_reasons.append(
+                    "submission-minimal package is missing table exports for the active display set "
+                    f"({submission_minimal_materialized_table_count}/"
+                    f"{submission_minimal_expected_table_count} tables materialized)"
+                )
         if not managed_publication_gate_clear:
             gap_preview = ", ".join(
                 item for item in (managed_publication_gate.get("gap_summaries") or [])[:4] if item
@@ -3657,6 +3754,14 @@ class QuestService:
             "submission_minimal_manifest_path": submission_minimal_manifest_path,
             "submission_minimal_docx_present": submission_minimal_docx_present,
             "submission_minimal_pdf_present": submission_minimal_pdf_present,
+            "submission_minimal_expected_main_text_figure_count": submission_minimal_expected_main_text_figure_count,
+            "submission_minimal_materialized_main_text_figure_count": (
+                submission_minimal_materialized_main_text_figure_count
+            ),
+            "submission_minimal_missing_main_text_figure_ids": submission_minimal_missing_main_text_figure_ids,
+            "submission_minimal_expected_table_count": submission_minimal_expected_table_count,
+            "submission_minimal_materialized_table_count": submission_minimal_materialized_table_count,
+            "submission_minimal_missing_table_ids": submission_minimal_missing_table_ids,
             "submission_minimal_ready": submission_minimal_ready,
             "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,
