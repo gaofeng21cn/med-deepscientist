@@ -6102,6 +6102,104 @@ def test_get_quest_state_rehydrates_reference_surface_from_active_paper_worktree
     assert coverage["records_by_primary_source"]["pubmed"] == 20
 
 
+def test_get_quest_state_prefers_richer_canonical_paper_surface_over_stale_active_worktree(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("canonical paper surface wins over stale active worktree quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    worktree_root = quest_root / ".ds" / "worktrees" / "paper-stale-sync"
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    quest_service.update_research_state(
+        quest_root,
+        workspace_mode="paper",
+        current_workspace_root=str(worktree_root),
+        current_workspace_branch="paper/main",
+    )
+
+    active_paper_root = worktree_root / "paper"
+    active_paper_root.mkdir(parents=True, exist_ok=True)
+    (active_paper_root / "draft.md").write_text(
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "**Results:** [Result placeholder: stale active paper surface still points at the old draft.]",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_json(
+        active_paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/main",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    _materialize_reference_materials(quest_root, active_paper_root, workspace_root=worktree_root, count=20)
+
+    canonical_paper_root = quest_root / "paper"
+    canonical_paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        canonical_paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Canonical Paper Surface Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        canonical_paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/main",
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(
+        canonical_paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(
+        canonical_paper_root / "claim_evidence_map.json",
+        {
+            "claims": [
+                {
+                    "claim_id": "claim-001",
+                    "claim_text": "Canonical paper surface keeps the measured Results section.",
+                    "status": "supported",
+                }
+            ]
+        },
+    )
+    write_json(canonical_paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(canonical_paper_root, count=20)
+    (canonical_paper_root / "draft.md").write_text(
+        (canonical_paper_root / "draft.md").read_text(encoding="utf-8")
+        + "\n## Results\n\nChina-side discrimination was `0.7600`, and the draft no longer contains placeholders.\n",
+        encoding="utf-8",
+    )
+
+    state = artifact.get_quest_state(quest_root, detail="summary")
+
+    assert state["ok"] is True
+    assert (quest_root / "paper" / "selected_outline.json").exists()
+    assert (quest_root / "paper" / "claim_evidence_map.json").exists()
+    assert (active_paper_root / "selected_outline.json").exists()
+    assert (active_paper_root / "claim_evidence_map.json").exists()
+    active_draft = (active_paper_root / "draft.md").read_text(encoding="utf-8")
+    canonical_draft = (quest_root / "paper" / "draft.md").read_text(encoding="utf-8")
+    assert "0.7600" in canonical_draft
+    assert "0.7600" in active_draft
+    assert "Result placeholder" not in active_draft
+
+
 def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checklist_has_blockers(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
