@@ -251,6 +251,12 @@ def test_new_creates_standalone_git_repo(temp_home: Path) -> None:
     assert (quest_root / ".claude" / "agents").exists()
     assert (quest_root / ".claude" / "agents" / "deepscientist-decision.md").exists()
     assert (quest_root / ".codex" / "skills" / "deepscientist-finalize" / "SKILL.md").exists()
+    gitignore_text = (quest_root / ".gitignore").read_text(encoding="utf-8")
+    assert ".ds/**/*.tmp" in gitignore_text
+    assert ".ds/bash_exec/" in gitignore_text
+    assert ".ds/codex_history/" in gitignore_text
+    assert ".ds/codex_homes/" in gitignore_text
+    assert ".ds/runs/" in gitignore_text
     assert snapshot["quest_id"] == "001"
     assert snapshot["runner"] == "codex"
     assert "paths" in snapshot

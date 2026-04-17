@@ -4,6 +4,15 @@ from pathlib import Path
 
 from ..shared import ensure_dir, run_command, slugify
 
+CHECKPOINT_EXCLUDE_PATHS = (
+    ":(exclude).ds/bash_exec/**",
+    ":(exclude).ds/codex_history/**",
+    ":(exclude).ds/codex_homes/**",
+    ":(exclude).ds/runs/**",
+    ":(exclude).ds/slim_backups/**",
+    ":(exclude).ds/worktrees/**",
+)
+
 
 def init_repo(repo: Path) -> None:
     run_command(["git", "init"], cwd=repo)
@@ -93,7 +102,7 @@ def canonical_worktree_root(repo: Path, run_id: str) -> Path:
 
 
 def checkpoint_repo(repo: Path, message: str, allow_empty: bool = False) -> dict:
-    run_command(["git", "add", "-A"], cwd=repo, check=False)
+    run_command(["git", "add", "-A", "--", ".", *CHECKPOINT_EXCLUDE_PATHS], cwd=repo, check=False)
     if not allow_empty and not has_changes(repo):
         return {
             "committed": False,

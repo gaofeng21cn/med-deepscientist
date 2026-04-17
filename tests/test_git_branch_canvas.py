@@ -63,6 +63,44 @@ def _write_run_artifact(
     )
 
 
+def test_checkpoint_repo_skips_heavy_runtime_paths_even_when_already_tracked(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("checkpoint runtime exclusion quest")
+    quest_root = Path(quest["quest_root"])
+
+    runtime_log = quest_root / ".ds" / "bash_exec" / "bash-001" / "log.jsonl"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    write_text(runtime_log, '{"seq":1,"line":"seed"}\n')
+    run_command(["git", "add", "-f", runtime_log.relative_to(quest_root).as_posix()], cwd=quest_root, check=True)
+    run_command(["git", "commit", "-m", "seed runtime log"], cwd=quest_root, check=True)
+
+    write_text(runtime_log, '{"seq":1,"line":"updated"}\n')
+    write_text(quest_root / "status.md", "# Status\n\nCheckpoint user-visible update.\n")
+
+    result = checkpoint_repo(quest_root, "checkpoint skips runtime", allow_empty=False)
+
+    assert result["committed"] is True
+    changed_paths = {
+        line.strip()
+        for line in run_command(
+            ["git", "show", "--name-only", "--format=", "HEAD"],
+            cwd=quest_root,
+            check=True,
+        ).stdout.splitlines()
+        if line.strip()
+    }
+    assert "status.md" in changed_paths
+    assert ".ds/bash_exec/bash-001/log.jsonl" not in changed_paths
+    runtime_diff = run_command(
+        ["git", "diff", "HEAD^", "HEAD", "--", ".ds/bash_exec/bash-001/log.jsonl"],
+        cwd=quest_root,
+        check=True,
+    )
+    assert runtime_diff.stdout.strip() == ""
+
+
 def test_git_branch_canvas_distinguishes_major_and_analysis_branches(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

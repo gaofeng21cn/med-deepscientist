@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import time
 from pathlib import Path
 
 from deepscientist import shared
+from deepscientist.shared import write_json
 
 
 def test_resolve_runner_binary_prefers_env_override_for_codex(monkeypatch, tmp_path: Path) -> None:
@@ -56,3 +59,17 @@ def test_resolve_runner_binary_uses_bundled_codex_as_fallback(monkeypatch, tmp_p
     monkeypatch.setattr(shared, "_codex_repo_roots", lambda: [bundled_root])
 
     assert shared.resolve_runner_binary("codex", runner_name="codex") == str(bundled_binary)
+
+
+def test_write_json_prunes_stale_atomic_tempfiles(tmp_path: Path) -> None:
+    target = tmp_path / "details.v1.json"
+    target.write_text('{"old": true}\n', encoding="utf-8")
+    stale = tmp_path / "details.v1.json.deadbeef.tmp"
+    stale.write_text("stale\n", encoding="utf-8")
+    old = time.time() - 8 * 3600
+    os.utime(stale, (old, old))
+
+    write_json(target, {"fresh": True})
+
+    assert not stale.exists()
+    assert target.read_text(encoding="utf-8").strip() == '{\n  "fresh": true\n}'

@@ -449,6 +449,7 @@ Do not use any direct terminal, subprocess, or implicit shell path outside `bash
 - If runtime is uncertain or likely long, prefer `bash_exec(mode='detach', ...)` plus monitoring instead of pretending a short timeout is enough.
 - Judge run health by forward progress, not by whether the final artifact already appeared.
 - Use the runtime's managed read/list/history/await/kill modes instead of rerunning commands blindly.
+- For generic text or file searches, exclude heavy runtime mirrors such as `.git`, `.venv`, `.ds/bash_exec`, `.ds/codex_homes`, and nested worktree-local `.ds` trees unless the task is explicitly about runtime forensics; do not recursively grep saved bash logs to answer ordinary content questions.
 - If a run is clearly invalid, wedged, or superseded, stop it explicitly, record why, fix the issue, and relaunch cleanly.
 - If you are waiting on an existing managed session, prefer `bash_exec(mode='await', id=..., timeout_seconds=...)`; if you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)` with a real buffer.
 - `managed_python_env_rule`: for Python scripts, package-manager commands, and tests, prefer the repo's managed environment such as `uv run ...` or an explicit project venv interpreter; do not assume bare `python`, `python -m pytest`, or system `pytest` has the required dependencies.

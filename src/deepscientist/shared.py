@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
@@ -60,9 +61,28 @@ def read_text(path: Path, default: str = "") -> str:
 
 def _atomic_write_text(path: Path, content: str) -> None:
     ensure_dir(path.parent)
+    _cleanup_stale_atomic_tempfiles(path)
     temp_path = path.with_suffix(f"{path.suffix}.{uuid4().hex}.tmp")
     temp_path.write_text(content, encoding="utf-8")
     temp_path.replace(path)
+    _cleanup_stale_atomic_tempfiles(path)
+
+
+def _cleanup_stale_atomic_tempfiles(path: Path, *, older_than_seconds: int = 3600) -> None:
+    now = time.time()
+    prefix = f"{path.name}."
+    suffix = ".tmp"
+    for candidate in path.parent.iterdir():
+        if not candidate.is_file():
+            continue
+        if candidate.name == path.name or not candidate.name.startswith(prefix) or not candidate.name.endswith(suffix):
+            continue
+        try:
+            if now - candidate.stat().st_mtime < older_than_seconds:
+                continue
+        except OSError:
+            continue
+        candidate.unlink(missing_ok=True)
 
 
 def write_json(path: Path, payload: Any) -> None:

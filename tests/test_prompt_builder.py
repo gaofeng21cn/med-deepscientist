@@ -1279,6 +1279,8 @@ def test_prompt_builder_mentions_long_running_bash_exec_monitoring_protocol(temp
     assert "long_run_reporting_protocol:" in prompt
     assert "intervention_threshold_protocol:" in prompt
     assert "timeout_protocol:" in prompt
+    assert "search_hygiene_protocol:" in prompt
+    assert "never recursively grep saved bash logs" in prompt
     assert "judge health by forward progress" in prompt
     assert "do not kill or restart a run merely because a short watch window passed without final completion" in prompt
 

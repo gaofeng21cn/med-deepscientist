@@ -41,6 +41,18 @@ QUEST_DIRECTORIES = (
     ".ds/worktrees",
 )
 
+RUNTIME_GITIGNORE_ENTRIES = (
+    ".ds/*.pid",
+    ".ds/*.sock",
+    ".ds/**/*.tmp",
+    ".ds/worktrees/",
+    ".ds/bash_exec/",
+    ".ds/codex_history/",
+    ".ds/codex_homes/",
+    ".ds/runs/",
+    ".ds/slim_backups/",
+)
+
 
 def initial_quest_yaml(
     quest_id: str,
@@ -112,10 +124,7 @@ def initial_summary() -> str:
 def gitignore() -> str:
     return "\n".join(
         [
-            ".ds/*.pid",
-            ".ds/*.sock",
-            ".ds/*.tmp",
-            ".ds/worktrees/",
+            *RUNTIME_GITIGNORE_ENTRIES,
             "tmp/",
             "__pycache__/",
             ".pytest_cache/",
