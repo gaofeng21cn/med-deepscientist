@@ -77,6 +77,38 @@ def test_waiting_for_user_transition_writes_native_runtime_event(temp_home: Path
     assert event["outer_loop_input"]["active_interaction_id"]
 
 
+def test_mark_turn_started_resets_interaction_watchdog_state_for_new_run(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("native truth watchdog reset quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    stale_at = "2026-03-15T10:51:08+00:00"
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="stopped",
+        active_run_id=None,
+        last_artifact_interact_at=stale_at,
+        last_tool_activity_at=stale_at,
+        last_tool_activity_name="artifact.interact",
+        tool_calls_since_last_artifact_interact=37,
+    )
+
+    app.quest_service.mark_turn_started(quest_id, run_id="run-native-reset-001")
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    watchdog = app.quest_service.artifact_interaction_watchdog_status(quest_root)
+
+    assert runtime_state["last_artifact_interact_at"] is None
+    assert runtime_state["last_tool_activity_at"] is None
+    assert runtime_state["last_tool_activity_name"] is None
+    assert runtime_state["tool_calls_since_last_artifact_interact"] == 0
+    assert watchdog["stale_visibility_gap"] is False
+    assert watchdog["inspection_due"] is False
+
+
 def test_reconcile_runtime_state_writes_native_runtime_event(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
