@@ -1785,7 +1785,9 @@ class QuestService:
     ) -> dict[str, Any]:
         if paper_root is None:
             return {}
-        for candidate in (paper_root / root_filename, paper_root / nested_relative_path):
+        # Nested catalogs carry the authoritative publication-facing metadata.
+        # Root-level catalogs may be lightweight projections kept for legacy surfaces.
+        for candidate in (paper_root / nested_relative_path, paper_root / root_filename):
             if candidate.exists():
                 payload = read_json(candidate, {})
                 if isinstance(payload, dict):

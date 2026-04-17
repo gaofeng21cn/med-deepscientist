@@ -1176,6 +1176,108 @@ def test_snapshot_routes_back_to_write_when_display_frontier_is_below_contract_a
     assert "main-text figure ambition remains below contract target" in " ".join(health["blocking_reasons"])
 
 
+def test_snapshot_prefers_richer_nested_figure_catalog_over_legacy_root_projection(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper display frontier nested figure catalog quest")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "study_archetype": "survey_trend_analysis",
+            "endpoint_type": "descriptive",
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "clinical_observation",
+            "reporting_guideline_family": "STROBE",
+            "display_shell_plan": [
+                {
+                    "display_id": "cohort_flow",
+                    "display_kind": "figure",
+                    "requirement_key": "cohort_flow_figure",
+                    "catalog_id": "F1",
+                    "story_role": "study_setup",
+                },
+                {
+                    "display_id": "treatment_class_comparison",
+                    "display_kind": "table",
+                    "requirement_key": "table2_treatment_class_comparison",
+                    "catalog_id": "T2",
+                    "story_role": "result_primary",
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "historical-to-current-patient-migration",
+                    "section_title": "Historical-to-current patient migration",
+                    "research_question": "Did patient treatment use migrate?",
+                    "direct_answer": "Yes.",
+                    "supporting_display_items": ["T2"],
+                    "key_quantitative_findings": ["Biologic use increased."],
+                    "clinical_meaning": "Patterns shifted.",
+                    "boundary": "Descriptive only.",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "display_id": "cohort_flow",
+                    "catalog_id": "F1",
+                    "title": "Legacy projected cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figures" / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "display_id": "cohort_flow",
+                    "title": "Richer cohort flow catalog",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {"table_id": "T2", "title": "Treatment class comparison"},
+            ]
+        },
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["display_ambition"] == "strong"
+    assert health["active_main_text_figure_count"] == 1
+    assert health["minimum_main_text_figures"] == 4
+    assert health["missing_recommended_main_text_figure_ids"] == ["F2", "F3", "F4"]
+    assert health["recommended_action"] == "expand_result_display_frontier"
+
+
 def test_snapshot_infers_display_frontier_from_legacy_survey_trend_contract(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
