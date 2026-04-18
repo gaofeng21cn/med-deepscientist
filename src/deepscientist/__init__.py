@@ -1,4 +1,7 @@
+from . import editable_shared_bootstrap as _editable_shared_bootstrap
 from importlib.metadata import PackageNotFoundError, version as _package_version
+
+_editable_shared_bootstrap.ensure_editable_dependency_paths()
 
 __all__ = ["__version__"]
 
