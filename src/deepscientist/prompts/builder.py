@@ -1267,8 +1267,25 @@ class PromptBuilder:
             else {}
         )
         if paper_contract_health:
+            blocking_reasons = [
+                str(item).strip()
+                for item in (paper_contract_health.get("blocking_reasons") or [])
+                if str(item).strip()
+            ]
+            if not blocking_reasons and str(paper_contract_health.get("global_stage_authority") or "").strip() == "publication_gate" and not bool(
+                paper_contract_health.get("managed_publication_gate_clear")
+            ):
+                blocking_reasons = [
+                    str(item).strip()
+                    for item in (paper_contract_health.get("managed_publication_gate_gap_summaries") or [])
+                    if str(item).strip()
+                ] or [
+                    str(item).strip()
+                    for item in (paper_contract_health.get("completion_blocking_reasons") or [])
+                    if str(item).strip()
+                ]
             primary_blocker = str(
-                ((paper_contract_health.get("blocking_reasons") or [None])[0]) or "none"
+                ((blocking_reasons or [None])[0]) or "none"
             ).strip() or "none"
             narration_contract = (
                 dict(paper_contract_health.get("status_narration_contract") or {})

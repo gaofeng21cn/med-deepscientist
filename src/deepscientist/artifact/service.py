@@ -3980,10 +3980,14 @@ class ArtifactService:
         self,
         quest_root: Path,
         *,
+        continuation_policy: str | None = None,
         continuation_reason: str | None,
         workspace_root: Path | None = None,
     ) -> str:
+        policy = str(continuation_policy or "").strip().lower()
         reason = str(continuation_reason or "").strip()
+        if policy == "wait_for_user_or_resume" and reason == "unchanged_finalize_state":
+            return "stop"
         if not reason.startswith("decision:"):
             return "continue"
         artifact_id = reason.split(":", 1)[1].strip()
@@ -4042,8 +4046,31 @@ class ArtifactService:
             "route_source": "paper_line_local",
         }
 
-    def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
+    def _paper_line_display_blockers(self, payload: dict[str, Any]) -> list[str]:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        if blocking_reasons:
+            return blocking_reasons
+        if str(payload.get("global_stage_authority") or "").strip() == "publication_gate" and not bool(
+            payload.get("managed_publication_gate_clear")
+        ):
+            gate_gaps = [
+                str(item).strip()
+                for item in (payload.get("managed_publication_gate_gap_summaries") or [])
+                if str(item).strip()
+            ]
+            if gate_gaps:
+                return gate_gaps
+            completion_blocking_reasons = [
+                str(item).strip()
+                for item in (payload.get("completion_blocking_reasons") or [])
+                if str(item).strip()
+            ]
+            if completion_blocking_reasons:
+                return completion_blocking_reasons
+        return []
+
+    def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
+        blocking_reasons = self._paper_line_display_blockers(payload)
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
@@ -4111,7 +4138,7 @@ class ArtifactService:
         return "\n".join(lines).rstrip() + "\n"
 
     def _render_paper_line_summary_markdown(self, payload: dict[str, Any]) -> str:
-        blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        blocking_reasons = self._paper_line_display_blockers(payload)
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
         human_milestone = self._human_milestone_payload(payload)
@@ -4260,11 +4287,16 @@ class ArtifactService:
             "unresolved_required_count": int(health.get("unresolved_required_count") or 0),
             "unmapped_completed_count": int(health.get("unmapped_completed_count") or 0),
             "blocking_reasons": list(health.get("blocking_reasons") or []),
+            "completion_blocking_reasons": list(health.get("completion_blocking_reasons") or []),
             "recommended_next_stage": str(health.get("recommended_next_stage") or "").strip() or None,
             "recommended_action": str(health.get("recommended_action") or "").strip() or None,
             "recommendation_scope": str(health.get("recommendation_scope") or "").strip() or None,
             "global_stage_authority": str(health.get("global_stage_authority") or "").strip() or None,
             "global_stage_rule": str(health.get("global_stage_rule") or "").strip() or None,
+            "managed_publication_gate_clear": bool(health.get("managed_publication_gate_clear")),
+            "managed_publication_gate_gap_summaries": list(
+                health.get("managed_publication_gate_gap_summaries") or []
+            ),
             "active_anchor": str(snapshot.get("active_anchor") or "").strip() or None,
             "continuation_policy": str(snapshot.get("continuation_policy") or "").strip() or None,
             "continuation_anchor": str(snapshot.get("continuation_anchor") or "").strip() or None,
@@ -4285,6 +4317,7 @@ class ArtifactService:
         }
         payload["continuation_display_action"] = self._continuation_display_action(
             quest_root,
+            continuation_policy=payload.get("continuation_policy"),
             continuation_reason=payload.get("continuation_reason"),
             workspace_root=workspace_root,
         )
@@ -4783,10 +4816,15 @@ class ArtifactService:
                 "closure_state": str(paper_health.get("closure_state") or "").strip() or None,
                 "delivery_state": str(paper_health.get("delivery_state") or "").strip() or None,
                 "blocking_reasons": list(paper_health.get("blocking_reasons") or []),
+                "completion_blocking_reasons": list(paper_health.get("completion_blocking_reasons") or []),
                 "recommended_next_stage": str(paper_health.get("recommended_next_stage") or "").strip() or None,
                 "recommended_action": str(paper_health.get("recommended_action") or "").strip() or None,
                 "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
                 "global_stage_authority": str(paper_health.get("global_stage_authority") or "").strip() or None,
+                "managed_publication_gate_clear": bool(paper_health.get("managed_publication_gate_clear")),
+                "managed_publication_gate_gap_summaries": list(
+                    paper_health.get("managed_publication_gate_gap_summaries") or []
+                ),
                 "writing_ready": bool(paper_health.get("writing_ready")),
                 "finalize_ready": bool(paper_health.get("finalize_ready")),
                 "keep_bundle_fixed_by_default": bool(paper_health.get("keep_bundle_fixed_by_default")),
@@ -11461,6 +11499,8 @@ class ArtifactService:
         ).strip().lower()
         if reply_mode_resolved not in {"none", "threaded", "blocking"}:
             reply_mode_resolved = "blocking" if kind == "decision_request" else "threaded"
+        if reply_mode_resolved == "blocking" and kind != "decision_request":
+            reply_mode_resolved = "threaded"
         expects_reply_resolved = bool(expects_reply) if expects_reply is not None else reply_mode_resolved == "blocking"
         decision_policy = self._decision_policy(quest_root)
         decision_type = self._interaction_decision_type({"reply_schema": reply_schema_resolved})
@@ -12452,6 +12492,103 @@ class ArtifactService:
     def _interaction_decision_type(item: dict[str, Any]) -> str:
         reply_schema = item.get("reply_schema") if isinstance(item.get("reply_schema"), dict) else {}
         return str(reply_schema.get("decision_type") or "").strip()
+
+    @staticmethod
+    def _interaction_uses_valid_blocking_protocol(item: dict[str, Any]) -> bool:
+        if not isinstance(item, dict):
+            return False
+        reply_mode = str(item.get("reply_mode") or "").strip().lower()
+        if reply_mode and reply_mode != "blocking":
+            return False
+        return str(item.get("kind") or "").strip().lower() == "decision_request"
+
+    def has_valid_waiting_request(self, quest_root: Path) -> bool:
+        state = self._read_interaction_state(quest_root)
+        waiting_requests = [
+            dict(item)
+            for item in (state.get("open_requests") or [])
+            if str(item.get("status") or "").strip().lower() == "waiting"
+        ]
+        return any(self._interaction_uses_valid_blocking_protocol(item) for item in waiting_requests)
+
+    def clear_invalid_waiting_requests(
+        self,
+        quest_root: Path,
+        *,
+        closing_artifact_id: str,
+    ) -> list[str]:
+        state = self._read_interaction_state(quest_root)
+        open_requests = [dict(item) for item in (state.get("open_requests") or [])]
+        recent_threads = [dict(item) for item in (state.get("recent_threads") or [])]
+        now = utc_now()
+        cleared_interaction_ids: list[str] = []
+
+        for index, item in enumerate(open_requests):
+            if str(item.get("status") or "").strip().lower() != "waiting":
+                continue
+            if self._interaction_uses_valid_blocking_protocol(item):
+                continue
+            updated = dict(item)
+            updated["status"] = "closed"
+            updated["closed_at"] = now
+            updated["closed_by_artifact_id"] = closing_artifact_id
+            open_requests[index] = updated
+            interaction_id = str(item.get("interaction_id") or item.get("artifact_id") or "").strip()
+            if interaction_id:
+                cleared_interaction_ids.append(interaction_id)
+
+        if not cleared_interaction_ids:
+            return []
+
+        cleared_interaction_id_set = set(cleared_interaction_ids)
+        for index, item in enumerate(recent_threads):
+            candidate_ids = {
+                str(item.get("interaction_id") or "").strip(),
+                str(item.get("artifact_id") or "").strip(),
+            }
+            if not (candidate_ids & cleared_interaction_id_set):
+                continue
+            updated = dict(item)
+            updated["status"] = "closed"
+            updated["closed_at"] = now
+            updated["closed_by_artifact_id"] = closing_artifact_id
+            updated["updated_at"] = now
+            recent_threads[index] = updated
+
+        state["open_requests"] = open_requests[-20:]
+        state["recent_threads"] = recent_threads[-30:]
+        default_reply_interaction_id = self._default_reply_interaction_id(
+            open_requests=state["open_requests"],
+            recent_threads=state["recent_threads"],
+        )
+        state["default_reply_interaction_id"] = default_reply_interaction_id
+        latest_thread_interaction_id = str(state.get("latest_thread_interaction_id") or "").strip()
+        if latest_thread_interaction_id in cleared_interaction_id_set:
+            state["latest_thread_interaction_id"] = default_reply_interaction_id
+        last_outbound_interaction_id = str(state.get("last_outbound_interaction_id") or "").strip()
+        if last_outbound_interaction_id in cleared_interaction_id_set:
+            state["last_outbound_interaction_id"] = default_reply_interaction_id
+        self._write_interaction_state(quest_root, state)
+
+        runtime_state = self.quest_service._read_runtime_state(quest_root)
+        waiting_requests_remaining = [
+            item
+            for item in state["open_requests"]
+            if str(item.get("status") or "").strip().lower() == "waiting"
+        ]
+        if not waiting_requests_remaining and str(runtime_state.get("status") or "") == "waiting_for_user":
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                status="running" if runtime_state.get("active_run_id") else "active",
+                stop_reason=None,
+                active_interaction_id=default_reply_interaction_id,
+            )
+        else:
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                active_interaction_id=default_reply_interaction_id,
+            )
+        return cleared_interaction_ids
 
     def _latest_completion_request(self, quest_root: Path) -> dict[str, Any] | None:
         state = self._read_interaction_state(quest_root)

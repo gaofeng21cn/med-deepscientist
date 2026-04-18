@@ -2717,6 +2717,21 @@ class DaemonApp:
     @staticmethod
     def _continuation_anchor_for(snapshot: dict) -> str:
         continuation_anchor = str(snapshot.get("continuation_anchor") or "").strip()
+        if continuation_anchor in CONTINUATION_SKILLS and continuation_anchor != "decision":
+            return continuation_anchor
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        recommended_next_stage = str(paper_health.get("recommended_next_stage") or "").strip()
+        recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+        if (
+            recommended_next_stage in CONTINUATION_SKILLS
+            and recommended_next_stage != "decision"
+            and recommended_action != "request_user_decision"
+        ):
+            return recommended_next_stage
         if continuation_anchor in CONTINUATION_SKILLS:
             return continuation_anchor
         active_anchor = str(snapshot.get("active_anchor") or "").strip()
@@ -2764,7 +2779,12 @@ class DaemonApp:
                         snapshot,
                         DaemonApp._continuation_anchor_for(snapshot),
                     )
-        if turn_mode in {"answering", "command_execution", "recovering"}:
+        if turn_mode == "command_execution":
+            return DaemonApp._turn_skill_stage_gate(
+                snapshot,
+                DaemonApp._continuation_anchor_for(snapshot),
+            )
+        if turn_mode in {"answering", "recovering"}:
             return "decision"
         if str(turn_reason or "").strip() == "auto_continue" or latest_user_message is None:
             return DaemonApp._turn_skill_stage_gate(

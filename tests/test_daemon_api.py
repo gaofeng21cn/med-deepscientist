@@ -321,6 +321,68 @@ def test_turn_skill_for_allows_custom_review_entry_before_baseline_confirmation(
     )
 
 
+def test_turn_skill_for_auto_continue_prefers_paper_followthrough_stage_over_decision_anchor() -> None:
+    snapshot = {
+        "active_anchor": "decision",
+        "continuation_anchor": "decision",
+        "baseline_gate": "confirmed",
+        "paper_contract_health": {
+            "recommended_next_stage": "write",
+            "recommended_action": "return_to_publishability_gate",
+        },
+        "startup_contract": {
+            "need_research_paper": True,
+        },
+    }
+
+    assert DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution") == "write"
+
+
+def test_turn_skill_for_command_execution_prefers_paper_followthrough_stage_over_decision_anchor() -> None:
+    snapshot = {
+        "active_anchor": "decision",
+        "continuation_anchor": "decision",
+        "baseline_gate": "confirmed",
+        "paper_contract_health": {
+            "recommended_next_stage": "write",
+            "recommended_action": "return_to_publishability_gate",
+        },
+        "startup_contract": {
+            "need_research_paper": True,
+        },
+    }
+    latest_user_message = {
+        "content": "继续修 publication-facing 图并重跑 submission_minimal",
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(
+            snapshot,
+            latest_user_message,
+            turn_reason="user_message",
+            turn_mode="command_execution",
+        )
+        == "write"
+    )
+
+
+def test_turn_skill_for_keeps_decision_when_paper_followthrough_requires_user_decision() -> None:
+    snapshot = {
+        "active_anchor": "decision",
+        "continuation_anchor": "decision",
+        "baseline_gate": "confirmed",
+        "paper_contract_health": {
+            "recommended_next_stage": "write",
+            "recommended_action": "request_user_decision",
+        },
+        "startup_contract": {
+            "need_research_paper": True,
+        },
+    }
+
+    assert DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution") == "decision"
+
+
 def _wait_for_json(url: str, *, timeout: float = 10.0) -> dict | list:
     deadline = time.time() + timeout
     last_error: Exception | None = None
