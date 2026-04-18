@@ -2364,6 +2364,27 @@ class QuestService:
 
         return changed
 
+    def _repair_synced_paper_live_paths(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path,
+    ) -> None:
+        from ..artifact.service import ArtifactService
+
+        current_workspace_root = workspace_root.resolve(strict=False)
+        legacy_workspace_roots = [
+            root.resolve(strict=False)
+            for root in self.workspace_roots(quest_root)
+            if root.resolve(strict=False) != current_workspace_root
+        ]
+        ArtifactService(self.home).repair_paper_live_paths(
+            quest_root,
+            workspace_root=current_workspace_root,
+            current_workspace_root=current_workspace_root,
+            legacy_workspace_roots=legacy_workspace_roots,
+        )
+
     def synchronize_active_paper_surface(
         self,
         quest_root: Path,
@@ -2422,6 +2443,7 @@ class QuestService:
                 paper_target_root,
                 preserved_paths={"medical_analysis_contract.json", "medical_reporting_contract.json"},
             )
+            self._repair_synced_paper_live_paths(quest_root, workspace_root=resolved_workspace_root)
         if literature_changed:
             self._sync_surface_tree(source_literature_root, target_literature_root)
 

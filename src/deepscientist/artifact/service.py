@@ -1178,8 +1178,46 @@ class ArtifactService:
         ]
         return normalized
 
+    def _paper_bundle_surface_override(
+        self,
+        quest_root: Path,
+        raw_path: object,
+        *,
+        source_root: Path,
+        target_paper_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> Path | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        candidate_paper_roots = [target_paper_root, *self._paper_sync_roots(quest_root)]
+        seen_roots: set[str] = set()
+        paper_roots: list[Path] = []
+        for paper_root in candidate_paper_roots:
+            resolved_root = paper_root.resolve(strict=False)
+            key = str(resolved_root)
+            if key in seen_roots:
+                continue
+            seen_roots.add(key)
+            paper_roots.append(resolved_root)
+        for candidate in self._paper_live_path_candidates(
+            text,
+            source_root=source_root,
+            current_workspace_root=current_workspace_root,
+            legacy_workspace_roots=legacy_workspace_roots,
+        ):
+            for paper_root in paper_roots:
+                try:
+                    relative = candidate.resolve(strict=False).relative_to(paper_root)
+                except ValueError:
+                    continue
+                return target_paper_root / relative
+        return None
+
     def _normalize_paper_bundle_manifest_payload(
         self,
+        quest_root: Path,
         payload: dict[str, Any],
         *,
         source_root: Path,
@@ -1191,8 +1229,13 @@ class ArtifactService:
         normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
         local_overrides = {
             "outline_path": target_paper_root / "selected_outline.json",
+            "draft_path": target_paper_root / "draft.md",
+            "writing_plan_path": target_paper_root / "writing_plan.md",
+            "references_path": target_paper_root / "references.bib",
             "claim_evidence_map_path": target_paper_root / "claim_evidence_map.json",
             "evidence_ledger_path": target_paper_root / "evidence_ledger.json",
+            "compile_report_path": target_paper_root / "build" / "compile_report.json",
+            "pdf_path": target_paper_root / "paper.pdf",
             "baseline_inventory_path": target_paper_root / "baseline_inventory.json",
         }
         optional_local_overrides = {
@@ -1220,6 +1263,17 @@ class ArtifactService:
         ):
             if key not in normalized:
                 continue
+            if key not in local_overrides:
+                surface_override = self._paper_bundle_surface_override(
+                    quest_root,
+                    normalized.get(key),
+                    source_root=source_root,
+                    target_paper_root=target_paper_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+                if surface_override is not None:
+                    local_overrides[key] = surface_override
             normalized[key] = self._normalize_paper_live_path(
                 normalized.get(key),
                 source_root=source_root,
@@ -3577,6 +3631,7 @@ class ArtifactService:
             )
             for paper_root in default_paper_roots:
                 normalized = self._normalize_paper_bundle_manifest_payload(
+                    quest_root,
                     manifest_source_payload,
                     source_root=manifest_source_root,
                     target_paper_root=paper_root,
@@ -10043,6 +10098,7 @@ class ArtifactService:
         active_manifest: dict[str, Any] | None = None
         for sync_paper_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
             normalized_manifest = self._normalize_paper_bundle_manifest_payload(
+                quest_root,
                 raw_manifest,
                 source_root=workspace_root,
                 target_paper_root=sync_paper_root,
