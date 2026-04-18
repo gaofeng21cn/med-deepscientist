@@ -74,6 +74,7 @@ from ..connector.qq_profiles import list_qq_profiles, merge_qq_profile_config, n
 from ..quest import QuestService
 from ..runners import CodexRunner, HermesNativeProofRunner, RunRequest, get_runner_factory, register_builtin_runners
 from ..runtime_logs import JsonlLogger
+from ..runtime_storage import maintain_quest_runtime_storage
 from ..shared import append_jsonl, ensure_dir, generate_id, iter_jsonl, read_json, read_jsonl, read_jsonl_tail, read_text, resolve_within, run_command, slugify, utc_now, which, write_json
 from ..skills import SkillInstaller
 from ..team import SingleTeamService
@@ -105,6 +106,7 @@ CODEX_RETRY_DEFAULT_MAX_BACKOFF_SEC = 1800.0
 LEGACY_CODEX_RETRY_INITIAL_BACKOFF_SEC = 1.0
 LEGACY_CODEX_RETRY_BACKOFF_MULTIPLIER = 2.0
 LEGACY_CODEX_RETRY_MAX_BACKOFF_SEC = 8.0
+_RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS = 0
 _CRASH_AUTO_RESUME_COOLDOWN = timedelta(minutes=10)
 _CRASH_AUTO_RESUME_MAX_RECENT_ATTEMPTS = 2
 _CHINESE_DIGIT_MAP = {
@@ -224,6 +226,8 @@ class DaemonApp:
         self._canonicalize_lingzhu_binding_state()
         self._turn_lock = threading.Lock()
         self._turn_state: dict[str, dict[str, object]] = {}
+        self._quest_runtime_maintenance_lock = threading.Lock()
+        self._quest_runtime_maintenance_threads: dict[str, threading.Thread] = {}
         self._server: ThreadingHTTPServer | None = None
         self._terminal_attach_server: WebSocketServer | None = None
         self._terminal_attach_thread: threading.Thread | None = None
@@ -1580,6 +1584,80 @@ class DaemonApp:
                 state.pop("worker", None)
             return dict(state)
 
+    def _run_runtime_storage_maintenance(self, quest_id: str) -> None:
+        quest_root = self.quest_service._quest_root(quest_id)
+        try:
+            manifest = maintain_quest_runtime_storage(
+                quest_root,
+                include_worktrees=True,
+                older_than_seconds=_RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS,
+                dedupe_worktree_min_mb=None,
+            )
+            root_manifests = manifest.get("roots") if isinstance(manifest.get("roots"), list) else []
+            compacted_files = 0
+            for item in root_manifests:
+                if not isinstance(item, dict):
+                    continue
+                runtime_logs = item.get("runtime_logs") if isinstance(item.get("runtime_logs"), dict) else {}
+                compacted_files += len(runtime_logs.get("compacted_files") or [])
+            prune_manifest = manifest.get("worktree_runtime_prune") if isinstance(manifest.get("worktree_runtime_prune"), dict) else {}
+            self.logger.log(
+                "info",
+                "quest.runtime_storage_maintained",
+                quest_id=quest_id,
+                compacted_files=compacted_files,
+                worktrees_pruned=int(prune_manifest.get("worktrees_pruned") or 0),
+                directories_removed=int(prune_manifest.get("directories_removed") or 0),
+            )
+        except Exception as exc:
+            append_jsonl(
+                quest_root / ".ds" / "events.jsonl",
+                {
+                    "event_id": generate_id("evt"),
+                    "type": "quest.runtime_storage_maintenance_failed",
+                    "quest_id": quest_id,
+                    "summary": f"Background runtime storage maintenance failed: {exc}",
+                    "created_at": utc_now(),
+                },
+            )
+            self.logger.log(
+                "error",
+                "quest.runtime_storage_maintenance_failed",
+                quest_id=quest_id,
+                error=str(exc),
+            )
+        finally:
+            with self._quest_runtime_maintenance_lock:
+                active = self._quest_runtime_maintenance_threads.get(quest_id)
+                if active is threading.current_thread():
+                    self._quest_runtime_maintenance_threads.pop(quest_id, None)
+
+    def _schedule_runtime_storage_maintenance(self, quest_id: str) -> dict[str, object]:
+        with self._quest_runtime_maintenance_lock:
+            active = self._quest_runtime_maintenance_threads.get(quest_id)
+            if isinstance(active, threading.Thread) and active.is_alive():
+                return {
+                    "scheduled": True,
+                    "started": False,
+                    "quest_id": quest_id,
+                    "reason": "already_running",
+                }
+            if isinstance(active, threading.Thread) and not active.is_alive():
+                self._quest_runtime_maintenance_threads.pop(quest_id, None)
+            worker = threading.Thread(
+                target=self._run_runtime_storage_maintenance,
+                args=(quest_id,),
+                daemon=True,
+                name=f"deepscientist-runtime-storage-{quest_id}",
+            )
+            self._quest_runtime_maintenance_threads[quest_id] = worker
+        worker.start()
+        return {
+            "scheduled": True,
+            "started": True,
+            "quest_id": quest_id,
+        }
+
     def _compact_snapshot_with_reconciled_turn_state(self, quest_id: str) -> dict[str, Any]:
         snapshot = self.quest_service.snapshot_fast(quest_id)
         return self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
@@ -1647,13 +1725,15 @@ class DaemonApp:
             completed_at=completed_at or None,
             exit_code=exit_code if isinstance(exit_code, int) else None,
         )
-        return self.quest_service.mark_turn_finished(
+        reconciled = self.quest_service.mark_turn_finished(
             quest_id,
             status=normalized_status,
             event_source="daemon_runtime_reconcile",
             event_kind="runtime_stale_turn_reconciled",
             event_summary=summary,
         )
+        self._schedule_runtime_storage_maintenance(quest_id)
+        return reconciled
 
     def control_quest(self, quest_id: str, *, action: str, source: str = "local") -> dict:
         normalized_action = str(action or "").strip().lower()
@@ -1756,6 +1836,7 @@ class DaemonApp:
             cancelled_pending_user_message_count=cancelled_count,
             previous_snapshot=previous_snapshot,
         )
+        self._schedule_runtime_storage_maintenance(quest_id)
         return {
             "ok": True,
             "quest_id": quest_id,
@@ -3079,6 +3160,7 @@ class DaemonApp:
                 status=normalized_status,
                 error=str(exc),
             )
+            self._schedule_runtime_storage_maintenance(quest_id)
 
     def _normalize_status_after_turn(self, quest_id: str, *, turn_reason: str = "user_message") -> None:
         with self._turn_lock:
@@ -3130,6 +3212,7 @@ class DaemonApp:
             **runtime_updates,
         )
         snapshot = self.quest_service.snapshot(quest_id)
+        self._schedule_runtime_storage_maintenance(quest_id)
         status = str(snapshot.get("status") or "")
         if status in {"stopped", "paused", "completed", "error"}:
             return

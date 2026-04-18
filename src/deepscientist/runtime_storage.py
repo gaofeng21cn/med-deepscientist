@@ -25,6 +25,19 @@ _TOOL_NAME_BYTES_RE = re.compile(rb'"tool_name"\s*:\s*"([^"]+)"')
 _TIMESTAMP_BYTES_RE = re.compile(rb'"timestamp"\s*:\s*"([^"]+)"')
 _SEQ_BYTES_RE = re.compile(rb'"seq"\s*:\s*(\d+)')
 _STREAM_BYTES_RE = re.compile(rb'"stream"\s*:\s*"([^"]+)"')
+_PINNED_WORKTREE_STATE_KEYS = (
+    "current_workspace_root",
+    "research_head_worktree_root",
+    "analysis_parent_worktree_root",
+    "paper_parent_worktree_root",
+)
+_WORKTREE_RUNTIME_DIR_NAMES = (
+    "bash_exec",
+    "runs",
+    "codex_history",
+    "codex_homes",
+    "slim_backups",
+)
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -68,6 +81,118 @@ def iter_managed_roots(quest_root: Path) -> list[Path]:
     return roots
 
 
+def _pinned_worktree_roots(quest_root: Path) -> set[Path]:
+    resolved_quest_root = Path(quest_root).expanduser().resolve()
+    worktrees_root = resolved_quest_root / ".ds" / "worktrees"
+    if not worktrees_root.exists():
+        return set()
+    payload = read_json(resolved_quest_root / ".ds" / "research_state.json", {})
+    if not isinstance(payload, dict):
+        return set()
+    pinned: set[Path] = set()
+    for key in _PINNED_WORKTREE_STATE_KEYS:
+        raw = str(payload.get(key) or "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw).expanduser().resolve(strict=False)
+        try:
+            candidate.relative_to(worktrees_root)
+        except ValueError:
+            continue
+        pinned.add(candidate)
+    return pinned
+
+
+def _path_tree_is_cold(path: Path, *, now: datetime, older_than_seconds: int) -> bool:
+    cutoff = now.timestamp() - max(0, older_than_seconds)
+    for current_root, _, filenames in os.walk(path):
+        current = Path(current_root)
+        try:
+            current_stat = current.stat()
+        except OSError:
+            continue
+        if current_stat.st_mtime > cutoff:
+            return False
+        for filename in filenames:
+            candidate = current / filename
+            try:
+                if candidate.stat().st_mtime > cutoff:
+                    return False
+            except OSError:
+                continue
+    return True
+
+
+def prune_cold_worktree_runtime_payloads(
+    quest_root: Path,
+    *,
+    older_than_seconds: int = 6 * 3600,
+) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    worktrees_root = resolved_root / ".ds" / "worktrees"
+    pinned_roots = _pinned_worktree_roots(resolved_root)
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "worktrees_root": str(worktrees_root),
+        "older_than_seconds": max(0, older_than_seconds),
+        "pinned_worktrees": sorted(str(path) for path in pinned_roots),
+        "worktrees_examined": 0,
+        "worktrees_pruned": 0,
+        "directories_removed": 0,
+        "removed": [],
+        "skipped": [],
+    }
+    if not worktrees_root.exists():
+        return manifest
+
+    now = datetime.now(UTC)
+    for worktree_root in sorted(path for path in worktrees_root.iterdir() if path.is_dir()):
+        resolved_worktree = worktree_root.resolve(strict=False)
+        manifest["worktrees_examined"] += 1
+        if resolved_worktree in pinned_roots:
+            manifest["skipped"].append(
+                {
+                    "worktree_root": str(worktree_root.relative_to(resolved_root)),
+                    "reason": "pinned",
+                }
+            )
+            continue
+        runtime_dirs = [
+            worktree_root / ".ds" / directory_name
+            for directory_name in _WORKTREE_RUNTIME_DIR_NAMES
+            if (worktree_root / ".ds" / directory_name).exists()
+        ]
+        if not runtime_dirs:
+            manifest["skipped"].append(
+                {
+                    "worktree_root": str(worktree_root.relative_to(resolved_root)),
+                    "reason": "no_runtime_payloads",
+                }
+            )
+            continue
+        if any(not _path_tree_is_cold(path, now=now, older_than_seconds=older_than_seconds) for path in runtime_dirs):
+            manifest["skipped"].append(
+                {
+                    "worktree_root": str(worktree_root.relative_to(resolved_root)),
+                    "reason": "recent_runtime_payloads",
+                }
+            )
+            continue
+        removed_directories: list[str] = []
+        for runtime_dir in runtime_dirs:
+            removed_directories.append(str(runtime_dir.relative_to(resolved_root)))
+            shutil.rmtree(runtime_dir, ignore_errors=True)
+        manifest["worktrees_pruned"] += 1
+        manifest["directories_removed"] += len(removed_directories)
+        manifest["removed"].append(
+            {
+                "worktree_root": str(worktree_root.relative_to(resolved_root)),
+                "directories": removed_directories,
+            }
+        )
+    return manifest
+
+
 def _archive_path(path: Path) -> Path:
     suffixes = "".join(path.suffixes)
     base = path.name[: -len(suffixes)] if suffixes else path.name
@@ -76,7 +201,7 @@ def _archive_path(path: Path) -> Path:
 
 def _write_gzip_copy(source: Path, archive_path: Path) -> None:
     ensure_dir(archive_path.parent)
-    with source.open("rb") as input_handle, gzip.open(archive_path, "wb", compresslevel=1) as output_handle:
+    with source.open("rb") as input_handle, gzip.open(archive_path, "wb", compresslevel=6) as output_handle:
         shutil.copyfileobj(input_handle, output_handle)
 
 
@@ -830,12 +955,22 @@ def maintain_quest_runtime_storage(
         "include_worktrees": include_worktrees,
         "roots": [],
         "processed_at": utc_now(),
+        "worktree_runtime_prune": {
+            "quest_root": str(resolved_quest_root),
+            "skipped": True,
+            "reason": "include_worktrees_disabled",
+        },
         "worktree_dedupe": {
             "quest_root": str(resolved_quest_root),
             "skipped": True,
             "reason": "include_worktrees_disabled" if not include_worktrees else "dedupe_disabled",
         },
     }
+    if include_worktrees:
+        manifest["worktree_runtime_prune"] = prune_cold_worktree_runtime_payloads(
+            resolved_quest_root,
+            older_than_seconds=older_than_seconds,
+        )
     for root in roots:
         gitignore_manifest = ensure_runtime_gitignore(root)
         temp_manifest = prune_stale_atomic_tempfiles(root, older_than_seconds=max(3600, older_than_seconds // 2))

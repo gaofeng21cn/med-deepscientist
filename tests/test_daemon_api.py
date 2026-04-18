@@ -5194,6 +5194,66 @@ def test_turn_cleanup_recovers_after_partial_runtime_state_failure(temp_home: Pa
     assert snapshot["last_stage_fingerprint_at"] is not None
 
 
+def test_turn_cleanup_schedules_runtime_storage_maintenance(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("turn cleanup maintenance quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-maintenance-schedule-001"
+    scheduled: list[str] = []
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+    )
+
+    def _capture_schedule(target_quest_id: str) -> dict[str, object]:
+        scheduled.append(target_quest_id)
+        return {"scheduled": True, "started": True, "quest_id": target_quest_id}
+
+    monkeypatch.setattr(app, "_schedule_runtime_storage_maintenance", _capture_schedule)
+
+    app._ensure_turn_cleanup(quest_id, run_id=run_id, turn_reason="user_message")
+
+    assert scheduled == [quest_id]
+
+
+def test_runtime_storage_maintenance_scheduler_dedupes_active_quest(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("runtime maintenance dedupe quest")
+    quest_id = quest["quest_id"]
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    def _blocking_run(target_quest_id: str) -> None:
+        calls.append(target_quest_id)
+        started.set()
+        release.wait(timeout=5)
+
+    monkeypatch.setattr(app, "_run_runtime_storage_maintenance", _blocking_run)
+
+    first = app._schedule_runtime_storage_maintenance(quest_id)
+    assert started.wait(timeout=5)
+
+    second = app._schedule_runtime_storage_maintenance(quest_id)
+    release.set()
+
+    assert first["scheduled"] is True
+    assert first["started"] is True
+    assert second["scheduled"] is True
+    assert second["started"] is False
+    assert second["reason"] == "already_running"
+    assert calls == [quest_id]
+
 def test_daemon_retries_failed_runner_attempt_and_continues_with_retry_context(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

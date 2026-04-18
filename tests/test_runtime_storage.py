@@ -397,3 +397,91 @@ def test_runtime_storage_maintenance_dedupes_large_worktree_runtime_files(tmp_pa
     dedupe_manifest = result["worktree_dedupe"]
     assert dedupe_manifest["files_relinked"] == 1
     assert os.stat(stdout_a).st_ino == os.stat(stdout_b).st_ino
+
+
+def test_runtime_storage_maintenance_prunes_cold_unpinned_worktree_runtime_payloads(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    worktree_root = quest_root / ".ds" / "worktrees" / "wt-cold"
+    runtime_dirs = [
+        worktree_root / ".ds" / "bash_exec" / "bash-001",
+        worktree_root / ".ds" / "runs" / "run-001",
+        worktree_root / ".ds" / "codex_history" / "run-001",
+        worktree_root / ".ds" / "codex_homes" / "run-001" / "sessions" / "2026" / "04",
+        worktree_root / ".ds" / "slim_backups" / "2026-04-18T00-00-00Z",
+    ]
+    for path in runtime_dirs:
+        path.mkdir(parents=True, exist_ok=True)
+    (runtime_dirs[0] / "terminal.log").write_text("terminal\n", encoding="utf-8")
+    (runtime_dirs[1] / "stdout.jsonl").write_text('{"line":"stdout"}\n', encoding="utf-8")
+    (runtime_dirs[2] / "events.jsonl").write_text('{"event":{"type":"message"}}\n', encoding="utf-8")
+    (runtime_dirs[3] / "rollout.jsonl").write_text('{"item":{"type":"message"}}\n', encoding="utf-8")
+    (runtime_dirs[4] / "manifest.json").write_text('{"ok":true}\n', encoding="utf-8")
+    artifact_path = worktree_root / "artifacts" / "reports" / "kept.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text('{"kept":true}\n', encoding="utf-8")
+    (worktree_root / "brief.md").write_text("# kept\n", encoding="utf-8")
+    old = time.time() - 8 * 3600
+    for path in [
+        worktree_root / ".ds" / "bash_exec",
+        worktree_root / ".ds" / "runs",
+        worktree_root / ".ds" / "codex_history",
+        worktree_root / ".ds" / "codex_homes",
+        worktree_root / ".ds" / "slim_backups",
+    ]:
+        for item in sorted(path.rglob("*"), reverse=True):
+            os.utime(item, (old, old))
+        os.utime(path, (old, old))
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=None,
+    )
+
+    assert not (worktree_root / ".ds" / "bash_exec").exists()
+    assert not (worktree_root / ".ds" / "runs").exists()
+    assert not (worktree_root / ".ds" / "codex_history").exists()
+    assert not (worktree_root / ".ds" / "codex_homes").exists()
+    assert not (worktree_root / ".ds" / "slim_backups").exists()
+    assert artifact_path.exists()
+    assert (worktree_root / "brief.md").exists()
+    prune_manifest = result["worktree_runtime_prune"]
+    assert prune_manifest["worktrees_pruned"] == 1
+    assert prune_manifest["directories_removed"] == 5
+
+
+def test_runtime_storage_maintenance_keeps_pinned_worktree_runtime_payloads(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    worktree_root = quest_root / ".ds" / "worktrees" / "wt-pinned"
+    runtime_root = worktree_root / ".ds" / "runs" / "run-001"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    (runtime_root / "stdout.jsonl").write_text('{"line":"stdout"}\n', encoding="utf-8")
+    (quest_root / ".ds").mkdir(parents=True, exist_ok=True)
+    (quest_root / ".ds" / "research_state.json").write_text(
+        json.dumps(
+            {
+                "current_workspace_root": str(worktree_root),
+                "research_head_worktree_root": str(worktree_root),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    old = time.time() - 8 * 3600
+    os.utime(runtime_root / "stdout.jsonl", (old, old))
+    os.utime(worktree_root / ".ds" / "runs", (old, old))
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=None,
+    )
+
+    assert (worktree_root / ".ds" / "runs").exists()
+    prune_manifest = result["worktree_runtime_prune"]
+    assert prune_manifest["worktrees_pruned"] == 0
+    assert any(item["reason"] == "pinned" for item in prune_manifest["skipped"])
