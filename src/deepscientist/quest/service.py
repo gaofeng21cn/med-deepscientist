@@ -3437,6 +3437,13 @@ class QuestService:
         )
         managed_publication_gate_status = str(managed_publication_gate.get("status") or "").strip() or "not_configured"
         managed_publication_gate_clear = bool(managed_publication_gate.get("clear"))
+        managed_publication_gate_gap_summaries = [
+            str(item).strip() for item in (managed_publication_gate.get("gap_summaries") or []) if str(item).strip()
+        ]
+        managed_gate_needs_display_frontier = (
+            managed_publication_gate_clear
+            and "submission_grade_active_figure_floor_unmet" in managed_publication_gate_gap_summaries
+        )
         managed_publication_gate_summary = (
             str(managed_publication_gate.get("summary") or "").strip()
             or "managed publication gate status is unavailable"
@@ -3553,7 +3560,7 @@ class QuestService:
         elif not results_display_surface_ready:
             recommended_next_stage = "write"
             recommended_action = "expand_result_display_surface"
-        elif not display_strength_ready:
+        elif not display_strength_ready or managed_gate_needs_display_frontier:
             recommended_next_stage = "write"
             recommended_action = "expand_result_display_frontier"
         elif bundle_status != "present":
@@ -3619,6 +3626,8 @@ class QuestService:
             for item in (display_frontier.get("display_frontier_gaps") or [])
             if str(item).strip()
         )
+        if managed_gate_needs_display_frontier and "submission_grade_active_figure_floor_unmet" not in blocking_reasons:
+            blocking_reasons.append("submission_grade_active_figure_floor_unmet")
         if not review_outputs_ready:
             blocking_reasons.append(
                 "skeptical review outputs are missing "
@@ -3672,7 +3681,7 @@ class QuestService:
                 )
         if not managed_publication_gate_clear:
             gap_preview = ", ".join(
-                item for item in (managed_publication_gate.get("gap_summaries") or [])[:4] if item
+                item for item in managed_publication_gate_gap_summaries[:4] if item
             )
             if managed_publication_gate_status == "missing":
                 blocking_reasons.append(
@@ -3816,7 +3825,7 @@ class QuestService:
             "managed_publication_gate_summary": managed_publication_gate_summary,
             "managed_publication_eval_path": str(managed_publication_gate.get("publication_eval_path") or "").strip() or None,
             "managed_study_root": str(managed_publication_gate.get("study_root") or "").strip() or None,
-            "managed_publication_gate_gap_summaries": list(managed_publication_gate.get("gap_summaries") or []),
+            "managed_publication_gate_gap_summaries": managed_publication_gate_gap_summaries,
             "managed_publication_gate_recommended_action_types": list(
                 managed_publication_gate.get("recommended_action_types") or []
             ),

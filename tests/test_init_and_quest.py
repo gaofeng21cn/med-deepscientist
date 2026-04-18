@@ -1624,6 +1624,59 @@ def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_no
     assert "forbidden_manuscript_terminology" in joined
 
 
+def test_snapshot_prefers_display_frontier_when_managed_gate_clear_reports_figure_floor_gap(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper display frontier is still required by managed gate")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "display_frontier",
+                    "severity": "should_fix",
+                    "summary": "submission_grade_active_figure_floor_unmet",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_runtime",
+                    "priority": "now",
+                    "reason": "main-text figure ambition still needs expansion",
+                }
+            ],
+        },
+    )
+
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["managed_publication_gate_status"] == "clear"
+    assert health["managed_publication_gate_clear"] is True
+    assert health["managed_publication_gate_gap_summaries"] == ["submission_grade_active_figure_floor_unmet"]
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "expand_result_display_frontier"
+    assert "submission_grade_active_figure_floor_unmet" in health["blocking_reasons"]
+
+
 def test_snapshot_resolves_relative_study_root_for_managed_publication_eval(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
