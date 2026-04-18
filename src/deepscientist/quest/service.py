@@ -3303,6 +3303,125 @@ class QuestService:
             "finalize_resume_packet_path": finalize_resume_packet_path,
         }
 
+    @staticmethod
+    def _submission_checklist_external_metadata_only(
+        submission_checklist: dict[str, Any],
+        *,
+        submission_minimal_ready: bool,
+    ) -> bool:
+        if not isinstance(submission_checklist, dict) or not submission_minimal_ready:
+            return False
+        metadata_fields = {
+            "authorship",
+            "affiliations",
+            "corresponding_author_details",
+            "running_title_and_keywords",
+            "ethics_and_consent_wording",
+            "funding_statement",
+            "conflict_of_interest_statement",
+            "data_availability_statement",
+            "code_availability_statement",
+        }
+        status_values = [
+            str(submission_checklist.get("overall_status") or "").strip().lower(),
+            str(submission_checklist.get("package_status") or "").strip().lower(),
+            str(submission_checklist.get("status") or "").strip().lower(),
+        ]
+        items = [dict(item) for item in (submission_checklist.get("items") or []) if isinstance(item, dict)]
+        if not items:
+            return any("external_metadata" in value for value in status_values if value)
+
+        saw_incomplete_item = False
+        for item in items:
+            status = str(item.get("status") or "").strip().lower()
+            if not status:
+                continue
+            status_marks_ready = any(token in status for token in ("pass", "ready", "complete", "clear", "synced", "present"))
+            status_marks_pending = any(token in status for token in ("pending", "blocked", "missing", "gap", "nonfinal"))
+            if status_marks_ready and not status_marks_pending:
+                continue
+            pending_fields = {
+                str(field).strip()
+                for field in (item.get("pending_fields") or [])
+                if str(field).strip()
+            }
+            if pending_fields and pending_fields.issubset(metadata_fields):
+                saw_incomplete_item = True
+                continue
+            if "external_metadata" in status:
+                saw_incomplete_item = True
+                continue
+            return False
+        return saw_incomplete_item
+
+    @classmethod
+    def _paper_content_milestone_payload(
+        cls,
+        *,
+        writing_ready: bool,
+        review_outputs_ready: bool,
+        proofing_outputs_ready: bool,
+        bundle_status: str,
+        finalize_ready: bool,
+        submission_checklist: dict[str, Any],
+        submission_minimal_ready: bool,
+    ) -> dict[str, Any]:
+        content_milestone_reached = (
+            writing_ready
+            and review_outputs_ready
+            and proofing_outputs_ready
+            and bundle_status == "present"
+        )
+        review_ready = content_milestone_reached
+        submission_ready = finalize_ready
+        objective_metadata_only_remaining = (
+            content_milestone_reached
+            and not submission_ready
+            and cls._submission_checklist_external_metadata_only(
+                submission_checklist,
+                submission_minimal_ready=submission_minimal_ready,
+            )
+        )
+        if submission_ready:
+            milestone_id = "submission_ready"
+            remaining_scope = "none"
+            status_summary_zh = "投稿里程碑已达成：论文内容和投稿包已经就绪，可以进入外投。"
+            status_summary_en = "Submission milestone reached: the manuscript content and submission package are ready for external submission."
+        elif content_milestone_reached and objective_metadata_only_remaining:
+            milestone_id = "content_complete_pending_objective_info"
+            remaining_scope = "objective_info_only"
+            status_summary_zh = "内容里程碑已达成：论文内容已经完成，当前可以给人审阅；离外投只差客观信息补齐。"
+            status_summary_en = "Content milestone reached: the manuscript is review-ready, and only objective submission metadata remains before external submission."
+        elif content_milestone_reached:
+            milestone_id = "content_complete_review_ready"
+            remaining_scope = "submission_packaging_or_objective_info"
+            status_summary_zh = "内容里程碑已达成：论文内容已经完成，当前可以给人审阅；离外投还差投稿包收口或客观信息补齐。"
+            status_summary_en = "Content milestone reached: the manuscript is review-ready, and only submission packaging or objective metadata remains before external submission."
+        else:
+            milestone_id = "content_incomplete"
+            remaining_scope = "paper_content"
+            missing_parts: list[str] = []
+            if not writing_ready:
+                missing_parts.append("科学内容与主文")
+            if bundle_status != "present":
+                missing_parts.append("成稿 bundle")
+            if not review_outputs_ready or not proofing_outputs_ready:
+                missing_parts.append("审阅/校对")
+            detail_zh = "、".join(missing_parts) if missing_parts else "论文内容"
+            status_summary_zh = f"内容里程碑未达成：当前还在补{detail_zh}。"
+            status_summary_en = "Content milestone not reached: the manuscript content is still being completed."
+        return {
+            "milestone_id": milestone_id,
+            "content_milestone_reached": content_milestone_reached,
+            "review_ready": review_ready,
+            "submission_ready": submission_ready,
+            "objective_metadata_only_remaining": objective_metadata_only_remaining,
+            "remaining_scope": remaining_scope,
+            "milestone_label_zh": "已达成" if content_milestone_reached else "未达成",
+            "status_summary_zh": status_summary_zh,
+            "status_summary_en": status_summary_en,
+        }
+
     def _paper_contract_health_payload(
         self,
         *,
@@ -3709,6 +3828,15 @@ class QuestService:
         finalize_ready = (
             writing_ready
             and submission_ready_for_delivery
+        )
+        human_milestone = self._paper_content_milestone_payload(
+            writing_ready=writing_ready,
+            review_outputs_ready=review_outputs_ready,
+            proofing_outputs_ready=proofing_outputs_ready,
+            bundle_status=bundle_status,
+            finalize_ready=finalize_ready,
+            submission_checklist=submission_checklist,
+            submission_minimal_ready=submission_minimal_ready,
         )
         completion_blocking_reasons = list(blocking_reasons)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):

@@ -3972,6 +3972,10 @@ class ArtifactService:
     def _paper_line_state_label(value: bool) -> str:
         return "ready" if value else "blocked"
 
+    @staticmethod
+    def _human_milestone_payload(payload: dict[str, Any]) -> dict[str, Any]:
+        return dict(payload.get("human_milestone") or {}) if isinstance(payload.get("human_milestone"), dict) else {}
+
     def _continuation_display_action(
         self,
         quest_root: Path,
@@ -4043,6 +4047,9 @@ class ArtifactService:
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
+        human_milestone = self._human_milestone_payload(payload)
+        milestone_label_zh = str(human_milestone.get("milestone_label_zh") or "未达成").strip() or "未达成"
+        milestone_summary_zh = str(human_milestone.get("status_summary_zh") or "").strip()
         local_stage_label = "Recommended Next Stage"
         local_action_label = "Recommended Action"
         if route_source == "quest_continuation":
@@ -4062,6 +4069,7 @@ class ArtifactService:
             f"- Paper Line ID: `{str(payload.get('paper_line_id') or 'unknown').strip() or 'unknown'}`",
             f"- Paper Branch: `{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`",
             f"- Title: {str(payload.get('title') or 'Not recorded').strip() or 'Not recorded'}",
+            f"- 内容里程碑：{milestone_label_zh}",
             f"- Selected Outline: `{str(payload.get('selected_outline_ref') or 'none').strip() or 'none'}`",
             f"- Contract: `{self._paper_line_state_label(bool(payload.get('contract_ok')) )}`",
             f"- Reference Materialization: `{self._paper_line_state_label(bool(payload.get('reference_materialization_ready')) )}`",
@@ -4085,6 +4093,8 @@ class ArtifactService:
             "## Blocking Reasons",
             "",
         ]
+        if milestone_summary_zh:
+            lines.insert(10, f"- 当前判断：{milestone_summary_zh}")
         if route_source == "quest_continuation":
             lines.insert(
                 21,
@@ -4104,6 +4114,9 @@ class ArtifactService:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
+        human_milestone = self._human_milestone_payload(payload)
+        milestone_label_zh = str(human_milestone.get("milestone_label_zh") or "未达成").strip() or "未达成"
+        milestone_summary_zh = str(human_milestone.get("status_summary_zh") or "").strip()
         next_step_label = "Next step"
         if route_source == "quest_continuation":
             next_step_label = "Quest-level next step"
@@ -4116,6 +4129,7 @@ class ArtifactService:
                 f"`{str(payload.get('paper_branch') or 'paper').strip() or 'paper'}`."
             ),
             "",
+            f"- 内容里程碑：{milestone_label_zh}",
             f"- Writing readiness: `{self._paper_line_state_label(bool(payload.get('writing_ready')) )}`",
             f"- Audit package readiness: `{self._paper_line_state_label(bool(payload.get('audit_package_ready')) )}`",
             f"- Finalize readiness: `{self._paper_line_state_label(bool(payload.get('finalize_ready')) )}`",
@@ -4128,6 +4142,8 @@ class ArtifactService:
             "## Current Blockers",
             "",
         ]
+        if milestone_summary_zh:
+            lines.insert(8, f"- 当前判断：{milestone_summary_zh}")
         if route_source == "quest_continuation":
             lines.insert(
                 9,
@@ -4263,6 +4279,8 @@ class ArtifactService:
             "literature_record_count": int(health.get("literature_record_count") or 0),
             "literature_record_counts": dict(health.get("literature_record_counts") or {}),
             "literature_record_paths": list(health.get("literature_record_paths") or []),
+            "human_milestone": dict(health.get("human_milestone") or {}),
+            "status_narration_contract": dict(health.get("status_narration_contract") or {}),
             "updated_at": utc_now(),
         }
         payload["continuation_display_action"] = self._continuation_display_action(

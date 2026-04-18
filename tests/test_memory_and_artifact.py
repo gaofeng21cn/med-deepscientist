@@ -6948,6 +6948,7 @@ def test_paper_line_state_sync_matches_public_contract_health_for_completed_main
     )
 
     state = artifact._write_paper_line_state(quest_root)
+    global_status = artifact.get_global_status(quest_root, detail="brief", locale="zh")
     persisted = read_json(quest_root / "paper" / "paper_line_state.json", {})
     status_text = (quest_root / "status.md").read_text(encoding="utf-8")
     summary_text = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
