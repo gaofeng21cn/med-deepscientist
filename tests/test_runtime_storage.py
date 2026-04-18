@@ -189,3 +189,211 @@ def test_runtime_storage_maintenance_compacts_stale_running_sessions_with_finish
     assert "compacted completed runtime log" in compacted_terminal
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
+
+
+def test_runtime_storage_maintenance_compacts_cold_run_stdout_logs(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_id = "run-compact-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    history_root = quest_root / ".ds" / "codex_history" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    history_root.mkdir(parents=True, exist_ok=True)
+    payload = "stdout:" + ("x" * 150_000)
+    (run_root / "stdout.jsonl").write_text(
+        "\n".join(
+            json.dumps({"timestamp": "2026-04-10T00:00:00+00:00", "line": f"{index}:{payload}"}, ensure_ascii=False)
+            for index in range(10)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (history_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "completed_at": "2026-04-10T00:00:00+00:00",
+                "updated_at": "2026-04-10T00:00:00+00:00",
+                "exit_code": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=3600,
+        jsonl_max_mb=1,
+        text_max_mb=1,
+        head_lines=2,
+        tail_lines=2,
+    )
+
+    compacted_stdout = (run_root / "stdout.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(compacted_stdout) == 5
+    assert any("compacted completed runtime log" in line for line in compacted_stdout)
+    assert (run_root / "stdout.full.jsonl.gz").exists()
+    runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
+    assert any(item["path"].endswith("stdout.jsonl") for item in runtime_logs)
+
+
+def test_runtime_storage_maintenance_compacts_cold_codex_session_logs(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_id = "run-compact-002"
+    history_root = quest_root / ".ds" / "codex_history" / run_id
+    session_path = quest_root / ".ds" / "codex_homes" / run_id / "sessions" / "2026" / "04" / "15" / "rollout.jsonl"
+    history_root.mkdir(parents=True, exist_ok=True)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "session:" + ("x" * 150_000)
+    session_path.write_text(
+        "\n".join(
+            json.dumps({"seq": index + 1, "item": {"type": "message", "text": f"{index}:{payload}"}}, ensure_ascii=False)
+            for index in range(10)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (history_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "completed_at": "2026-04-10T00:00:00+00:00",
+                "updated_at": "2026-04-10T00:00:00+00:00",
+                "exit_code": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=3600,
+        jsonl_max_mb=1,
+        text_max_mb=1,
+        head_lines=2,
+        tail_lines=2,
+    )
+
+    compacted_session = session_path.read_text(encoding="utf-8").splitlines()
+    assert len(compacted_session) == 5
+    assert any("compacted completed runtime log" in line for line in compacted_session)
+    assert session_path.with_name("rollout.full.jsonl.gz").exists()
+    runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
+    assert any(item["path"].endswith("rollout.jsonl") for item in runtime_logs)
+
+
+def test_runtime_storage_maintenance_slims_oversized_run_and_history_jsonl_entries(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_id = "run-oversized-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    history_root = quest_root / ".ds" / "codex_history" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    history_root.mkdir(parents=True, exist_ok=True)
+    huge_text = "x" * 1_500_000
+    (run_root / "stdout.jsonl").write_text(
+        json.dumps({"timestamp": "2026-04-10T00:00:00+00:00", "line": huge_text}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    (history_root / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-04-10T00:00:00+00:00",
+                "event": {
+                    "type": "message",
+                    "content": huge_text,
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (history_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "completed_at": "2026-04-10T00:00:00+00:00",
+                "updated_at": "2026-04-10T00:00:00+00:00",
+                "exit_code": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=3600,
+        slim_jsonl_threshold_mb=1,
+    )
+
+    compacted_stdout = (run_root / "stdout.jsonl").read_text(encoding="utf-8")
+    compacted_history = (history_root / "events.jsonl").read_text(encoding="utf-8")
+    assert "compacted oversized stdout entry" in compacted_stdout
+    assert "Oversized codex history entry" in compacted_history
+    slim_manifest = result["roots"][0]["oversized_jsonl"]
+    assert slim_manifest["compacted_line_count"] == 2
+    assert slim_manifest["files"]
+    backup_root = Path(slim_manifest["backup_root"])
+    assert backup_root.exists()
+    assert (backup_root / "manifest.json").exists()
+
+
+def test_runtime_storage_maintenance_dedupes_large_worktree_cold_files(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    session_a = quest_root / ".ds" / "worktrees" / "wt-a" / ".codex" / "sessions" / "2026" / "04" / "a.jsonl"
+    session_b = quest_root / ".ds" / "worktrees" / "wt-b" / ".codex" / "sessions" / "2026" / "04" / "b.jsonl"
+    session_a.parent.mkdir(parents=True, exist_ok=True)
+    session_b.parent.mkdir(parents=True, exist_ok=True)
+    duplicated_payload = (json.dumps({"message": "x" * 1_500_000}, ensure_ascii=False) + "\n") * 2
+    session_a.write_text(duplicated_payload, encoding="utf-8")
+    session_b.write_text(duplicated_payload, encoding="utf-8")
+    old = time.time() - 8 * 3600
+    os.utime(session_a, (old, old))
+    os.utime(session_b, (old, old))
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=1,
+    )
+
+    dedupe_manifest = result["worktree_dedupe"]
+    assert dedupe_manifest["files_relinked"] == 1
+    assert os.stat(session_a).st_ino == os.stat(session_b).st_ino
+
+
+def test_runtime_storage_maintenance_dedupes_large_worktree_runtime_files(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    stdout_a = quest_root / ".ds" / "worktrees" / "wt-a" / ".ds" / "runs" / "run-001" / "stdout.jsonl"
+    stdout_b = quest_root / ".ds" / "worktrees" / "wt-b" / ".ds" / "runs" / "run-001" / "stdout.jsonl"
+    stdout_a.parent.mkdir(parents=True, exist_ok=True)
+    stdout_b.parent.mkdir(parents=True, exist_ok=True)
+    duplicated_payload = (json.dumps({"line": "x" * 1_500_000}, ensure_ascii=False) + "\n") * 2
+    stdout_a.write_text(duplicated_payload, encoding="utf-8")
+    stdout_b.write_text(duplicated_payload, encoding="utf-8")
+    old = time.time() - 8 * 3600
+    os.utime(stdout_a, (old, old))
+    os.utime(stdout_b, (old, old))
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=1,
+    )
+
+    dedupe_manifest = result["worktree_dedupe"]
+    assert dedupe_manifest["files_relinked"] == 1
+    assert os.stat(stdout_a).st_ino == os.stat(stdout_b).st_ino

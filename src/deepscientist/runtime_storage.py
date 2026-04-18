@@ -3,10 +3,13 @@ from __future__ import annotations
 from collections import deque
 from datetime import UTC, datetime
 import gzip
+import hashlib
 import json
+import os
 import re
 import shutil
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 from .quest.layout import RUNTIME_GITIGNORE_ENTRIES
@@ -15,6 +18,13 @@ from .shared import ensure_dir, read_json, utc_now, write_json
 TERMINAL_STATUSES = {"completed", "failed", "terminated"}
 _ATOMIC_TMP_RE = re.compile(r"^(?P<base>.+)\.[A-Za-z0-9_-]{8,}\.tmp$")
 _SEQ_RE = re.compile(r'"seq"\s*:\s*(\d+)')
+_EVENT_ID_BYTES_RE = re.compile(rb'"event_id"\s*:\s*"([^"]+)"')
+_EVENT_TYPE_BYTES_RE = re.compile(rb'"(?:type|event_type)"\s*:\s*"([^"]+)"')
+_RUN_ID_BYTES_RE = re.compile(rb'"run_id"\s*:\s*"([^"]+)"')
+_TOOL_NAME_BYTES_RE = re.compile(rb'"tool_name"\s*:\s*"([^"]+)"')
+_TIMESTAMP_BYTES_RE = re.compile(rb'"timestamp"\s*:\s*"([^"]+)"')
+_SEQ_BYTES_RE = re.compile(rb'"seq"\s*:\s*(\d+)')
+_STREAM_BYTES_RE = re.compile(rb'"stream"\s*:\s*"([^"]+)"')
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -119,6 +129,16 @@ def _extract_seq(raw_line: str) -> int | None:
     try:
         return int(match.group(1))
     except ValueError:
+        return None
+
+
+def _extract_bytes(pattern: re.Pattern[bytes], raw: bytes) -> str | None:
+    match = pattern.search(raw)
+    if match is None:
+        return None
+    try:
+        return match.group(1).decode("utf-8", errors="ignore").strip() or None
+    except Exception:
         return None
 
 
@@ -299,6 +319,339 @@ def _maybe_update_session_meta(session_dir: Path, *, entries: list[dict[str, Any
     write_json(meta_path, meta)
 
 
+def _replace_file(path: Path, lines: list[bytes]) -> None:
+    with NamedTemporaryFile("wb", delete=False, dir=path.parent, prefix=f"{path.name}.", suffix=".tmp") as handle:
+        temp_path = Path(handle.name)
+        for line in lines:
+            handle.write(line)
+    temp_path.replace(path)
+
+
+def _backup_raw_line(backup_root: Path, *, file_rel: str, line_no: int, raw: bytes) -> Path:
+    digest = hashlib.sha256(raw).hexdigest()[:16]
+    safe_rel = file_rel.replace("/", "__")
+    backup_name = f"{safe_rel}__line_{line_no:06d}__{digest}.jsonl.gz"
+    backup_path = backup_root / backup_name
+    ensure_dir(backup_path.parent)
+    with gzip.open(backup_path, "wb") as handle:
+        handle.write(raw)
+    return backup_path
+
+
+def _event_placeholder(raw: bytes, *, original_bytes: int, backup_ref: str, file_rel: str, line_no: int) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "event_id": _extract_bytes(_EVENT_ID_BYTES_RE, raw) or f"evt-slim-{line_no}",
+        "type": _extract_bytes(_EVENT_TYPE_BYTES_RE, raw) or "runner.tool_result",
+        "run_id": _extract_bytes(_RUN_ID_BYTES_RE, raw),
+        "tool_name": _extract_bytes(_TOOL_NAME_BYTES_RE, raw),
+        "status": "compacted",
+        "summary": f"Oversized quest event payload ({original_bytes} bytes) was compacted into a quest-local backup.",
+        "oversized_event": True,
+        "original_bytes": original_bytes,
+        "backup_ref": backup_ref,
+        "created_at": utc_now(),
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def _bash_log_placeholder(raw: bytes, *, original_bytes: int, backup_ref: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "seq": int(_extract_bytes(_SEQ_BYTES_RE, raw) or 0),
+        "stream": _extract_bytes(_STREAM_BYTES_RE, raw) or "stdout",
+        "timestamp": _extract_bytes(_TIMESTAMP_BYTES_RE, raw),
+        "line": f"[compacted oversized bash log entry: {original_bytes} bytes -> {backup_ref}]",
+        "oversized_payload": True,
+        "original_bytes": original_bytes,
+        "backup_ref": backup_ref,
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def _stdout_placeholder(raw: bytes, *, original_bytes: int, backup_ref: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "timestamp": _extract_bytes(_TIMESTAMP_BYTES_RE, raw),
+        "line": f"[compacted oversized stdout entry: {original_bytes} bytes -> {backup_ref}]",
+        "oversized_payload": True,
+        "original_bytes": original_bytes,
+        "backup_ref": backup_ref,
+    }
+    return {key: value for key, value in payload.items() if value is not None}
+
+
+def _codex_history_placeholder(raw: bytes, *, original_bytes: int, backup_ref: str) -> dict[str, Any]:
+    return {
+        "timestamp": _extract_bytes(_TIMESTAMP_BYTES_RE, raw),
+        "event": {
+            "type": "oversized_payload",
+            "summary": f"Oversized codex history entry ({original_bytes} bytes) was compacted into a quest-local backup.",
+            "backup_ref": backup_ref,
+            "original_bytes": original_bytes,
+        },
+    }
+
+
+def _placeholder_for(path: Path, raw: bytes, *, original_bytes: int, backup_ref: str, file_rel: str, line_no: int) -> dict[str, Any]:
+    normalized = file_rel.replace("\\", "/")
+    if normalized == ".ds/events.jsonl":
+        return _event_placeholder(raw, original_bytes=original_bytes, backup_ref=backup_ref, file_rel=file_rel, line_no=line_no)
+    if normalized.startswith(".ds/bash_exec/") and normalized.endswith("/log.jsonl"):
+        return _bash_log_placeholder(raw, original_bytes=original_bytes, backup_ref=backup_ref)
+    if normalized.startswith(".ds/runs/") and normalized.endswith("/stdout.jsonl"):
+        return _stdout_placeholder(raw, original_bytes=original_bytes, backup_ref=backup_ref)
+    if normalized.startswith(".ds/codex_history/") and normalized.endswith("/events.jsonl"):
+        return _codex_history_placeholder(raw, original_bytes=original_bytes, backup_ref=backup_ref)
+    return {
+        "oversized_payload": True,
+        "original_bytes": original_bytes,
+        "backup_ref": backup_ref,
+    }
+
+
+def _iter_jsonl_slim_targets(ds_root: Path) -> list[Path]:
+    files: list[Path] = []
+    direct_events = ds_root / "events.jsonl"
+    if direct_events.exists():
+        files.append(direct_events)
+    files.extend(sorted((ds_root / "bash_exec").glob("**/log.jsonl")))
+    files.extend(sorted((ds_root / "codex_history").glob("**/events.jsonl")))
+    files.extend(sorted((ds_root / "runs").glob("**/stdout.jsonl")))
+    return [path for path in files if path.is_file()]
+
+
+def _path_is_cold(path: Path, *, root: Path, now: datetime, older_than_seconds: int) -> bool:
+    relative = path.relative_to(root).as_posix()
+    timestamp: datetime | None = None
+    if relative.startswith(".ds/bash_exec/") and relative.endswith("/log.jsonl"):
+        meta = read_json(path.parent / "meta.json", {})
+        timestamp = _parse_timestamp((meta or {}).get("finished_at") or (meta or {}).get("updated_at"))
+    elif relative.startswith(".ds/codex_history/") and relative.endswith("/events.jsonl"):
+        meta = read_json(path.parent / "meta.json", {})
+        timestamp = _parse_timestamp(
+            (meta or {}).get("completed_at") or (meta or {}).get("finished_at") or (meta or {}).get("updated_at")
+        )
+    elif relative.startswith(".ds/runs/") and relative.endswith("/stdout.jsonl"):
+        run_id = path.parent.name
+        meta = read_json(root / ".ds" / "codex_history" / run_id / "meta.json", {})
+        timestamp = _parse_timestamp(
+            (meta or {}).get("completed_at") or (meta or {}).get("finished_at") or (meta or {}).get("updated_at")
+        )
+    elif relative.startswith(".ds/codex_homes/") and "/sessions/" in relative and relative.endswith(".jsonl"):
+        parts = Path(relative).parts
+        run_id = parts[2] if len(parts) > 2 else ""
+        meta = read_json(root / ".ds" / "codex_history" / run_id / "meta.json", {})
+        timestamp = _parse_timestamp(
+            (meta or {}).get("completed_at") or (meta or {}).get("finished_at") or (meta or {}).get("updated_at")
+        )
+    if timestamp is not None:
+        return (now - timestamp).total_seconds() >= older_than_seconds
+    age = _age_seconds(path, now=now)
+    return age is not None and age >= older_than_seconds
+
+
+def _iter_cold_runtime_jsonl_targets(root: Path) -> list[Path]:
+    resolved_root = Path(root).expanduser().resolve()
+    ds_root = resolved_root / ".ds"
+    files: list[Path] = []
+    files.extend(sorted((ds_root / "runs").glob("*/stdout.jsonl")))
+    codex_homes_root = ds_root / "codex_homes"
+    if codex_homes_root.exists():
+        for run_home in sorted(path for path in codex_homes_root.iterdir() if path.is_dir()):
+            sessions_root = run_home / "sessions"
+            if not sessions_root.exists():
+                continue
+            files.extend(sorted(sessions_root.glob("**/*.jsonl")))
+    return [path for path in files if path.is_file()]
+
+
+def slim_quest_jsonl(
+    quest_root: Path,
+    *,
+    older_than_seconds: int = 6 * 3600,
+    threshold_bytes: int,
+) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    ds_root = resolved_root / ".ds"
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backup_root = ds_root / "slim_backups" / timestamp
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "threshold_bytes": threshold_bytes,
+        "backup_root": str(backup_root),
+        "processed_at": utc_now(),
+        "files": [],
+        "compacted_line_count": 0,
+        "compacted_bytes_total": 0,
+    }
+    if threshold_bytes <= 0 or not ds_root.exists():
+        return manifest
+
+    now = datetime.now(UTC)
+    for path in _iter_jsonl_slim_targets(ds_root):
+        if not _path_is_cold(path, root=resolved_root, now=now, older_than_seconds=older_than_seconds):
+            continue
+        rel = path.relative_to(resolved_root).as_posix()
+        line_no = 0
+        compacted_lines = 0
+        compacted_bytes = 0
+        rewritten: list[bytes] = []
+        with path.open("rb") as handle:
+            for raw in handle:
+                line_no += 1
+                line_bytes = len(raw)
+                if line_bytes <= threshold_bytes:
+                    rewritten.append(raw)
+                    continue
+                backup_path = _backup_raw_line(backup_root, file_rel=rel, line_no=line_no, raw=raw)
+                backup_ref = backup_path.relative_to(resolved_root).as_posix()
+                placeholder = _placeholder_for(
+                    path,
+                    raw,
+                    original_bytes=line_bytes,
+                    backup_ref=backup_ref,
+                    file_rel=rel,
+                    line_no=line_no,
+                )
+                rewritten.append((json.dumps(placeholder, ensure_ascii=False) + "\n").encode("utf-8"))
+                compacted_lines += 1
+                compacted_bytes += line_bytes
+        if compacted_lines:
+            _replace_file(path, rewritten)
+            manifest["files"].append(
+                {
+                    "path": rel,
+                    "compacted_lines": compacted_lines,
+                    "compacted_bytes": compacted_bytes,
+                }
+            )
+            manifest["compacted_line_count"] += compacted_lines
+            manifest["compacted_bytes_total"] += compacted_bytes
+
+    if manifest["compacted_line_count"]:
+        ensure_dir(backup_root)
+        manifest_path = backup_root / "manifest.json"
+        manifest["manifest_path"] = str(manifest_path)
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return manifest
+
+
+def _iter_dedupe_targets(worktrees_root: Path, *, older_than_seconds: int, min_bytes: int) -> list[Path]:
+    now = datetime.now(UTC)
+    patterns = [
+        "**/.codex/sessions/**/*.jsonl",
+        "**/experiments/**/*.json",
+        "**/.ds/runs/*/stdout.jsonl",
+        "**/.ds/runs/*/stdout.full.jsonl.gz",
+        "**/.ds/codex_history/*/events.jsonl",
+        "**/.ds/bash_exec/**/*.full.jsonl.gz",
+        "**/.ds/bash_exec/**/*.full.log.gz",
+        "**/.ds/codex_homes/*/sessions/**/*.jsonl",
+        "**/.ds/codex_homes/*/sessions/**/*.jsonl.gz",
+    ]
+    files: list[Path] = []
+    for pattern in patterns:
+        for path in worktrees_root.glob(pattern):
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_size < min_bytes:
+                    continue
+            except OSError:
+                continue
+            age = _age_seconds(path, now=now)
+            if age is None or age < older_than_seconds:
+                continue
+            files.append(path)
+    return sorted(files)
+
+
+def _sha256(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _replace_with_hardlink(target: Path, source: Path) -> None:
+    with NamedTemporaryFile("wb", delete=False, dir=target.parent, prefix=f"{target.name}.", suffix=".linktmp") as handle:
+        temp_path = Path(handle.name)
+    try:
+        temp_path.unlink(missing_ok=True)
+        os.link(source, temp_path)
+        temp_path.replace(target)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def dedupe_worktree_files(
+    quest_root: Path,
+    *,
+    older_than_seconds: int = 6 * 3600,
+    min_bytes: int,
+) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    worktrees_root = resolved_root / ".ds" / "worktrees"
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "worktrees_root": str(worktrees_root),
+        "min_bytes": min_bytes,
+        "older_than_seconds": older_than_seconds,
+        "groups_examined": 0,
+        "files_relinked": 0,
+        "bytes_deduped": 0,
+        "groups": [],
+    }
+    if min_bytes <= 0 or not worktrees_root.exists():
+        return manifest
+
+    size_buckets: dict[int, list[Path]] = {}
+    for path in _iter_dedupe_targets(worktrees_root, older_than_seconds=older_than_seconds, min_bytes=min_bytes):
+        try:
+            size_buckets.setdefault(path.stat().st_size, []).append(path)
+        except OSError:
+            continue
+
+    for size, paths in sorted(size_buckets.items(), key=lambda item: -item[0]):
+        if len(paths) < 2:
+            continue
+        manifest["groups_examined"] += 1
+        hash_buckets: dict[str, list[Path]] = {}
+        for path in paths:
+            try:
+                digest = _sha256(path)
+            except OSError:
+                continue
+            hash_buckets.setdefault(digest, []).append(path)
+        for digest, dupes in hash_buckets.items():
+            if len(dupes) < 2:
+                continue
+            canonical = dupes[0]
+            relinked: list[str] = []
+            for duplicate in dupes[1:]:
+                try:
+                    if canonical.stat().st_ino == duplicate.stat().st_ino:
+                        continue
+                except OSError:
+                    continue
+                _replace_with_hardlink(duplicate, canonical)
+                manifest["files_relinked"] += 1
+                manifest["bytes_deduped"] += size
+                relinked.append(str(duplicate.relative_to(resolved_root)))
+            if relinked:
+                manifest["groups"].append(
+                    {
+                        "sha256": digest,
+                        "size_bytes": size,
+                        "canonical": str(canonical.relative_to(resolved_root)),
+                        "relinked": relinked,
+                    }
+                )
+    return manifest
+
+
 def compact_completed_runtime_logs(
     root: Path,
     *,
@@ -316,55 +669,76 @@ def compact_completed_runtime_logs(
         "session_count": 0,
     }
     bash_root = resolved_root / ".ds" / "bash_exec"
-    if not bash_root.exists():
-        return manifest
-
-    for session_dir in sorted(path for path in bash_root.iterdir() if path.is_dir()):
-        meta = read_json(session_dir / "meta.json", {})
-        if not _session_is_cold_terminal(meta or {}, now=now, older_than_seconds=older_than_seconds):
+    if bash_root.exists():
+        for session_dir in sorted(path for path in bash_root.iterdir() if path.is_dir()):
+            meta = read_json(session_dir / "meta.json", {})
+            if not _session_is_cold_terminal(meta or {}, now=now, older_than_seconds=older_than_seconds):
+                continue
+            session_entries: list[dict[str, Any]] = []
+            for filename, max_bytes, mode in (
+                ("log.jsonl", jsonl_max_bytes, "jsonl"),
+                ("terminal.log", text_max_bytes, "text"),
+                ("monitor.log", text_max_bytes, "text"),
+            ):
+                path = session_dir / filename
+                if not path.exists():
+                    continue
+                try:
+                    original_bytes = path.stat().st_size
+                except OSError:
+                    continue
+                if original_bytes < max_bytes:
+                    continue
+                archive_path = _archive_path(path)
+                if not archive_path.exists():
+                    _write_gzip_copy(path, archive_path)
+                if mode == "jsonl":
+                    compacted = _compact_jsonl_file(
+                        path,
+                        archive_path=archive_path,
+                        original_bytes=original_bytes,
+                        head_lines=head_lines,
+                        tail_lines=tail_lines,
+                        root=resolved_root,
+                    )
+                else:
+                    compacted = _compact_text_file(
+                        path,
+                        archive_path=archive_path,
+                        original_bytes=original_bytes,
+                        head_lines=head_lines,
+                        tail_lines=tail_lines,
+                        root=resolved_root,
+                    )
+                if compacted is not None:
+                    session_entries.append(compacted)
+                    manifest["compacted_files"].append(compacted)
+            if session_entries:
+                manifest["session_count"] += 1
+                _maybe_update_session_meta(session_dir, entries=session_entries)
+    for path in _iter_cold_runtime_jsonl_targets(resolved_root):
+        if not _path_is_cold(path, root=resolved_root, now=now, older_than_seconds=older_than_seconds):
             continue
-        session_entries: list[dict[str, Any]] = []
-        for filename, max_bytes, mode in (
-            ("log.jsonl", jsonl_max_bytes, "jsonl"),
-            ("terminal.log", text_max_bytes, "text"),
-            ("monitor.log", text_max_bytes, "text"),
-        ):
-            path = session_dir / filename
-            if not path.exists():
-                continue
-            try:
-                original_bytes = path.stat().st_size
-            except OSError:
-                continue
-            if original_bytes < max_bytes:
-                continue
-            archive_path = _archive_path(path)
-            if not archive_path.exists():
-                _write_gzip_copy(path, archive_path)
-            if mode == "jsonl":
-                compacted = _compact_jsonl_file(
-                    path,
-                    archive_path=archive_path,
-                    original_bytes=original_bytes,
-                    head_lines=head_lines,
-                    tail_lines=tail_lines,
-                    root=resolved_root,
-                )
-            else:
-                compacted = _compact_text_file(
-                    path,
-                    archive_path=archive_path,
-                    original_bytes=original_bytes,
-                    head_lines=head_lines,
-                    tail_lines=tail_lines,
-                    root=resolved_root,
-                )
-            if compacted is not None:
-                session_entries.append(compacted)
-                manifest["compacted_files"].append(compacted)
-        if session_entries:
+        try:
+            original_bytes = path.stat().st_size
+        except OSError:
+            continue
+        if original_bytes < jsonl_max_bytes:
+            continue
+        archive_path = _archive_path(path)
+        if not archive_path.exists():
+            _write_gzip_copy(path, archive_path)
+        compacted = _compact_jsonl_file(
+            path,
+            archive_path=archive_path,
+            original_bytes=original_bytes,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+            root=resolved_root,
+        )
+        if compacted is not None:
             manifest["session_count"] += 1
-            _maybe_update_session_meta(session_dir, entries=session_entries)
+            manifest["compacted_files"].append(compacted)
     return manifest
 
 
@@ -444,6 +818,8 @@ def maintain_quest_runtime_storage(
     older_than_seconds: int = 6 * 3600,
     jsonl_max_mb: int = 64,
     text_max_mb: int = 16,
+    slim_jsonl_threshold_mb: int | None = 8,
+    dedupe_worktree_min_mb: int | None = 16,
     head_lines: int = 200,
     tail_lines: int = 200,
 ) -> dict[str, Any]:
@@ -454,6 +830,11 @@ def maintain_quest_runtime_storage(
         "include_worktrees": include_worktrees,
         "roots": [],
         "processed_at": utc_now(),
+        "worktree_dedupe": {
+            "quest_root": str(resolved_quest_root),
+            "skipped": True,
+            "reason": "include_worktrees_disabled" if not include_worktrees else "dedupe_disabled",
+        },
     }
     for root in roots:
         gitignore_manifest = ensure_runtime_gitignore(root)
@@ -466,6 +847,11 @@ def maintain_quest_runtime_storage(
             head_lines=head_lines,
             tail_lines=tail_lines,
         )
+        oversized_jsonl_manifest = slim_quest_jsonl(
+            root,
+            older_than_seconds=older_than_seconds,
+            threshold_bytes=0 if slim_jsonl_threshold_mb is None else max(1, slim_jsonl_threshold_mb) * 1024 * 1024,
+        )
         codex_home_manifest = prune_codex_home_tempdirs(root, older_than_seconds=older_than_seconds)
         manifest["roots"].append(
             {
@@ -473,7 +859,14 @@ def maintain_quest_runtime_storage(
                 "gitignore": gitignore_manifest,
                 "tempfiles": temp_manifest,
                 "runtime_logs": log_manifest,
+                "oversized_jsonl": oversized_jsonl_manifest,
                 "codex_homes": codex_home_manifest,
             }
+        )
+    if include_worktrees and dedupe_worktree_min_mb is not None:
+        manifest["worktree_dedupe"] = dedupe_worktree_files(
+            resolved_quest_root,
+            older_than_seconds=older_than_seconds,
+            min_bytes=max(1, dedupe_worktree_min_mb) * 1024 * 1024,
         )
     return manifest
