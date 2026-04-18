@@ -1683,8 +1683,18 @@ class DaemonApp:
             self._refresh_turn_worker_state(quest_id)
             return snapshot
         turn_state = self._refresh_turn_worker_state(quest_id)
+        stale_live_turn_reconciled = False
         if turn_state.get("running"):
-            return snapshot
+            stale_live_turn_reconciled = self._interrupt_stale_live_turn_if_needed(
+                quest_id,
+                snapshot=snapshot,
+                active_run_id=active_run_id,
+            )
+            if not stale_live_turn_reconciled:
+                return snapshot
+            turn_state = self._refresh_turn_worker_state(quest_id)
+            if turn_state.get("running"):
+                return snapshot
 
         quest_root = self.quest_service._quest_root(quest_id)
         result_payload = read_json(quest_root / ".ds" / "runs" / active_run_id / "result.json", {})
@@ -1696,9 +1706,13 @@ class DaemonApp:
         )
         normalized_status = "active" if previous_status == "running" else previous_status
         summary = (
-            f"Cleared stale active turn state for run `{active_run_id}` after no live worker was found."
-            if not completed_at
-            else f"Cleared stale active turn state for completed run `{active_run_id}`."
+            f"Cleared stale active turn state for run `{active_run_id}` after no visible progress while queued user messages were pending."
+            if stale_live_turn_reconciled
+            else (
+                f"Cleared stale active turn state for run `{active_run_id}` after no live worker was found."
+                if not completed_at
+                else f"Cleared stale active turn state for completed run `{active_run_id}`."
+            )
         )
         append_jsonl(
             quest_root / ".ds" / "events.jsonl",
@@ -1734,6 +1748,54 @@ class DaemonApp:
         )
         self._schedule_runtime_storage_maintenance(quest_id)
         return reconciled
+
+    def _interrupt_stale_live_turn_if_needed(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict[str, Any],
+        active_run_id: str,
+    ) -> bool:
+        if int(snapshot.get("pending_user_message_count") or 0) <= 0:
+            return False
+
+        quest_root = self.quest_service._quest_root(quest_id)
+        interaction_watchdog = self.quest_service.artifact_interaction_watchdog_status(quest_root)
+        if not bool(interaction_watchdog.get("stale_visibility_gap")):
+            return False
+
+        runner_name = self._runner_name_for(snapshot)
+        try:
+            runner = self.get_runner(runner_name)
+        except KeyError:
+            runner = None
+
+        interrupted = False
+        if runner is not None and hasattr(runner, "interrupt"):
+            interrupted = bool(getattr(runner, "interrupt")(quest_id))
+        stopped_bash_session_ids = self._stop_active_bash_exec_sessions(
+            quest_id,
+            run_id=active_run_id,
+            reason="quest_runtime_reconcile",
+            user_id="daemon-runtime-reconcile",
+        )
+        with self._turn_lock:
+            state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
+            state["stop_requested"] = True
+            state["running"] = False
+            state["pending"] = False
+            state.pop("worker", None)
+
+        self.logger.log(
+            "warning",
+            "quest.stale_live_turn_interrupted",
+            quest_id=quest_id,
+            active_run_id=active_run_id,
+            runner=runner_name,
+            interrupted=interrupted,
+            stopped_bash_session_count=len(stopped_bash_session_ids),
+        )
+        return True
 
     def control_quest(self, quest_id: str, *, action: str, source: str = "local") -> dict:
         normalized_action = str(action or "").strip().lower()
@@ -1893,8 +1955,25 @@ class DaemonApp:
         with self._turn_lock:
             state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
             state["stop_requested"] = False
+        quest_root = self.quest_service._quest_root(quest_id)
+        cleared_invalid_waiting_interactions = self.artifact_service.clear_invalid_waiting_requests(
+            quest_root,
+            closing_artifact_id=generate_id("runtime"),
+        )
         snapshot = self.quest_service.snapshot(quest_id)
-        next_status = "running" if snapshot.get("status") == "running" else "active"
+        current_status = str(snapshot.get("status") or "").strip()
+        pending_user_message_count = int(snapshot.get("pending_user_message_count") or 0)
+        preserve_waiting_state = (
+            current_status == "waiting_for_user"
+            and pending_user_message_count == 0
+            and self.artifact_service.has_valid_waiting_request(quest_root)
+        )
+        if current_status == "running":
+            next_status = "running"
+        elif preserve_waiting_state:
+            next_status = "waiting_for_user"
+        else:
+            next_status = "active"
         snapshot = self.quest_service.set_status(
             quest_id,
             next_status,
@@ -1945,7 +2024,14 @@ class DaemonApp:
             if int(snapshot.get("pending_user_message_count") or 0) > 0
             else "auto_continue"
         )
-        if str(snapshot.get("status") or next_status) == "running" and has_live_turn:
+        if preserve_waiting_state:
+            scheduled = {
+                "scheduled": False,
+                "started": False,
+                "queued": False,
+                "reason": turn_reason,
+            }
+        elif str(snapshot.get("status") or next_status) == "running" and has_live_turn:
             scheduled = {
                 "scheduled": True,
                 "started": False,
@@ -1959,6 +2045,7 @@ class DaemonApp:
             "quest_id": quest_id,
             "action": "resume",
             "interrupted": False,
+            "cleared_invalid_waiting_interactions": cleared_invalid_waiting_interactions,
             "snapshot": snapshot,
             "message": summary,
             "event": event,

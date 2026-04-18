@@ -4259,6 +4259,155 @@ def test_quest_control_resume_schedules_auto_continue_turn(temp_home: Path, monk
     assert scheduled == [(quest_id, "auto_continue")]
 
 
+def test_resume_quest_preserves_waiting_completion_approval_without_auto_continue(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume waiting completion approval quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    request = app.artifact_service.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest appears complete. May I end it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+    )
+
+    snapshot_waiting = app.quest_service.snapshot(quest_id)
+    assert snapshot_waiting["status"] == "waiting_for_user"
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.resume_quest(quest_id, source="auto:daemon-recovery")
+
+    assert payload["scheduled"] is False
+    assert payload["started"] is False
+    assert payload["queued"] is False
+    assert payload["snapshot"]["status"] == "waiting_for_user"
+    assert scheduled == []
+
+    snapshot_after = app.quest_service.snapshot(quest_id)
+    assert snapshot_after["status"] == "waiting_for_user"
+    assert snapshot_after["waiting_interaction_id"] == request["interaction_id"]
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "waiting_for_user"
+    assert runtime_state["active_interaction_id"] == request["interaction_id"]
+
+
+def test_resume_quest_clears_invalid_blocking_progress_waiting_state_and_auto_continues(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume invalid blocking progress waiting quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    interaction_id = "progress-invalid-blocking"
+    created_at = utc_now()
+
+    write_json(
+        quest_root / ".ds" / "interaction_state.json",
+        {
+            "open_requests": [
+                {
+                    "interaction_id": interaction_id,
+                    "artifact_id": interaction_id,
+                    "kind": "progress",
+                    "reply_mode": "blocking",
+                    "status": "waiting",
+                    "message": "当前最合适的做法是保持待命；如果你发送新指令，我再继续。",
+                    "options": [],
+                    "allow_free_text": True,
+                    "reply_schema": {},
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            ],
+            "recent_threads": [
+                {
+                    "interaction_id": interaction_id,
+                    "artifact_id": interaction_id,
+                    "kind": "progress",
+                    "reply_mode": "blocking",
+                    "status": "waiting",
+                    "message": "当前最合适的做法是保持待命；如果你发送新指令，我再继续。",
+                    "options": [],
+                    "allow_free_text": True,
+                    "reply_schema": {},
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }
+            ],
+            "default_reply_interaction_id": interaction_id,
+            "latest_thread_interaction_id": interaction_id,
+            "last_outbound_interaction_id": interaction_id,
+        },
+    )
+    app.quest_service.set_status(quest_id, "waiting_for_user")
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="waiting_for_user",
+        active_interaction_id=interaction_id,
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.resume_quest(quest_id, source="auto:daemon-recovery")
+
+    assert payload["scheduled"] is True
+    assert payload["started"] is True
+    assert payload["queued"] is False
+    assert payload["snapshot"]["status"] == "active"
+    assert scheduled == [(quest_id, "auto_continue")]
+
+    snapshot_after = app.quest_service.snapshot(quest_id)
+    assert snapshot_after["status"] == "active"
+    assert snapshot_after["waiting_interaction_id"] is None
+    assert not snapshot_after["pending_decisions"]
+    assert snapshot_after["default_reply_interaction_id"] is None
+    assert snapshot_after["active_interaction_id"] is None
+
+    interaction_state = read_json(quest_root / ".ds" / "interaction_state.json", {})
+    assert not any(str(item.get("status") or "") == "waiting" for item in interaction_state["open_requests"])
+    assert not any(str(item.get("status") or "") == "waiting" for item in interaction_state["recent_threads"])
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "active"
+    assert runtime_state["active_interaction_id"] is None
+
+
 def test_quest_control_pause_marks_quest_paused_and_interrupts_runner(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -4616,6 +4765,72 @@ def test_submit_user_message_reconciles_stale_active_turn_and_starts_new_run(tem
         time.sleep(0.05)
     else:
         raise AssertionError("fresh run did not clear active_run_id after completing")
+
+    events = app.quest_service.events(quest_id)["events"]
+    assert any(
+        item.get("type") == "quest.turn_state_reconciled"
+        and item.get("abandoned_run_id") == stale_run_id
+        for item in events
+    )
+
+
+def test_quest_runtime_audit_reconciles_stale_live_turn_with_pending_queue_message(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("stale live turn audit quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    stale_run_id = "run-stale-live-001"
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+    stale_at = (datetime.now(UTC) - timedelta(minutes=45)).replace(microsecond=0).isoformat()
+
+    queue_payload = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+    queue_payload["pending"] = [
+        {
+            "message_id": "msg-stale-live-001",
+            "source": "local",
+            "conversation_id": "local",
+            "content": "Hard control message from runtime watch.",
+            "created_at": stale_at,
+            "reply_to_interaction_id": None,
+            "attachments": [],
+            "status": "queued",
+        }
+    ]
+    write_json(quest_root / ".ds" / "user_message_queue.json", queue_payload)
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        pending_user_message_count=1,
+        last_artifact_interact_at=stale_at,
+        last_tool_activity_at=stale_at,
+        last_tool_activity_name="artifact.interact",
+        tool_calls_since_last_artifact_interact=1,
+    )
+
+    release_worker = threading.Event()
+    worker = threading.Thread(target=release_worker.wait, daemon=True)
+    worker.start()
+    app._turn_state[quest_id] = {
+        "running": True,
+        "pending": False,
+        "reason": "auto_continue",
+        "worker": worker,
+    }
+
+    try:
+        audit = app.quest_runtime_audit(quest_id)
+        snapshot = app.quest_service.snapshot(quest_id)
+    finally:
+        release_worker.set()
+        worker.join(timeout=1)
+
+    assert audit["worker_running"] is False
+    assert snapshot["status"] == "active"
+    assert snapshot["active_run_id"] is None
+    assert snapshot["pending_user_message_count"] == 1
+    assert bool((app._turn_state.get(quest_id) or {}).get("running")) is False
 
     events = app.quest_service.events(quest_id)["events"]
     assert any(
