@@ -184,6 +184,33 @@ def test_prompt_builder_marks_author_metadata_gaps_non_blocking_when_package_is_
     assert "not a blocking external-credential case" in prompt
 
 
+def test_prompt_builder_includes_medical_manuscript_rhetoric_rules_for_tripod_contract(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create(
+        "medical rhetoric quest",
+        startup_contract={
+            "schema_version": 1,
+            "need_research_paper": True,
+            "reporting_guideline_family": "TRIPOD",
+            "medical_reporting_contract_summary": "Prediction-model manuscript for a general medical journal.",
+        },
+    )
+    prompt = PromptBuilder(repo_root(), temp_home).build(
+        quest_id=snapshot["quest_id"],
+        skill_id="write",
+        user_message="Continue the manuscript draft.",
+        model="gpt-5.4",
+    )
+
+    assert "## Medical Manuscript Delivery" in prompt
+    assert "headline narrative around clinical question, primary finding, clinical implication, and interpretation boundary" in prompt
+    assert "external validation, discrimination, calibration, clinical utility, and transportability" in prompt
+    assert "support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice" in prompt
+    assert "manuscript headline, abstract, or main results surface" in prompt
+
+
 def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     quest_root = Path(snapshot["quest_root"])

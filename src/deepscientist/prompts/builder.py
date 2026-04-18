@@ -10,7 +10,7 @@ from ..memory import MemoryService
 from ..memory.frontmatter import load_markdown_document
 from ..quest import QuestService
 from ..registries import BaselineRegistry
-from ..startup_contract import runtime_owned_startup_contract
+from ..startup_contract import runtime_owned_startup_contract, startup_contract_extensions
 from ..shared import read_json, read_text, read_yaml
 
 STANDARD_SKILLS = (
@@ -173,6 +173,7 @@ class PromptBuilder:
             Path("contracts") / "shared_interaction.md",
             quest_root=quest_root,
         )
+        medical_manuscript_delivery_block = self._medical_manuscript_delivery_block(snapshot)
         connector_contract_block = self._connector_contract_block(quest_id=quest_id, snapshot=snapshot)
         sections = [
             system_block,
@@ -293,7 +294,15 @@ class PromptBuilder:
                 "## Current User Message",
                 self._current_user_message_block(turn_reason=turn_reason, user_message=user_message),
             ]
-        )
+            )
+        if medical_manuscript_delivery_block:
+            sections.extend(
+                [
+                    "",
+                    "## Medical Manuscript Delivery",
+                    medical_manuscript_delivery_block,
+                ]
+            )
         return "\n\n".join(sections).strip() + "\n"
 
     def _turn_driver_block(
@@ -875,6 +884,28 @@ class PromptBuilder:
         if value in {"none", "copy_ready_text", "latex_required"}:
             return value
         return "none"
+
+    @staticmethod
+    def _medical_manuscript_delivery_block(snapshot: dict) -> str:
+        startup_contract = snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        extensions = startup_contract_extensions(startup_contract)
+        reporting_guideline = str(extensions.get("reporting_guideline_family") or "").strip()
+        medical_reporting_summary = str(extensions.get("medical_reporting_contract_summary") or "").strip()
+        medical_analysis_summary = str(extensions.get("medical_analysis_contract_summary") or "").strip()
+        if (
+            reporting_guideline.lower() != "tripod"
+            and not medical_reporting_summary
+            and not medical_analysis_summary
+        ):
+            return ""
+        lines = [
+            f"- reporting_guideline_family: {reporting_guideline or 'unspecified'}",
+            "- manuscript_native_medical_rhetoric_rule: organize the headline narrative around clinical question, primary finding, clinical implication, and interpretation boundary.",
+            "- preferred_medical_terms: prefer external validation, discrimination, calibration, clinical utility, and transportability when the evidence supports those concepts.",
+            "- analysis_plane_surface_rule: keep support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice off the manuscript headline, abstract, or main results surface.",
+            "- mechanism_language_rule: if those analysis-plane terms are needed, confine them to mechanistic or explanatory paragraphs and pair them with manuscript-native wording.",
+        ]
+        return "\n".join(lines)
 
     def _research_delivery_policy_block(self, snapshot: dict) -> str:
         need_research_paper = self._need_research_paper(snapshot)

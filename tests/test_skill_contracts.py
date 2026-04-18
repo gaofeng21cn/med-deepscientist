@@ -30,6 +30,16 @@ def test_system_prompt_defines_metric_contract_rules_and_optional_metric_md() ->
     assert "`Result/metric.md` may be used as temporary scratch memory" in text
 
 
+def test_system_prompt_adds_medical_publication_native_rhetoric_rules() -> None:
+    text = _system_prompt_text()
+
+    assert "medical-publication-native wording" in text
+    assert "clinical question, primary finding, clinical implication, and interpretation boundary" in text
+    assert "support mismatch" in text
+    assert "risk compression" in text
+    assert "self-quantile" in text
+
+
 def test_idea_skill_requires_survey_delta_and_memory_reuse_contract() -> None:
     text = _skill_text("idea")
 
@@ -445,6 +455,15 @@ def test_system_prompt_keeps_decision_actions_enumerated_and_python_env_managed(
     assert "system `pytest`" in text
     assert "caption_cleanliness_rule" in text
     assert "AutoFigure-Edit" not in text
+
+
+def test_write_skill_requires_medical_publication_native_rhetoric_for_medical_prediction_papers() -> None:
+    text = _skill_text("write")
+
+    assert "medical prediction or TRIPOD-style paper" in text
+    assert "clinical question, primary finding, clinical implication, and interpretation boundary" in text
+    assert "external validation, discrimination, calibration, clinical utility, and transportability" in text
+    assert "support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice" in text
 
 
 def test_idea_skill_adds_problem_importance_and_first_principles_memo() -> None:

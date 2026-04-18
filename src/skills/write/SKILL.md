@@ -30,6 +30,9 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - For those package-polish metadata gaps, use a threaded `progress` or `milestone` follow-up plus TODO surfaces rather than `reply_mode='blocking'`, unless the missing item is a true external credential or secret without which no auditable package can be generated at all.
 - If the active communication surface is QQ, keep writing milestones text-first unless a final paper PDF or one clearly useful summary artifact already exists.
 - Treat connector-facing report charts separately from paper-facing figures; do not auto-send draft paper figures to QQ.
+- For a medical prediction or TRIPOD-style paper, build manuscript-facing wording around clinical question, primary finding, clinical implication, and interpretation boundary before expanding paragraphs or captions.
+- In those papers, prefer external validation, discrimination, calibration, clinical utility, and transportability when those are the supported concepts.
+- Keep support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice out of the manuscript headline, abstract, and main results surface; if they matter, place them in mechanistic explanation and pair them with manuscript-native wording.
 - For paper-facing figures and figure drafts, keep palette discipline explicit:
   - prefer `mist-stone` as the paper-default palette: `#F3EEE8`, `#D8D1C7`, `#8A9199`
   - use `sage-clay` when the method-vs-baseline contrast needs one stronger but still muted accent: `#E7E1D6`, `#B7A99A`, `#7F8F84`
