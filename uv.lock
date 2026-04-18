@@ -283,6 +283,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "lark-oapi" },
     { name = "mcp" },
+    { name = "opl-harness-shared" },
     { name = "pillow" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -307,6 +308,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=42,<46" },
     { name = "lark-oapi", specifier = ">=1.5,<2" },
     { name = "mcp", specifier = ">=1.19,<2" },
+    { name = "opl-harness-shared", git = "https://github.com/gaofeng21cn/one-person-lab.git?subdirectory=python%2Fopl-harness-shared&rev=8523f4ab76af486d44a1ccd3a88996ca860d2cc2" },
     { name = "pillow", specifier = ">=10,<12" },
     { name = "pyyaml", specifier = ">=6,<7" },
     { name = "rich", specifier = ">=14,<15" },
@@ -504,6 +506,11 @@ sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
+
+[[package]]
+name = "opl-harness-shared"
+version = "0.1.0"
+source = { git = "https://github.com/gaofeng21cn/one-person-lab.git?subdirectory=python%2Fopl-harness-shared&rev=8523f4ab76af486d44a1ccd3a88996ca860d2cc2#8523f4ab76af486d44a1ccd3a88996ca860d2cc2" }
 
 [[package]]
 name = "packaging"

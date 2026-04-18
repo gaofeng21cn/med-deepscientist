@@ -16,6 +16,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import quote
 
+from opl_harness_shared.status_narration import (
+    PAPER_MILESTONE_ANSWER_CHECKLIST,
+    build_status_narration_contract,
+)
+
 try:
     import fcntl  # pragma: no cover - exercised on POSIX
 except ImportError:  # pragma: no cover - exercised on Windows
@@ -3721,6 +3726,43 @@ class QuestService:
         if not managed_publication_gate_clear and recommended_next_stage == "finalize":
             recommended_next_stage = "write"
             recommended_action = "return_to_publishability_gate"
+        narration_contract_anchor = selected_outline_ref or active_line_id or "paper-line"
+        status_narration_contract = build_status_narration_contract(
+            contract_id=f"paper-contract-health::{narration_contract_anchor}",
+            surface_kind="paper_contract_health",
+            milestone={
+                "milestone_id": human_milestone.get("milestone_id"),
+                "content_milestone_reached": bool(human_milestone.get("content_milestone_reached")),
+                "review_ready": bool(human_milestone.get("review_ready")),
+                "submission_ready": bool(human_milestone.get("submission_ready")),
+            },
+            stage={
+                "recommended_next_stage": recommended_next_stage,
+                "recommended_action": recommended_action,
+                "recommendation_scope": recommendation_scope,
+            },
+            readiness={
+                "writing_ready": writing_ready,
+                "audit_package_ready": audit_package_ready,
+                "finalize_ready": finalize_ready,
+                "completion_approval_ready": completion_approval_ready,
+            },
+            remaining_scope={
+                "scope_id": human_milestone.get("remaining_scope"),
+                "objective_metadata_only_remaining": bool(
+                    human_milestone.get("objective_metadata_only_remaining")
+                ),
+            },
+            current_blockers=blocking_reasons[:8],
+            next_step=recommended_action,
+            facts={
+                "global_stage_authority": global_stage_authority,
+                "global_stage_rule": global_stage_rule,
+                "managed_publication_gate_status": managed_publication_gate_status,
+                "managed_publication_gate_clear": managed_publication_gate_clear,
+            },
+            answer_checklist=PAPER_MILESTONE_ANSWER_CHECKLIST,
+        )
 
         return {
             "paper_line_id": active_line_id,
@@ -3829,6 +3871,8 @@ class QuestService:
             "managed_publication_gate_recommended_action_types": list(
                 managed_publication_gate.get("recommended_action_types") or []
             ),
+            "human_milestone": human_milestone,
+            "status_narration_contract": status_narration_contract,
             "completion_approval_ready": completion_approval_ready,
             "completion_blocking_reasons": completion_blocking_reasons,
             "blocking_reasons": blocking_reasons,

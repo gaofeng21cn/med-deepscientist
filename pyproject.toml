@@ -16,6 +16,7 @@ dependencies = [
   "cryptography>=42,<46",
   "lark-oapi>=1.5,<2",
   "mcp>=1.19,<2",
+  "opl-harness-shared @ git+https://github.com/gaofeng21cn/one-person-lab.git@8523f4ab76af486d44a1ccd3a88996ca860d2cc2#subdirectory=python/opl-harness-shared",
   "Pillow>=10,<12",
   "PyYAML>=6,<7",
   "rich>=14,<15",

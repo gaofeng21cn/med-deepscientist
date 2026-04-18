@@ -1270,6 +1270,11 @@ class PromptBuilder:
             primary_blocker = str(
                 ((paper_contract_health.get("blocking_reasons") or [None])[0]) or "none"
             ).strip() or "none"
+            narration_contract = (
+                dict(paper_contract_health.get("status_narration_contract") or {})
+                if isinstance(paper_contract_health.get("status_narration_contract"), dict)
+                else {}
+            )
             lines.extend(
                 [
                     f"- paper_contract_health: {'ready' if bool(paper_contract_health.get('writing_ready')) else 'blocked'}",
@@ -1285,6 +1290,19 @@ class PromptBuilder:
                     "- paper_campaign_tool: call artifact.get_analysis_campaign(campaign_id='active') when exact supplementary slice status matters.",
                 ]
             )
+            if narration_contract:
+                answer_checklist = (
+                    ((narration_contract.get("narration_policy") or {}) if isinstance(narration_contract.get("narration_policy"), dict) else {})
+                    .get("answer_checklist")
+                    or []
+                )
+                lines.extend(
+                    [
+                        f"- paper_status_narration_mode: {((narration_contract.get('narration_policy') or {}) if isinstance(narration_contract.get('narration_policy'), dict) else {}).get('mode') or 'ai_first'}",
+                        f"- paper_status_answer_checklist: {', '.join(str(item) for item in answer_checklist) or 'current_stage,current_blockers,next_step'}",
+                        "- paper_status_narration_rule: when the user asks about progress, milestone, review readiness, or submission readiness, answer in plain language from `paper_contract_health.status_narration_contract`; treat legacy summary strings as fallback context only.",
+                    ]
+                )
             lines.append(
                 "- paper_contract_rule: if the paper state is blocked, do not stabilize draft prose as if the paper were settled; treat paper-line next-step hints as local-only until the publication gate authorizes write."
             )

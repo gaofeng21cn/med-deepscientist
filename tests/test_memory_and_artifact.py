@@ -6933,6 +6933,19 @@ def test_paper_line_state_sync_matches_public_contract_health_for_completed_main
     assert health["writing_ready"] is True
     assert health["unmapped_completed_count"] == 0
     assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert health["human_milestone"]["milestone_id"] == "content_complete_review_ready"
+    assert health["human_milestone"]["content_milestone_reached"] is True
+    assert health["human_milestone"]["review_ready"] is True
+    assert health["human_milestone"]["submission_ready"] is False
+    assert (
+        health["human_milestone"]["status_summary_zh"]
+        == "内容里程碑已达成：论文内容已经完成，当前可以给人审阅；离外投还差投稿包收口或客观信息补齐。"
+    )
+    assert health["status_narration_contract"]["contract_kind"] == "ai_status_narration"
+    assert (
+        health["status_narration_contract"]["narration_policy"]["answer_checklist"]
+        == ["milestone_status", "review_readiness", "submission_readiness", "remaining_scope"]
+    )
 
     state = artifact._write_paper_line_state(quest_root)
     persisted = read_json(quest_root / "paper" / "paper_line_state.json", {})
@@ -6947,6 +6960,19 @@ def test_paper_line_state_sync_matches_public_contract_health_for_completed_main
     assert persisted["unmapped_completed_count"] == health["unmapped_completed_count"]
     assert "sync_paper_contract" not in status_text
     assert "completed analysis remains unmapped into the paper contract" not in summary_text
+    assert "内容里程碑：已达成" in status_text
+    assert "内容里程碑：已达成" in summary_text
+    assert "当前可以给人审阅" in summary_text
+    assert global_status["global_status"]["paper_contract_health"]["human_milestone"] == health["human_milestone"]
+    assert (
+        global_status["global_status"]["paper_contract_health"]["status_narration_contract"]
+        == health["status_narration_contract"]
+    )
+    assert global_status["global_status"]["status_narration_contract"] == health["status_narration_contract"]
+    assert (
+        global_status["global_status"]["summary_text"]
+        == "内容里程碑已达成：论文内容已经完成，当前可以给人审阅；离外投还差投稿包收口或客观信息补齐。"
+    )
 
 
 def test_read_quest_documents_accepts_single_name_string(temp_home: Path) -> None:

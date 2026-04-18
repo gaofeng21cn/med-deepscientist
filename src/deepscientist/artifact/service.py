@@ -6118,6 +6118,22 @@ class ArtifactService:
         continuation_policy = str(snapshot.get("continuation_policy") or "auto").strip() or "auto"
         next_stage = str(paper_health.get("recommended_next_stage") or stage).strip() or stage
         next_action = str(paper_health.get("recommended_action") or "continue").strip() or "continue"
+        human_milestone = dict(paper_health.get("human_milestone") or {}) if isinstance(paper_health.get("human_milestone"), dict) else {}
+        status_narration_contract = (
+            dict(paper_health.get("status_narration_contract") or {})
+            if isinstance(paper_health.get("status_narration_contract"), dict)
+            else {}
+        )
+        human_summary_zh = str(human_milestone.get("status_summary_zh") or "").strip() or None
+        human_summary_en = str(human_milestone.get("status_summary_en") or "").strip() or None
+        human_summary_ready = bool(
+            bool(paper_health.get("writing_ready"))
+            or bool(paper_health.get("audit_package_ready"))
+            or bool(paper_health.get("review_outputs_ready"))
+            or bool(paper_health.get("proofing_outputs_ready"))
+            or str(paper_health.get("draft_status") or "").strip() == "present"
+            or str(paper_health.get("bundle_status") or "").strip() == "present"
+        )
         brief_summary_zh = (
             f"当前阶段是 `{stage}`。"
             f"{(' 论文线当前状态是 `' + closure_state + '`。' if closure_state else '')}"
@@ -6134,6 +6150,10 @@ class ArtifactService:
             f"{(' The quest is currently parked and will not auto-spin until a new user message or resume.' if continuation_policy == 'wait_for_user_or_resume' else '')}"
             f"{(' Latest run: ' + latest_run_summary) if latest_run_summary else ''}"
         ).strip()
+        if human_summary_zh and human_summary_ready:
+            brief_summary_zh = human_summary_zh
+        if human_summary_en and human_summary_ready:
+            brief_summary_en = human_summary_en
         payload: dict[str, Any] = {
             "quest_id": snapshot.get("quest_id"),
             "title": snapshot.get("title"),
@@ -6157,10 +6177,13 @@ class ArtifactService:
                 "recommended_action": next_action,
                 "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
                 "global_stage_authority": str(paper_health.get("global_stage_authority") or "").strip() or None,
+                "human_milestone": human_milestone,
+                "status_narration_contract": status_narration_contract,
             },
             "claim_boundary": claim_boundary,
             "pending_user_message_count": int(snapshot.get("pending_user_message_count") or 0),
             "bash_running_count": int(counts.get("bash_running_count") or 0),
+            "status_narration_contract": status_narration_contract,
             "summary_text": brief_summary_zh if normalized_locale.startswith("zh") else brief_summary_en,
         }
         if normalized_detail == "full":
