@@ -2132,6 +2132,54 @@ class DaemonApp:
         )
         return True
 
+    def _interrupt_stale_live_turn_if_needed(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict[str, Any],
+        active_run_id: str,
+    ) -> bool:
+        if int(snapshot.get("pending_user_message_count") or 0) <= 0:
+            return False
+
+        quest_root = self.quest_service._quest_root(quest_id)
+        interaction_watchdog = self.quest_service.artifact_interaction_watchdog_status(quest_root)
+        if not bool(interaction_watchdog.get("stale_visibility_gap")):
+            return False
+
+        runner_name = self._runner_name_for(snapshot)
+        try:
+            runner = self.get_runner(runner_name)
+        except KeyError:
+            runner = None
+
+        interrupted = False
+        if runner is not None and hasattr(runner, "interrupt"):
+            interrupted = bool(getattr(runner, "interrupt")(quest_id))
+        stopped_bash_session_ids = self._stop_active_bash_exec_sessions(
+            quest_id,
+            run_id=active_run_id,
+            reason="quest_runtime_reconcile",
+            user_id="daemon-runtime-reconcile",
+        )
+        with self._turn_lock:
+            state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
+            state["stop_requested"] = True
+            state["running"] = False
+            state["pending"] = False
+            state.pop("worker", None)
+
+        self.logger.log(
+            "warning",
+            "quest.stale_live_turn_interrupted",
+            quest_id=quest_id,
+            active_run_id=active_run_id,
+            runner=runner_name,
+            interrupted=interrupted,
+            stopped_bash_session_count=len(stopped_bash_session_ids),
+        )
+        return True
+
     def control_quest(self, quest_id: str, *, action: str, source: str = "local") -> dict:
         normalized_action = str(action or "").strip().lower()
         if normalized_action == "pause":

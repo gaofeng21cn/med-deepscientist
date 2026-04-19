@@ -4938,7 +4938,6 @@ def test_quest_runtime_audit_reconciles_stale_live_turn_with_pending_queue_messa
         for item in events
     )
 
-
 def test_submit_user_message_recovers_stalled_live_turn_and_starts_new_run(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -5317,8 +5316,6 @@ def test_stalled_live_turn_recovery_pending_respects_later_control_action(
     assert state.get("stop_requested") is True
     assert state.get("pending") is False
     assert runner.requests == []
-
-
 def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_message(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
