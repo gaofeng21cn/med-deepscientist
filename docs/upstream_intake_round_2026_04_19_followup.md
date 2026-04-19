@@ -81,6 +81,16 @@ The deferred remainder is:
   - absorbing the upstream bundle would overload one persisted field with two unrelated authorities and would corrupt the current artifact/worktree routing seam
   - the continuation-policy logic in those commits depends on that upstream mode meaning, so the safe follow-up path is a future dedicated controller/runtime contract design instead of a direct intake
 
+### Candidate D: Weixin ret=-2 text-send retry
+
+- source commit: `c3abc96d82a03db44a30706827200344a325cfd6`
+- title: `fix(weixin): enable text-send retry on ret=-2 stale-context errors`
+- decision: `absorb`
+- rationale:
+  - current fork already had Weixin stale-context retry handling, but text messages were still incorrectly sharing the media retry budget
+  - the upstream fix cleanly separates text retry delays from media retry delays and makes `_send_items()` honor whichever retry budget is longer
+  - the patch is runtime-local, connector-specific, and directly improves outbound reliability for the MAS-facing Weixin bridge without widening any product or protocol seam
+
 ## Execution Result
 
 The backend-only follow-up was absorbed as:
@@ -93,6 +103,7 @@ This follow-up also repaired the fork audit surface so it now records previously
 - `fcba71f` `Fix corrupted older event history pagination`
 - `838f87e` `feat: improve runtime recovery diagnosis`
 - `a255de4` `Harden Windows asset and git subprocess handling`
+- `c7233d1` `fix: recover weixin text ret=-2 retries`
 
 ## Verification
 
@@ -109,5 +120,19 @@ Key outcomes:
 
 - `tests/test_metrics_overview_surface.py`: `5 passed`
 - `tests/test_memory_and_artifact.py -k idea_interaction_message`: `2 passed, 126 deselected`
+- `scripts/verify.sh`: `55 passed`
+- `git diff --check`: clean
+
+The Weixin retry intake also passed fresh verification before and after merge:
+
+```bash
+uv run pytest -q tests/test_connector_bridges.py -k 'weixin'
+scripts/verify.sh
+git diff --check
+```
+
+Key outcomes:
+
+- `tests/test_connector_bridges.py -k 'weixin'`: `12 passed, 8 deselected`
 - `scripts/verify.sh`: `55 passed`
 - `git diff --check`: clean
