@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from deepscientist.config import ConfigManager
@@ -107,6 +108,32 @@ def test_mark_turn_started_resets_interaction_watchdog_state_for_new_run(temp_ho
     assert runtime_state["tool_calls_since_last_artifact_interact"] == 0
     assert watchdog["stale_visibility_gap"] is False
     assert watchdog["inspection_due"] is False
+
+
+def test_watchdog_uses_turn_start_age_when_first_activity_never_arrives(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("native truth zero activity watchdog quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.mark_turn_started(quest_id, run_id="run-native-zero-activity-001")
+    stale_started_at = (datetime.now(UTC) - timedelta(minutes=31)).replace(microsecond=0).isoformat()
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_transition_at=stale_started_at,
+    )
+
+    watchdog = app.quest_service.artifact_interaction_watchdog_status(quest_root)
+
+    assert watchdog["last_artifact_interact_at"] is None
+    assert watchdog["last_tool_activity_at"] is None
+    assert watchdog["active_execution_window"] is True
+    assert watchdog["seconds_since_last_transition"] >= 30 * 60
+    assert watchdog["no_progress_since_turn_start"] is True
+    assert watchdog["stale_visibility_gap"] is True
+    assert watchdog["inspection_due"] is True
 
 
 def test_reconcile_runtime_state_writes_native_runtime_event(temp_home: Path) -> None:

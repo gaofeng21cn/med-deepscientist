@@ -7544,15 +7544,29 @@ class QuestService:
         runtime_state = self._read_runtime_state(quest_root)
         last_artifact_interact_at = str(runtime_state.get("last_artifact_interact_at") or "").strip() or None
         last_tool_activity_at = str(runtime_state.get("last_tool_activity_at") or "").strip() or None
+        last_transition_at = str(runtime_state.get("last_transition_at") or "").strip() or None
         runtime_status = str(runtime_state.get("status") or runtime_state.get("display_status") or "").strip().lower()
         active_run_id = str(runtime_state.get("active_run_id") or "").strip() or None
         tool_count = int(runtime_state.get("tool_calls_since_last_artifact_interact") or 0)
         silence_seconds = self._seconds_since_iso_timestamp(last_artifact_interact_at)
+        tool_silence_seconds = self._seconds_since_iso_timestamp(last_tool_activity_at)
+        transition_silence_seconds = self._seconds_since_iso_timestamp(last_transition_at)
         active_execution_window = bool(active_run_id) or runtime_status == "running"
+        no_progress_since_turn_start = bool(
+            active_execution_window
+            and transition_silence_seconds is not None
+            and transition_silence_seconds >= 30 * 60
+            and silence_seconds is None
+            and tool_silence_seconds is None
+            and tool_count == 0
+        )
         stale_visibility_gap = bool(
-            silence_seconds is not None
-            and silence_seconds >= 30 * 60
-            and (tool_count > 0 or active_execution_window)
+            (
+                silence_seconds is not None
+                and silence_seconds >= 30 * 60
+                and (tool_count > 0 or active_execution_window)
+            )
+            or no_progress_since_turn_start
         )
         inspection_due = bool(
             tool_count >= 25
@@ -7563,9 +7577,14 @@ class QuestService:
             "seconds_since_last_artifact_interact": silence_seconds,
             "tool_calls_since_last_artifact_interact": tool_count,
             "last_tool_activity_at": last_tool_activity_at,
-            "seconds_since_last_tool_activity": self._seconds_since_iso_timestamp(last_tool_activity_at),
+            "seconds_since_last_tool_activity": tool_silence_seconds,
             "last_tool_activity_name": str(runtime_state.get("last_tool_activity_name") or "").strip() or None,
+            "active_execution_started_at": last_transition_at,
+            "seconds_since_active_execution_start": transition_silence_seconds,
+            "last_transition_at": last_transition_at,
+            "seconds_since_last_transition": transition_silence_seconds,
             "active_execution_window": active_execution_window,
+            "no_progress_since_turn_start": no_progress_since_turn_start,
             "stale_visibility_gap": stale_visibility_gap,
             "inspection_due": inspection_due,
             "user_update_due": False,

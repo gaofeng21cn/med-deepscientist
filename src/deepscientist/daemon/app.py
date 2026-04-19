@@ -1768,6 +1768,8 @@ class DaemonApp:
         if silent_seconds is None:
             watchdog = snapshot.get("interaction_watchdog") if isinstance(snapshot.get("interaction_watchdog"), dict) else {}
             silent_seconds = watchdog.get("seconds_since_last_tool_activity")
+            if silent_seconds is None and bool(watchdog.get("no_progress_since_turn_start")):
+                silent_seconds = watchdog.get("seconds_since_last_transition")
         try:
             silent_seconds_int = int(silent_seconds or 0)
         except (TypeError, ValueError):
@@ -2040,13 +2042,27 @@ class DaemonApp:
             or "running"
         )
         normalized_status = "active" if previous_status == "running" else previous_status
+        interaction_watchdog = (
+            snapshot.get("interaction_watchdog")
+            if isinstance(snapshot.get("interaction_watchdog"), dict)
+            else {}
+        )
+        zero_activity_stale = bool(interaction_watchdog.get("no_progress_since_turn_start"))
+        transition_seconds = int(interaction_watchdog.get("seconds_since_last_transition") or 0)
         summary = (
-            f"Cleared stale active turn state for run `{active_run_id}` after no visible progress while queued user messages were pending."
-            if stale_live_turn_reconciled
+            (
+                f"Cleared stale active turn state for run `{active_run_id}` after "
+                f"{transition_seconds} seconds without first tool or artifact activity."
+            )
+            if stale_live_turn_reconciled and zero_activity_stale
             else (
-                f"Cleared stale active turn state for run `{active_run_id}` after no live worker was found."
-                if not completed_at
-                else f"Cleared stale active turn state for completed run `{active_run_id}`."
+                f"Cleared stale active turn state for run `{active_run_id}` after no visible progress while queued user messages were pending."
+                if stale_live_turn_reconciled
+                else (
+                    f"Cleared stale active turn state for run `{active_run_id}` after no live worker was found."
+                    if not completed_at
+                    else f"Cleared stale active turn state for completed run `{active_run_id}`."
+                )
             )
         )
         append_jsonl(
@@ -2081,6 +2097,12 @@ class DaemonApp:
             event_kind="runtime_stale_turn_reconciled",
             event_summary=summary,
         )
+        with self._turn_lock:
+            state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
+            state["running"] = False
+            state["pending"] = False
+            state["stop_requested"] = False
+            state.pop("worker", None)
         self._schedule_runtime_storage_maintenance(quest_id)
         return reconciled
 
@@ -2091,12 +2113,13 @@ class DaemonApp:
         snapshot: dict[str, Any],
         active_run_id: str,
     ) -> bool:
-        if int(snapshot.get("pending_user_message_count") or 0) <= 0:
-            return False
-
         quest_root = self.quest_service._quest_root(quest_id)
         interaction_watchdog = self.quest_service.artifact_interaction_watchdog_status(quest_root)
         if not bool(interaction_watchdog.get("stale_visibility_gap")):
+            return False
+        pending_user_count = int(snapshot.get("pending_user_message_count") or 0)
+        zero_activity_stale = bool(interaction_watchdog.get("no_progress_since_turn_start"))
+        if pending_user_count <= 0 and not zero_activity_stale:
             return False
 
         runner_name = self._runner_name_for(snapshot)
