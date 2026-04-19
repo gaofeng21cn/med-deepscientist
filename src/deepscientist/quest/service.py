@@ -1816,6 +1816,57 @@ class QuestService:
                 return resolved
         return (paper_root / candidate).resolve(strict=False)
 
+    def _managed_publication_eval_context(
+        self,
+        quest_root: Path,
+        *,
+        paper_root: Path | None,
+    ) -> dict[str, Any]:
+        context = {
+            "study_root": None,
+            "publication_eval_path": None,
+            "payload": None,
+            "emitted_at": None,
+        }
+        if paper_root is None:
+            return context
+
+        contract_path = paper_root / "medical_reporting_contract.json"
+        reporting_contract = read_json(contract_path, {}) if contract_path.exists() else {}
+        if not isinstance(reporting_contract, dict) or not reporting_contract:
+            return context
+
+        study_root = self._resolve_managed_study_root(
+            quest_root=quest_root,
+            paper_root=paper_root,
+            reporting_contract=reporting_contract,
+        )
+        if study_root is None:
+            return context
+
+        publication_eval_path = study_root / "artifacts" / "publication_eval" / "latest.json"
+        payload = read_json(publication_eval_path, {}) if publication_eval_path.exists() else None
+        emitted_at = None
+        if isinstance(payload, dict):
+            emitted_at = str(payload.get("emitted_at") or "").strip() or None
+
+        context["study_root"] = str(study_root)
+        context["publication_eval_path"] = str(publication_eval_path)
+        context["payload"] = payload if isinstance(payload, dict) else None
+        context["emitted_at"] = emitted_at
+        return context
+
+    @classmethod
+    def _latest_progress_timestamp(cls, *values: Any) -> str | None:
+        latest: datetime | None = None
+        for value in values:
+            parsed = cls._parse_runtime_timestamp(value)
+            if parsed is None:
+                continue
+            if latest is None or parsed > latest:
+                latest = parsed
+        return latest.isoformat() if latest is not None else None
+
     @staticmethod
     def _read_paper_catalog(
         *,
@@ -2134,39 +2185,38 @@ class QuestService:
         if paper_root is None:
             return default_payload
 
-        contract_path = paper_root / "medical_reporting_contract.json"
-        reporting_contract = read_json(contract_path, {}) if contract_path.exists() else {}
-        if not isinstance(reporting_contract, dict) or not reporting_contract:
-            return default_payload
-
-        study_root = self._resolve_managed_study_root(
-            quest_root=quest_root,
+        publication_eval_context = self._managed_publication_eval_context(
+            quest_root,
             paper_root=paper_root,
-            reporting_contract=reporting_contract,
         )
+        study_root = str(publication_eval_context.get("study_root") or "").strip() or None
+        publication_eval_path = str(publication_eval_context.get("publication_eval_path") or "").strip() or None
+        payload = publication_eval_context.get("payload")
+        emitted_at = str(publication_eval_context.get("emitted_at") or "").strip() or None
+
         if study_root is None:
             return default_payload
 
-        publication_eval_path = study_root / "artifacts" / "publication_eval" / "latest.json"
-        if not publication_eval_path.exists():
+        if publication_eval_path is None or not Path(publication_eval_path).exists():
             return {
                 "status": "missing",
                 "clear": False,
                 "summary": "managed publication gate evaluation is missing",
-                "study_root": str(study_root),
-                "publication_eval_path": str(publication_eval_path),
+                "study_root": study_root,
+                "publication_eval_path": publication_eval_path,
+                "emitted_at": emitted_at,
                 "gap_summaries": [],
                 "recommended_action_types": [],
             }
 
-        payload = read_json(publication_eval_path, {})
         if not isinstance(payload, dict) or not payload:
             return {
                 "status": "invalid",
                 "clear": False,
                 "summary": "managed publication gate payload is invalid",
-                "study_root": str(study_root),
-                "publication_eval_path": str(publication_eval_path),
+                "study_root": study_root,
+                "publication_eval_path": publication_eval_path,
+                "emitted_at": emitted_at,
                 "gap_summaries": [],
                 "recommended_action_types": [],
             }
@@ -2193,8 +2243,9 @@ class QuestService:
                 "status": "invalid",
                 "clear": False,
                 "summary": "managed publication gate payload is invalid",
-                "study_root": str(study_root),
-                "publication_eval_path": str(publication_eval_path),
+                "study_root": study_root,
+                "publication_eval_path": publication_eval_path,
+                "emitted_at": emitted_at,
                 "gap_summaries": gap_summaries,
                 "recommended_action_types": recommended_action_types,
             }
@@ -2204,8 +2255,9 @@ class QuestService:
             "status": status,
             "clear": status == "clear",
             "summary": summary,
-            "study_root": str(study_root),
-            "publication_eval_path": str(publication_eval_path),
+            "study_root": study_root,
+            "publication_eval_path": publication_eval_path,
+            "emitted_at": emitted_at,
             "gap_summaries": gap_summaries,
             "recommended_action_types": recommended_action_types,
         }
@@ -4509,6 +4561,21 @@ class QuestService:
             states.append((label, self._glob_states(attachment_root, "*/attachment.yaml")))
         return tuple(states)
 
+    def _managed_publication_eval_state(self, quest_root: Path) -> tuple[tuple[str, tuple[int, int, int] | None], ...]:
+        workspace_root = self.active_workspace_root(quest_root)
+        paper_root = self._best_paper_root(quest_root, workspace_root)
+        paths: list[Path] = []
+        if paper_root is not None:
+            paths.append(paper_root / "medical_reporting_contract.json")
+            context = self._managed_publication_eval_context(
+                quest_root,
+                paper_root=paper_root,
+            )
+            publication_eval_path = str(context.get("publication_eval_path") or "").strip()
+            if publication_eval_path:
+                paths.append(Path(publication_eval_path))
+        return self._path_states(paths)
+
     def _snapshot_state(self, quest_root: Path) -> tuple[Any, ...]:
         core_paths = [
             self._quest_yaml_path(quest_root),
@@ -4526,6 +4593,7 @@ class QuestService:
             self._artifact_collection_state(quest_root),
             self._codex_meta_state(quest_root),
             self._baseline_attachment_state(quest_root),
+            self._managed_publication_eval_state(quest_root),
         )
 
     def _compact_summary_state(self, quest_root: Path) -> tuple[Any, ...]:
@@ -4541,6 +4609,7 @@ class QuestService:
         return (
             self._path_states(core_paths),
             self._baseline_attachment_state(quest_root),
+            self._managed_publication_eval_state(quest_root),
         )
 
     def summary_compact(self, quest_id: str) -> dict[str, Any]:
@@ -4600,6 +4669,19 @@ class QuestService:
 
         bash_summary = BashExecService(self.home).summary(quest_root)
         interaction_watchdog = self.artifact_interaction_watchdog_status(quest_root)
+        paper_root = self._best_paper_root(quest_root, workspace_root)
+        managed_publication_eval = self._managed_publication_eval_context(
+            quest_root,
+            paper_root=paper_root,
+        )
+        updated_at = self._latest_progress_timestamp(
+            runtime_state.get("last_artifact_interact_at"),
+            runtime_state.get("last_tool_activity_at"),
+            runtime_state.get("last_delivered_at"),
+            managed_publication_eval.get("emitted_at"),
+        ) or self._latest_progress_timestamp(
+            quest_yaml.get("updated_at"),
+        )
         payload = {
             "quest_id": quest_yaml.get("quest_id", quest_id),
             "title": quest_yaml.get("title", quest_id),
@@ -4648,7 +4730,7 @@ class QuestService:
             "last_delivered_at": runtime_state.get("last_delivered_at"),
             "bound_conversations": self._binding_sources_payload(quest_root).get("sources") or ["local:default"],
             "created_at": quest_yaml.get("created_at"),
-            "updated_at": quest_yaml.get("updated_at"),
+            "updated_at": updated_at,
             "branch": research_state.get("current_workspace_branch") or research_state.get("research_head_branch"),
             "summary": {
                 "status_line": status_line,
@@ -4970,6 +5052,19 @@ class QuestService:
         bash_service = BashExecService(self.home)
         bash_summary = bash_service.summary(quest_root)
         latest_bash_session = bash_summary.get("latest_session")
+        paper_root = self._best_paper_root(quest_root, workspace_root)
+        managed_publication_eval = self._managed_publication_eval_context(
+            quest_root,
+            paper_root=paper_root,
+        )
+        updated_at = self._latest_progress_timestamp(
+            runtime_state.get("last_artifact_interact_at"),
+            runtime_state.get("last_tool_activity_at"),
+            runtime_state.get("last_delivered_at"),
+            managed_publication_eval.get("emitted_at"),
+        ) or self._latest_progress_timestamp(
+            quest_yaml.get("updated_at"),
+        )
         paper_contract = self._paper_contract_payload(quest_root, workspace_root)
         paper_evidence = self._paper_evidence_payload(quest_root, workspace_root)
         analysis_inventory = self._analysis_inventory_payload(quest_root, workspace_root)
@@ -5099,7 +5194,7 @@ class QuestService:
             "last_delivered_at": runtime_state.get("last_delivered_at"),
             "bound_conversations": self._binding_sources_payload(quest_root).get("sources") or ["local:default"],
             "created_at": quest_yaml.get("created_at"),
-            "updated_at": quest_yaml.get("updated_at"),
+            "updated_at": updated_at,
             "branch": current_branch(workspace_root),
             "head": head_commit(workspace_root),
             "graph_svg_path": str(graph_svg) if graph_svg.exists() else None,

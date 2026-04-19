@@ -1779,6 +1779,134 @@ def test_snapshot_marks_invalid_when_managed_publication_eval_schema_is_incomple
     assert "invalid" in str(health["managed_publication_gate_summary"] or "")
 
 
+def test_snapshot_updated_at_tracks_managed_publication_eval_emitted_at(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper progress timestamp follows managed publication eval")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    quest_yaml = service.read_quest_yaml(quest_root)
+    quest_yaml["updated_at"] = "2026-04-17T01:54:53+00:00"
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+
+    emitted_at = "2026-04-18T00:52:16+00:00"
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "emitted_at": emitted_at,
+            "verdict": {
+                "overall_verdict": "blocked",
+                "summary": "Reporting checklist remains incomplete.",
+            },
+            "gaps": [
+                {
+                    "summary": "missing_reporting_guideline_checklist",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_runtime",
+                }
+            ],
+        },
+    )
+
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    compact = service.summary_compact(snapshot["quest_id"])
+
+    assert refreshed["updated_at"] == emitted_at
+    assert compact["updated_at"] == emitted_at
+    assert service.list_quests()[0]["updated_at"] == emitted_at
+
+
+def test_snapshot_updated_at_refreshes_when_managed_publication_eval_changes(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper progress timestamp refreshes after managed publication eval updates")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    quest_yaml = service.read_quest_yaml(quest_root)
+    quest_yaml["updated_at"] = "2026-04-17T01:54:53+00:00"
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    first_emitted_at = "2026-04-18T00:52:16+00:00"
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "emitted_at": first_emitted_at,
+            "verdict": {
+                "overall_verdict": "blocked",
+                "summary": "Reporting checklist remains incomplete.",
+            },
+            "gaps": [
+                {
+                    "summary": "missing_reporting_guideline_checklist",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_runtime",
+                }
+            ],
+        },
+    )
+
+    initial_snapshot = service.snapshot(snapshot["quest_id"])
+    initial_compact = service.summary_compact(snapshot["quest_id"])
+
+    assert initial_snapshot["updated_at"] == first_emitted_at
+    assert initial_compact["updated_at"] == first_emitted_at
+
+    refreshed_emitted_at = "2026-04-18T12:08:03+00:00"
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "emitted_at": refreshed_emitted_at,
+            "verdict": {
+                "overall_verdict": "blocked",
+                "summary": "Reporting checklist still needs guideline coverage and revised evidence links.",
+            },
+            "gaps": [
+                {
+                    "summary": "missing_reporting_guideline_checklist",
+                },
+                {
+                    "summary": "missing_evidence_linkage_refresh",
+                },
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_runtime",
+                }
+            ],
+        },
+    )
+
+    refreshed_snapshot = service.snapshot(snapshot["quest_id"])
+    refreshed_compact = service.summary_compact(snapshot["quest_id"])
+
+    assert refreshed_snapshot["updated_at"] == refreshed_emitted_at
+    assert refreshed_compact["updated_at"] == refreshed_emitted_at
+    assert service.list_quests()[0]["updated_at"] == refreshed_emitted_at
+
+
 def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     service = QuestService(temp_home)
