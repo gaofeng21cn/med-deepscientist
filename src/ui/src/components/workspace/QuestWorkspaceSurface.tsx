@@ -4559,10 +4559,16 @@ export function QuestWorkspaceSurfaceInner({
   }, [refresh])
 
   React.useEffect(() => {
+    if (restoring || !workspace.historySeeded || !detailLikeView) {
+      return
+    }
     void ensureViewData('details')
-  }, [ensureViewData, questId])
+  }, [detailLikeView, ensureViewData, questId, restoring, workspace.historySeeded])
 
   React.useEffect(() => {
+    if (restoring || !workspace.historySeeded || !detailLikeView) {
+      return
+    }
     let cancelled = false
     let retryTimer: number | null = null
 
@@ -4592,7 +4598,13 @@ export function QuestWorkspaceSurfaceInner({
         window.clearTimeout(retryTimer)
       }
     }
-  }, [questId, workflow?.entries.length, workflow?.projection_status?.generated_at])
+  }, [
+    detailLikeView,
+    questId,
+    restoring,
+    workflow?.projection_status?.generated_at,
+    workspace.historySeeded,
+  ])
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return

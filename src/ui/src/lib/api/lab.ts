@@ -9,7 +9,7 @@ import {
   saveDemoLabLayout,
 } from '@/demo/adapter'
 import { isDemoProjectId } from '@/demo/projects'
-import { shouldUseQuestProject } from '@/lib/runtime/quest-runtime'
+import { isQuestRuntimeSurface, shouldUseQuestProject } from '@/lib/runtime/quest-runtime'
 import type {
   GuidanceVm,
   GitBranchNode,
@@ -95,6 +95,9 @@ function loadWithShortCache<T>(
 }
 
 async function shouldUseLocalQuestLab(projectId: string): Promise<boolean> {
+  if (isQuestRuntimeSurface()) {
+    return true
+  }
   return shouldUseQuestProject(projectId)
 }
 

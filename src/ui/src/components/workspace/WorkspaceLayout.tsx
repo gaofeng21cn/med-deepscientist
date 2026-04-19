@@ -3289,7 +3289,10 @@ export function WorkspaceLayout({
     return key.trim() ? key : null
   }, [isLocalQuestProject, questWorkspace.snapshot])
   const [isMobileQuestShell, setIsMobileQuestShell] = React.useState(false)
-  const workspaceProjectTitle = projectName ?? (projectId ? `Project ${projectId}` : 'Project')
+  const workspaceProjectTitle =
+    projectName ??
+    (isQuestRouteProject ? questWorkspace.snapshot?.title : null) ??
+    (projectId ? `Project ${projectId}` : 'Project')
   const { addToast } = useToast()
   const tabsHydrated = useTabsStore((state) => state.hasHydrated)
   const activeTab = useActiveTab()

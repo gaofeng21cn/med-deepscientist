@@ -594,8 +594,9 @@ export function useQuestWorkspace(questId: string | null) {
   const [detailsReady, setDetailsReady] = useState(false)
   const [history, setHistory] = useState<FeedItem[]>([])
   const [pendingFeed, setPendingFeed] = useState<FeedItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [restoring, setRestoring] = useState(false)
+  const [loading, setLoading] = useState(Boolean(questId))
+  const [restoring, setRestoring] = useState(Boolean(questId))
+  const [historySeeded, setHistorySeeded] = useState(!questId)
   const [hasOlderHistory, setHasOlderHistory] = useState(false)
   const [loadingOlderHistory, setLoadingOlderHistory] = useState(false)
   const [oldestLoadedCursor, setOldestLoadedCursor] = useState<number | null>(null)
@@ -1000,6 +1001,7 @@ export function useQuestWorkspace(questId: string | null) {
       setLoading(true)
       if (reset) {
         setRestoring(true)
+        setHistorySeeded(false)
         setConnectionState('connecting')
         cursorRef.current = 0
         lastEventIdRef.current = null
@@ -1013,55 +1015,72 @@ export function useQuestWorkspace(questId: string | null) {
       }
       try {
         const after = reset ? 0 : cursorRef.current
-        const [hydrated, nextFeed] = await Promise.all([
-          hydrateState(targetQuestId),
-          reset
-            ? client.events(targetQuestId, 0, { limit: INITIAL_EVENT_LIMIT, tail: true })
-            : client.events(targetQuestId, after),
-        ])
+        const hydrated = await hydrateState(targetQuestId)
         if (!hydrated || questIdRef.current !== targetQuestId) {
           return
         }
-
-        const initialUpdates = (nextFeed.acp_updates ?? []).map((item) => item.params.update)
-        const normalized = initialUpdates.map((item) => normalizeUpdate(item))
-        const sealedRunIds = collectSealedAssistantRunIds(initialUpdates)
-        const baseState: FeedState = reset
-          ? { history: [], pending: [] }
-          : { history: historyRef.current, pending: pendingFeedRef.current }
-        let nextState = applyIncomingFeedUpdates(baseState, normalized)
-
-        if (sealedRunIds.length > 0) {
-          nextState = sealPendingAssistantStreams(nextState, sealedRunIds)
-        }
-
-        if (hydrated.snapshot?.status && hydrated.snapshot.status !== 'running') {
-          nextState = sealPendingAssistantStreams(nextState)
-        }
-
-        updateFeedState(nextState)
-        cursorRef.current = typeof nextFeed.cursor === 'number' ? nextFeed.cursor : after
-        lastEventIdRef.current = String(cursorRef.current)
-        if (reset) {
-          updateHistoryWindow({
-            oldestCursor: parseCursorValue(nextFeed.oldest_cursor),
-            newestCursor:
-              parseCursorValue(nextFeed.newest_cursor) ??
-              parseCursorValue(nextFeed.cursor),
-            hasOlder: Boolean(nextFeed.has_more),
-          })
-        } else {
-          const nextNewestCursor =
-            parseCursorValue(nextFeed.newest_cursor) ??
-            parseCursorValue(nextFeed.cursor)
-          if (nextNewestCursor != null) {
-            updateHistoryWindow({
-              newestCursor: Math.max(newestLoadedCursorRef.current ?? 0, nextNewestCursor),
-            })
-          }
-        }
         setError(null)
         setConnectionState('connected')
+
+        const seedHistory = async () => {
+          try {
+            const nextFeed = reset
+              ? await client.events(targetQuestId, 0, { limit: INITIAL_EVENT_LIMIT, tail: true })
+              : await client.events(targetQuestId, after)
+            if (questIdRef.current !== targetQuestId) {
+              return
+            }
+
+            const initialUpdates = (nextFeed.acp_updates ?? []).map((item) => item.params.update)
+            const normalized = initialUpdates.map((item) => normalizeUpdate(item))
+            const sealedRunIds = collectSealedAssistantRunIds(initialUpdates)
+            const baseState: FeedState = {
+              history: historyRef.current,
+              pending: pendingFeedRef.current,
+            }
+            let nextState = applyIncomingFeedUpdates(baseState, normalized)
+
+            if (sealedRunIds.length > 0) {
+              nextState = sealPendingAssistantStreams(nextState, sealedRunIds)
+            }
+
+            if (hydrated.snapshot?.status && hydrated.snapshot.status !== 'running') {
+              nextState = sealPendingAssistantStreams(nextState)
+            }
+
+            updateFeedState(nextState)
+            cursorRef.current = typeof nextFeed.cursor === 'number' ? nextFeed.cursor : after
+            lastEventIdRef.current = String(cursorRef.current)
+            if (reset) {
+              updateHistoryWindow({
+                oldestCursor: parseCursorValue(nextFeed.oldest_cursor),
+                newestCursor:
+                  parseCursorValue(nextFeed.newest_cursor) ??
+                  parseCursorValue(nextFeed.cursor),
+                hasOlder: Boolean(nextFeed.has_more),
+              })
+            } else {
+              const nextNewestCursor =
+                parseCursorValue(nextFeed.newest_cursor) ??
+                parseCursorValue(nextFeed.cursor)
+              if (nextNewestCursor != null) {
+                updateHistoryWindow({
+                  newestCursor: Math.max(newestLoadedCursorRef.current ?? 0, nextNewestCursor),
+                })
+              }
+            }
+            setHistorySeeded(true)
+          } catch (caught) {
+            if (questIdRef.current === targetQuestId && historyRef.current.length === 0 && pendingFeedRef.current.length === 0) {
+              setError(caught instanceof Error ? caught.message : String(caught))
+              setConnectionState('error')
+            }
+          }
+        }
+
+        window.setTimeout(() => {
+          void seedHistory()
+        }, reset ? 120 : 0)
       } catch (caught) {
         if (questIdRef.current === targetQuestId) {
           setError(caught instanceof Error ? caught.message : String(caught))
@@ -1212,6 +1231,7 @@ export function useQuestWorkspace(questId: string | null) {
     setOldestLoadedCursor(null)
     setNewestLoadedCursor(null)
     setConnectionState(questId ? 'connecting' : 'connected')
+    setHistorySeeded(!questId)
     setError(null)
     detailsEnabledRef.current = false
     sessionInFlightRef.current = null
@@ -1335,7 +1355,7 @@ export function useQuestWorkspace(questId: string | null) {
   )
 
   useEffect(() => {
-    if (!questId || restoring) {
+    if (!questId || restoring || !historySeeded) {
       return
     }
     const targetQuestId = questId
@@ -1346,7 +1366,7 @@ export function useQuestWorkspace(questId: string | null) {
       clearSessionRefresh()
       clearPendingStreamCleanup()
     }
-  }, [clearDetailsRefresh, clearPendingStreamCleanup, clearSessionRefresh, questId, restoring, runEventStream, stopEventStream])
+  }, [clearDetailsRefresh, clearPendingStreamCleanup, clearSessionRefresh, historySeeded, questId, restoring, runEventStream, stopEventStream])
 
   const refreshWorkspace = useCallback(
     async (reset = true) => {
@@ -1381,6 +1401,7 @@ export function useQuestWorkspace(questId: string | null) {
     historyLimit: history.length,
     historyExpanded: !hasOlderHistory,
     historyLoadingFull: loadingOlderHistory,
+    historySeeded,
     hasLiveRun,
     streaming,
     activeToolCount,
