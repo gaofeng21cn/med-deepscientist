@@ -191,6 +191,8 @@ ds --here
 ```
 
 This is equivalent to `ds --home "$PWD/DeepScientist"`.
+Later `ds --status`, `ds --stop`, and `ds --restart` run from that same directory will usually pick the local `./DeepScientist` home automatically.
+Explicit `--home <path>` stays the most reliable choice when multiple non-default homes exist on one machine.
 
 If you want another port, run:
 
@@ -401,6 +403,7 @@ ds --status
 ```
 
 This shows whether the local runtime is up.
+The JSON payload also includes `daemon_state_path` and `launcher_path` so launcher/home mismatches are easier to diagnose.
 
 Stop the daemon:
 

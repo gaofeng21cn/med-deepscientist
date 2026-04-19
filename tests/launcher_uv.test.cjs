@@ -287,6 +287,28 @@ test('resolveHome uses ./DeepScientist under the current working directory when 
   }
 });
 
+test('resolveManagementHome prefers ./DeepScientist when the current directory has managed daemon state', () => {
+  const originalCwd = process.cwd();
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-manage-here-'));
+  const hereHome = path.join(tempDir, 'DeepScientist');
+  fs.mkdirSync(path.join(hereHome, 'runtime'), { recursive: true });
+  fs.writeFileSync(
+    path.join(hereHome, 'runtime', 'daemon.json'),
+    `${JSON.stringify({ daemon_id: 'daemon-here', pid: 12345, home: hereHome }, null, 2)}\n`,
+    'utf8'
+  );
+  process.chdir(tempDir);
+  try {
+    assert.equal(
+      __internal.resolveManagementHome(['--stop'], { stop: true }),
+      fs.realpathSync(hereHome)
+    );
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('parseLauncherArgs accepts --proxy without treating its URL as a positional command', () => {
   const parsed = __internal.parseLauncherArgs([
     '--port',
@@ -368,6 +390,40 @@ test('repairLegacyPathWrappers rewrites old install wrappers to the current npm 
     }
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('buildDaemonStatusPayload includes launcher and daemon state paths for diagnostics', () => {
+  const home = path.join(path.sep, 'tmp', 'DeepScientistHome');
+  const launcherPath = path.join(path.sep, 'tmp', 'bin', 'ds.js');
+  const state = {
+    daemon_id: 'daemon-123',
+    home,
+    auth_enabled: true,
+    auth_token: 'abcd1234',
+  };
+  const health = {
+    status: 'ok',
+    home,
+    daemon_id: 'daemon-123',
+  };
+
+  const payload = __internal.buildDaemonStatusPayload({
+    home,
+    url: 'http://127.0.0.1:20999',
+    state,
+    health,
+    launcherPath,
+  });
+
+  assert.equal(payload.healthy, true);
+  assert.equal(payload.identity_match, true);
+  assert.equal(payload.managed, true);
+  assert.equal(payload.home, home);
+  assert.equal(payload.url, 'http://127.0.0.1:20999');
+  assert.equal(payload.daemon_state_path, path.join(home, 'runtime', 'daemon.json'));
+  assert.equal(payload.launcher_path, launcherPath);
+  assert.equal(payload.daemon, state);
+  assert.equal(payload.health, health);
 });
 
 test('launcher --status emits complete JSON when stdout is captured', async (t) => {

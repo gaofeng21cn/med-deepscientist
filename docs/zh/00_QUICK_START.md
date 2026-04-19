@@ -191,6 +191,8 @@ ds --here
 ```
 
 它等价于 `ds --home "$PWD/DeepScientist"`。
+后续如果你在同一目录执行 `ds --status`、`ds --stop`、`ds --restart`，launcher 通常会自动识别本地 `./DeepScientist` home。
+当一台机器上同时存在多个非默认 home 时，显式传 `--home <path>` 依然最稳妥。
 
 如果你想换一个端口，可以运行：
 
@@ -404,6 +406,7 @@ ds --status
 ```
 
 这会告诉你本地运行时是否正常在线。
+JSON 输出还会带上 `daemon_state_path` 和 `launcher_path`，更容易排查 launcher 与 home 的错位问题。
 
 停止 daemon：
 

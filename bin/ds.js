@@ -537,6 +537,39 @@ function resolveHome(args) {
   return path.join(os.homedir(), 'DeepScientist');
 }
 
+function hasManagedDaemonState(home) {
+  const state = readDaemonState(home);
+  return Boolean(
+    state
+    && typeof state === 'object'
+    && (
+      state.daemon_id
+      || state.pid
+      || state.url
+      || state.launch_url
+      || state.home
+    )
+  );
+}
+
+function resolveManagementHome(rawArgs, options = {}) {
+  if (
+    options.home
+    || rawArgs.includes('--here')
+    || process.env.DEEPSCIENTIST_HOME
+    || process.env.DS_HOME
+  ) {
+    return options.home || resolveHome(rawArgs);
+  }
+
+  const cwdHome = normalizeHomePath(path.join(process.cwd(), 'DeepScientist'));
+  if (hasManagedDaemonState(cwdHome)) {
+    return cwdHome;
+  }
+
+  return normalizeHomePath(resolveHome(rawArgs));
+}
+
 function formatHttpHost(host) {
   const normalized = String(host || '').trim();
   if (!normalized) {
@@ -2650,6 +2683,22 @@ function removeDaemonState(home) {
   }
 }
 
+function buildDaemonStatusPayload({ home, url, state, health, launcherPath = null }) {
+  const healthy = Boolean(health && health.status === 'ok');
+  const identityMatch = state ? healthMatchesManagedState({ health, state, home }) : false;
+  return {
+    healthy,
+    identity_match: identityMatch,
+    managed: Boolean(state),
+    home,
+    url,
+    daemon_state_path: daemonStatePath(home),
+    launcher_path: launcherPath || resolveLauncherPath() || null,
+    daemon: state,
+    health,
+  };
+}
+
 function daemonSupervisorLogPath(home) {
   return path.join(home, 'logs', 'daemon-supervisor.log');
 }
@@ -4093,12 +4142,18 @@ async function launcherMain(rawArgs) {
     process.exit(0);
   }
 
-  const home = options.home || resolveHome(rawArgs);
+  const home = (options.stop || options.status || options.restart)
+    ? resolveManagementHome(rawArgs, options)
+    : (options.home || resolveHome(rawArgs));
   applyLauncherProxy(options.proxy);
   ensureDir(home);
+  const forceWrapperRepair =
+    detectInstallMode(repoRoot) !== 'npm-package'
+    && Boolean(options.home || process.env.DEEPSCIENTIST_HOME || process.env.DS_HOME);
   repairLegacyPathWrappers({
     home,
     launcherPath: resolveLauncherPath(),
+    force: forceWrapperRepair,
   });
 
   if (options.stop) {
@@ -4111,24 +4166,17 @@ async function launcherMain(rawArgs) {
     const configured = readConfiguredUiAddressFromFile(home, options.host, options.port);
     const url = state?.url || browserUiUrl(configured.host, configured.port);
     const health = await fetchHealth(url);
-    const healthy = Boolean(health && health.status === 'ok');
-    const identityMatch = state ? healthMatchesManagedState({ health, state, home }) : false;
+    const statusPayload = buildDaemonStatusPayload({
+      home,
+      url,
+      state,
+      health,
+      launcherPath: resolveLauncherPath(),
+    });
     await writeStdoutAndWait(
-      `${JSON.stringify(
-        {
-          healthy,
-          identity_match: identityMatch,
-          managed: Boolean(state),
-          home,
-          url,
-          daemon: state,
-          health,
-        },
-        null,
-        2
-      )}\n`
+      `${JSON.stringify(statusPayload, null, 2)}\n`
     );
-    process.exitCode = healthy && (!state || identityMatch) ? 0 : 1;
+    process.exitCode = statusPayload.healthy && (!state || statusPayload.identity_match) ? 0 : 1;
     return;
   }
 
@@ -4259,6 +4307,7 @@ module.exports = {
     legacyVenvRootPath,
     resolveUvBinary,
     resolveHome,
+    resolveManagementHome,
     parseLauncherArgs,
     normalizeProxyUrl,
     parseMigrateArgs,
@@ -4269,6 +4318,7 @@ module.exports = {
     detectInstallMode,
     updateManualCommand,
     buildUpdateStatus,
+    buildDaemonStatusPayload,
     parseYesNoAnswer,
     normalizeLauncherRelaunchArgs,
     officialRepositoryLine,
