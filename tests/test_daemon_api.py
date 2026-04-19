@@ -5112,6 +5112,84 @@ def test_quest_runtime_audit_reconciles_stale_live_turn_with_pending_queue_messa
         for item in events
     )
 
+
+def test_quest_runtime_audit_reconciles_zero_activity_zombie_live_turn(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("zero activity zombie live turn audit quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    stale_run_id = "run-zombie-live-001"
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+    stale_started_at = (datetime.now(UTC) - timedelta(minutes=45)).replace(microsecond=0).isoformat()
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_transition_at=stale_started_at,
+    )
+
+    interrupt_requested = threading.Event()
+
+    def _zombie_worker() -> None:
+        while not interrupt_requested.is_set():
+            time.sleep(0.02)
+
+    zombie_worker = threading.Thread(target=_zombie_worker, daemon=True, name=f"pytest-zombie-worker-{quest_id}")
+    zombie_worker.start()
+
+    class ZombieRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.interrupt_calls: list[str] = []
+
+        def interrupt(self, target_quest_id: str) -> bool:
+            self.interrupt_calls.append(target_quest_id)
+            interrupt_requested.set()
+            return True
+
+    runner = ZombieRunner()
+    app.runners["codex"] = runner
+    app._turn_state[quest_id] = {
+        "running": True,
+        "pending": False,
+        "stop_requested": False,
+        "reason": "auto_continue",
+        "worker": zombie_worker,
+    }
+
+    try:
+        audit = app.quest_runtime_audit(quest_id)
+        snapshot = app.quest_service.snapshot_fast(quest_id)
+    finally:
+        interrupt_requested.set()
+        zombie_worker.join(timeout=1)
+
+    assert audit == {
+        "ok": True,
+        "status": "none",
+        "source": "daemon_turn_worker",
+        "active_run_id": None,
+        "worker_running": False,
+        "worker_pending": False,
+        "stop_requested": False,
+    }
+    assert snapshot["status"] == "active"
+    assert snapshot["runtime_status"] == "active"
+    assert snapshot["display_status"] == "active"
+    assert snapshot["active_run_id"] is None
+    assert runner.interrupt_calls == [quest_id]
+    assert bool((app._turn_state.get(quest_id) or {}).get("running")) is False
+
+    events = app.quest_service.events(quest_id)["events"]
+    assert any(
+        item.get("type") == "quest.turn_state_reconciled"
+        and item.get("abandoned_run_id") == stale_run_id
+        for item in events
+    )
+
+
 def test_submit_user_message_recovers_stalled_live_turn_and_starts_new_run(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
