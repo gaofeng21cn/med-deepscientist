@@ -10,7 +10,7 @@ This audit records the second controlled upstream intake round for MedDeepScient
 - merge_base: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
 - rev_list_main_vs_upstream: `ahead=97, behind=105`
 - audit_status: `classified_and_executed`
-- execution_status: `round2_absorbed_on_main_with_followup`
+- execution_status: `round2_absorbed_on_main_with_windows_followup`
 
 ## Evidence
 
@@ -114,12 +114,22 @@ This round intentionally left out prompt wording, stage-skill wording, README ch
    - local follow-up commit: `a32ef0b`
    - rationale: persisted retry recovery, deterministic non-retryable failure diagnosis, and doctor-side `problem / why / fix` reporting all strengthen MAS-facing runtime recovery without widening product surface.
 
+### Batch F: Windows-support daemon follow-up
+
+1. upstream bundle
+   - `4c3fbbcbcadb670c26b86453632a6bd4b1cab59a` `Fix Windows UI asset MIME detection`
+   - `f417d82be02a4f6dc53d58b230fdcad20d3476a1` `Fix Windows UI asset MIME detection`
+   - `1b18d2e0ff54bba61ef7f317313983cb47e74725` `fix windows pop-up bug`
+   - decision: `absorb`
+   - intake branch commit: `a255de4`
+   - rationale: this bundle keeps daemon-served static assets on explicit cross-platform MIME types and routes git snapshot byte reads through the shared hidden-window process-control helper, which directly reduces Windows runtime friction without widening the MAS-facing API surface.
+
 ## Explicitly Deferred
 
 The following upstream groups remain outside this round by design:
 
 - prompt and stage-skill wording bundles such as `5a3c1c6`, `f2c85bc`, `76c135c`, `6d30f47`, `4b63ddc`, `01202f2`, and `56d3cd4`
-- UI, TUI, and product-surface features such as `77e97d9`, `7c9c03f`, `27211b3`, `5247232`, `3fbc9be`, `b707d94`, and `4c3fbbc`
+- UI, TUI, and product-surface features such as `77e97d9`, `7c9c03f`, `27211b3`, `5247232`, `3fbc9be`, `b707d94`, and `1865fa5`
 - workspace-mode continuation fixes `d58a655` and `d9d4bd6`, because this fork already uses `workspace_mode` for durable workspace/layout semantics while the stable control field remains `startup_contract.decision_policy`
 - connector-specific fixes such as `c3abc96` and `efe6c57`
 - docs / README / release / badge churn
@@ -140,6 +150,7 @@ This round used a dedicated intake worktree and produced the following local int
 9. `fcba71f` `Fix corrupted older event history pagination`
 10. `838f87e` `feat: improve runtime recovery diagnosis`
 11. `a32ef0b` `test: stabilize retry recovery timing coverage`
+12. `a255de4` `Harden Windows asset and git subprocess handling`
 
 Merge-back verification on the same intake branch also exposed 5 pre-existing `main` failures in `tests/test_init_and_quest.py`. Those were repaired locally before merge-back by:
 
@@ -163,6 +174,11 @@ uv run pytest -q tests/test_init_and_quest.py
 uv run pytest -q tests/test_acp_api.py
 uv run pytest -q tests/test_doctor.py
 uv run pytest -q tests/test_daemon_api.py
+uv run pytest -q tests/test_daemon_api.py -k ui_asset_prefers_explicit_javascript_mime_over_platform_guess
+uv run pytest -q tests/test_shared.py
+uv run pytest -q tests/test_memory_and_artifact.py -k test_explorer_can_switch_to_git_snapshot_and_open_historical_files
+uv run pytest -q tests/test_daemon_api.py
+uv run pytest -q tests/test_shared.py tests/test_windows_support.py
 uv run pytest -q
 scripts/verify.sh
 ```
@@ -179,6 +195,11 @@ Key outcomes:
 - `tests/test_acp_api.py`: `9 passed`
 - `tests/test_doctor.py`: `5 passed`
 - `tests/test_daemon_api.py`: `144 passed in 224.75s (0:03:44)`
+- `tests/test_daemon_api.py -k ui_asset_prefers_explicit_javascript_mime_over_platform_guess`: `1 passed`
+- `tests/test_shared.py`: `6 passed`
+- `tests/test_memory_and_artifact.py -k test_explorer_can_switch_to_git_snapshot_and_open_historical_files`: `1 passed`
+- `tests/test_daemon_api.py`: `145 passed in 258.21s (0:04:18)`
+- `tests/test_shared.py tests/test_windows_support.py`: `12 passed`
 - full `uv run pytest -q`: `747 passed, 5 warnings in 1177.68s (0:19:37)`
 - `scripts/verify.sh`: `55 passed`
 
@@ -187,5 +208,5 @@ Key outcomes:
 Round 2 follow-up is now absorbed on `main`. Remaining future review items are:
 
 - keep `d58a655` + `d9d4bd6` in `defer` until they are rewritten around the fork's stable decision-policy contract
-- keep `4c3fbbc` as a separate Windows daemon/UI supporting-fix lane
+- keep `1865fa5` in `defer` until it is split into a backend-only slice that preserves the fork's current runtime and product boundaries
 - keep optional companion skill `1c151a8` outside the runtime seam unless paper-plotting becomes a concrete MAS runtime need
