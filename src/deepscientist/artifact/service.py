@@ -4071,7 +4071,13 @@ class ArtifactService:
             if isinstance(payload.get("metadata_closeout"), dict)
             else {}
         )
-        if str(metadata_closeout.get("status") or "").strip() != "external_metadata_blocker_only":
+        metadata_closeout_status = str(metadata_closeout.get("status") or "").strip()
+        if metadata_closeout_status == "non_blocking_followup_only":
+            summary = str(metadata_closeout.get("summary") or "").strip()
+            if summary:
+                return [f"- Metadata Closeout: {summary}"]
+            return ["- Metadata Closeout: non-blocking submission-surface follow-up only."]
+        if metadata_closeout_status != "external_metadata_blocker_only":
             return []
         blocking_item_details = [
             dict(item)
@@ -6126,6 +6132,7 @@ class ArtifactService:
         )
         payload = dict(payload or {})
         payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
+        self._write_paper_line_state(quest_root, workspace_root=workspace_root)
         if normalized_detail == "summary":
             payload.pop("unresolved_required_items", None)
             payload.pop("unmapped_completed_items", None)

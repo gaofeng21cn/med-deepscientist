@@ -3375,6 +3375,11 @@ class QuestService:
         )
         if not isinstance(submission_minimal_manifest, dict):
             submission_minimal_manifest = {}
+        submission_minimal_metadata_closeout = (
+            dict(submission_minimal_manifest.get("metadata_closeout") or {})
+            if isinstance(submission_minimal_manifest.get("metadata_closeout"), dict)
+            else {}
+        )
         submission_minimal_package_paths: list[str] = []
         seen_submission_minimal_paths: set[str] = set()
 
@@ -3487,6 +3492,7 @@ class QuestService:
             "submission_blocking_items": submission_blocking_items,
             "submission_blocking_item_details": submission_blocking_item_details,
             "submission_minimal_manifest_path": submission_minimal_manifest_path,
+            "submission_minimal_metadata_closeout": submission_minimal_metadata_closeout,
             "submission_minimal_docx_path": submission_minimal_docx_path,
             "submission_minimal_pdf_path": submission_minimal_pdf_path,
             "submission_minimal_docx_present": bool(submission_minimal_docx_path),
@@ -3809,6 +3815,11 @@ class QuestService:
             quest_root,
             workspace_root=workspace_root,
         )
+        submission_minimal_metadata_closeout = (
+            dict(closure_evidence.get("submission_minimal_metadata_closeout") or {})
+            if isinstance(closure_evidence.get("submission_minimal_metadata_closeout"), dict)
+            else {}
+        )
         reference_materialization_ready = bool(reference_materialization.get("reference_materialization_ready"))
         citation_usage_ready = bool(citation_usage.get("citation_usage_ready"))
         paper_root = (
@@ -3864,20 +3875,31 @@ class QuestService:
             if isinstance(paper_contract.get("bundle_manifest"), dict)
             else {}
         )
-        metadata_closeout_raw = (
+        metadata_closeout_source = (
             dict(bundle_manifest.get("metadata_closeout") or {})
             if isinstance(bundle_manifest.get("metadata_closeout"), dict)
             else {}
         )
+        if not metadata_closeout_source and submission_minimal_metadata_closeout:
+            metadata_closeout_source = submission_minimal_metadata_closeout
+        metadata_closeout_raw = metadata_closeout_source
         metadata_field_status_summary_raw = (
             dict(metadata_closeout_raw.get("field_status_summary") or {})
             if isinstance(metadata_closeout_raw.get("field_status_summary"), dict)
             else {}
         )
+        metadata_non_blocking_followups_raw = (
+            list(metadata_closeout_raw.get("non_blocking_followups") or [])
+            if isinstance(metadata_closeout_raw.get("non_blocking_followups"), list)
+            else []
+        )
         metadata_closeout: dict[str, Any] = {}
         metadata_closeout_status = str(metadata_closeout_raw.get("status") or "").strip()
+        metadata_closeout_summary = str(metadata_closeout_raw.get("summary") or "").strip()
         if metadata_closeout_status:
             metadata_closeout["status"] = metadata_closeout_status
+        if metadata_closeout_summary:
+            metadata_closeout["summary"] = metadata_closeout_summary
         if metadata_field_status_summary_raw:
             metadata_closeout["field_status_summary"] = {
                 "total_open_fields": int(metadata_field_status_summary_raw.get("total_open_fields") or 0),
@@ -3891,6 +3913,24 @@ class QuestService:
                     metadata_field_status_summary_raw.get("optional_external_confirmation") or 0
                 ),
             }
+        metadata_non_blocking_followups: list[dict[str, str]] = []
+        for raw_followup in metadata_non_blocking_followups_raw:
+            if not isinstance(raw_followup, dict):
+                continue
+            followup: dict[str, str] = {}
+            key = str(raw_followup.get("key") or "").strip()
+            followup_status = str(raw_followup.get("status") or "").strip()
+            notes = str(raw_followup.get("notes") or "").strip()
+            if key:
+                followup["key"] = key
+            if followup_status:
+                followup["status"] = followup_status
+            if notes:
+                followup["notes"] = notes
+            if followup:
+                metadata_non_blocking_followups.append(followup)
+        if metadata_non_blocking_followups:
+            metadata_closeout["non_blocking_followups"] = metadata_non_blocking_followups
         submission_checklist_path = str(closure_evidence.get("submission_checklist_path") or "").strip() or None
         submission_checklist = read_json(Path(submission_checklist_path), {}) if submission_checklist_path else {}
         submission_checklist = submission_checklist if isinstance(submission_checklist, dict) else {}
