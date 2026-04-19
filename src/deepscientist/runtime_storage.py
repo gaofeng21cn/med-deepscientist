@@ -38,6 +38,9 @@ _WORKTREE_RUNTIME_DIR_NAMES = (
     "codex_homes",
     "slim_backups",
 )
+_REPORT_RETENTION_KEEP_FILENAMES = {"latest.json", "state.json", "retention_manifest.json"}
+_REPORT_RETENTION_RECENT_HOURLY_WINDOW_HOURS = 72
+_REPORT_RETENTION_OLDER_SAMPLING = "daily"
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -197,6 +200,44 @@ def _archive_path(path: Path) -> Path:
     suffixes = "".join(path.suffixes)
     base = path.name[: -len(suffixes)] if suffixes else path.name
     return path.with_name(f"{base}.full{suffixes}.gz")
+
+
+def _unique_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    for index in range(1, 10_000):
+        candidate = path.with_name(f"{stem}.{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"unable to allocate unique archive path for {path}")
+
+
+def _relative_ref(path: Path, *, root: Path) -> str:
+    return path.relative_to(root).as_posix()
+
+
+def _cold_archive_path(
+    root: Path,
+    *,
+    kind: str,
+    relative_path: str,
+    compress: bool = False,
+) -> Path:
+    normalized_relative = Path(*Path(relative_path).parts)
+    target = root / ".ds" / "cold_archive" / kind / normalized_relative
+    if compress and target.suffix != ".gz":
+        suffixes = "".join(target.suffixes)
+        base = target.name[: -len(suffixes)] if suffixes else target.name
+        target = target.with_name(f"{base}{suffixes}.gz")
+    ensure_dir(target.parent)
+    return _unique_path(target)
+
+
+def _write_json_index(path: Path, payload: dict[str, Any]) -> None:
+    ensure_dir(path.parent)
+    write_json(path, payload)
 
 
 def _write_gzip_copy(source: Path, archive_path: Path) -> None:
@@ -777,6 +818,282 @@ def dedupe_worktree_files(
     return manifest
 
 
+def _count_lines(path: Path) -> int:
+    with path.open("rb") as handle:
+        return sum(1 for _ in handle)
+
+
+def rotate_quest_events_segments(
+    quest_root: Path,
+    *,
+    max_bytes: int = 64 * 1024 * 1024,
+) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    events_path = resolved_root / ".ds" / "events.jsonl"
+    manifest_path = resolved_root / ".ds" / "events" / "manifest.json"
+    segments_root = resolved_root / ".ds" / "events" / "segments"
+    existing_manifest = read_json(manifest_path, {})
+    existing_segments = [
+        dict(item)
+        for item in (existing_manifest.get("segments") or [])
+        if isinstance(item, dict)
+    ]
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "events_path": str(events_path),
+        "manifest_path": str(manifest_path),
+        "segment_root": str(segments_root),
+        "max_bytes": max_bytes,
+        "rotated_segment_count": 0,
+        "segments": existing_segments,
+        "current_bytes": 0,
+    }
+    if max_bytes <= 0:
+        return manifest
+    if not events_path.exists():
+        ensure_dir(segments_root)
+        write_json(
+            manifest_path,
+            {
+                "schema_version": 1,
+                "quest_root": str(resolved_root),
+                "active_path": _relative_ref(events_path, root=resolved_root),
+                "segment_count": len(existing_segments),
+                "segments": existing_segments,
+                "updated_at": utc_now(),
+            },
+        )
+        return manifest
+    try:
+        current_bytes = events_path.stat().st_size
+    except OSError:
+        current_bytes = 0
+    manifest["current_bytes"] = current_bytes
+    if current_bytes < max_bytes:
+        write_json(
+            manifest_path,
+            {
+                "schema_version": 1,
+                "quest_root": str(resolved_root),
+                "active_path": _relative_ref(events_path, root=resolved_root),
+                "segment_count": len(existing_segments),
+                "segments": existing_segments,
+                "current_bytes": current_bytes,
+                "updated_at": utc_now(),
+            },
+        )
+        return manifest
+
+    ensure_dir(segments_root)
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    staging_path = events_path.with_name(f"events.rotate-{timestamp}.jsonl")
+    events_path.replace(staging_path)
+    events_path.write_text("", encoding="utf-8")
+    segment_rel = Path(".ds") / "events" / "segments" / f"events-{timestamp}.jsonl.gz"
+    segment_path = _unique_path(resolved_root / segment_rel)
+    _write_gzip_copy(staging_path, segment_path)
+    original_bytes = staging_path.stat().st_size if staging_path.exists() else current_bytes
+    line_count = _count_lines(staging_path) if staging_path.exists() else 0
+    staging_path.unlink(missing_ok=True)
+    segment_entry = {
+        "segment_id": f"events-segment-{timestamp}",
+        "path": _relative_ref(segment_path, root=resolved_root),
+        "original_bytes": original_bytes,
+        "line_count": line_count,
+        "created_at": utc_now(),
+    }
+    existing_segments.append(segment_entry)
+    write_json(
+        manifest_path,
+        {
+            "schema_version": 1,
+            "quest_root": str(resolved_root),
+            "active_path": _relative_ref(events_path, root=resolved_root),
+            "segment_count": len(existing_segments),
+            "segments": existing_segments,
+            "current_bytes": 0,
+            "updated_at": utc_now(),
+        },
+    )
+    manifest["rotated_segment_count"] = 1
+    manifest["segments"] = existing_segments
+    return manifest
+
+
+def _report_retention_bucket(path: Path, *, root: Path, now: datetime) -> tuple[str, str]:
+    modified = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+    age_hours = max(0.0, (now - modified).total_seconds()) / 3600.0
+    relative_parent = _relative_ref(path.parent, root=root)
+    if age_hours <= _REPORT_RETENTION_RECENT_HOURLY_WINDOW_HOURS:
+        return (
+            "hourly",
+            f"{relative_parent}:{modified.strftime('%Y-%m-%dT%H')}",
+        )
+    return (
+        "daily",
+        f"{relative_parent}:{modified.strftime('%Y-%m-%d')}",
+    )
+
+
+def apply_report_history_retention(quest_root: Path) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    reports_root = resolved_root / "artifacts" / "reports"
+    manifest_path = reports_root / "retention_manifest.json"
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "reports_root": str(reports_root),
+        "retention_contract": {
+            "keep_roles": ["latest", "state"],
+            "recent_hourly_window_hours": _REPORT_RETENTION_RECENT_HOURLY_WINDOW_HOURS,
+            "older_sampling": _REPORT_RETENTION_OLDER_SAMPLING,
+        },
+        "archived_file_count": 0,
+        "archived_files": [],
+        "kept_files": [],
+    }
+    if not reports_root.exists():
+        return manifest
+
+    now = datetime.now(UTC)
+    bucket_winners: dict[tuple[str, str], Path] = {}
+    candidates: list[Path] = []
+    for path in sorted(item for item in reports_root.rglob("*") if item.is_file()):
+        if path.name in _REPORT_RETENTION_KEEP_FILENAMES:
+            manifest["kept_files"].append(_relative_ref(path, root=resolved_root))
+            continue
+        bucket = _report_retention_bucket(path, root=resolved_root, now=now)
+        current = bucket_winners.get(bucket)
+        if current is None or path.stat().st_mtime > current.stat().st_mtime:
+            bucket_winners[bucket] = path
+        candidates.append(path)
+
+    kept_paths = set(bucket_winners.values())
+    for path in candidates:
+        if path in kept_paths:
+            manifest["kept_files"].append(_relative_ref(path, root=resolved_root))
+            continue
+        archive_target = _cold_archive_path(
+            resolved_root,
+            kind="report_history",
+            relative_path=_relative_ref(path, root=resolved_root),
+            compress=False,
+        )
+        shutil.move(str(path), archive_target)
+        manifest["archived_files"].append(
+            {
+                "source_path": _relative_ref(path, root=resolved_root),
+                "archive_path": _relative_ref(archive_target, root=resolved_root),
+            }
+        )
+    manifest["archived_file_count"] = len(manifest["archived_files"])
+    write_json(manifest_path, manifest)
+    return manifest
+
+
+def archive_cold_runtime_payloads(
+    quest_root: Path,
+    *,
+    older_than_seconds: int = 6 * 3600,
+) -> dict[str, Any]:
+    resolved_root = Path(quest_root).expanduser().resolve()
+    manifest: dict[str, Any] = {
+        "quest_root": str(resolved_root),
+        "moved_file_count": 0,
+        "moved_files": [],
+    }
+    now = datetime.now(UTC)
+
+    bash_root = resolved_root / ".ds" / "bash_exec"
+    if bash_root.exists():
+        for archive_path in sorted(bash_root.glob("**/*.full.*.gz")):
+            if not archive_path.is_file():
+                continue
+            target = _cold_archive_path(
+                resolved_root,
+                kind="bash_exec",
+                relative_path=_relative_ref(archive_path, root=resolved_root),
+                compress=False,
+            )
+            original_bytes = archive_path.stat().st_size
+            shutil.move(str(archive_path), target)
+            index_path = archive_path.with_name(f"{archive_path.name}.index.json")
+            _write_json_index(
+                index_path,
+                {
+                    "schema_version": 1,
+                    "kind": "bash_exec_full_archive",
+                    "source_path": _relative_ref(archive_path, root=resolved_root),
+                    "cold_archive_ref": _relative_ref(target, root=resolved_root),
+                    "archived_at": utc_now(),
+                    "original_bytes": original_bytes,
+                },
+            )
+            manifest["moved_files"].append(
+                {
+                    "kind": "bash_exec_full_archive",
+                    "source_path": _relative_ref(archive_path, root=resolved_root),
+                    "cold_archive_ref": _relative_ref(target, root=resolved_root),
+                }
+            )
+
+    for session_path in _iter_cold_runtime_jsonl_targets(resolved_root):
+        relative = _relative_ref(session_path, root=resolved_root)
+        if not relative.startswith(".ds/codex_homes/") or "/sessions/" not in relative:
+            continue
+        if not _path_is_cold(session_path, root=resolved_root, now=now, older_than_seconds=older_than_seconds):
+            continue
+        compact_path = session_path.with_name(f"{session_path.stem}.compact.ndjson")
+        if compact_path.exists():
+            continue
+        full_archive_path = _archive_path(session_path)
+        if full_archive_path.exists():
+            target = _cold_archive_path(
+                resolved_root,
+                kind="codex_sessions",
+                relative_path=relative,
+                compress=True,
+            )
+            shutil.move(str(full_archive_path), target)
+        else:
+            target = _cold_archive_path(
+                resolved_root,
+                kind="codex_sessions",
+                relative_path=relative,
+                compress=True,
+            )
+            _write_gzip_copy(session_path, target)
+        session_path.replace(compact_path)
+        index_path = session_path.with_name(f"{session_path.name}.index.json")
+        _write_json_index(
+            index_path,
+            {
+                "schema_version": 1,
+                "kind": "codex_session_jsonl",
+                "source_path": relative,
+                "compact_view_ref": _relative_ref(compact_path, root=resolved_root),
+                "cold_archive_ref": _relative_ref(target, root=resolved_root),
+                "archived_at": utc_now(),
+                "compact_view_bytes": compact_path.stat().st_size,
+            },
+        )
+        manifest["moved_files"].append(
+            {
+                "kind": "codex_session_jsonl",
+                "source_path": relative,
+                "compact_view_ref": _relative_ref(compact_path, root=resolved_root),
+                "cold_archive_ref": _relative_ref(target, root=resolved_root),
+            }
+        )
+
+    manifest["moved_file_count"] = len(manifest["moved_files"])
+    if manifest["moved_file_count"]:
+        _write_json_index(
+            resolved_root / ".ds" / "cold_archive" / "manifest.json",
+            manifest,
+        )
+    return manifest
+
+
 def compact_completed_runtime_logs(
     root: Path,
     *,
@@ -942,6 +1259,7 @@ def maintain_quest_runtime_storage(
     older_than_seconds: int = 6 * 3600,
     jsonl_max_mb: int = 64,
     text_max_mb: int = 16,
+    event_segment_max_mb: int = 64,
     slim_jsonl_threshold_mb: int | None = 8,
     dedupe_worktree_min_mb: int | None = 16,
     head_lines: int = 200,
@@ -973,6 +1291,10 @@ def maintain_quest_runtime_storage(
     for root in roots:
         gitignore_manifest = ensure_runtime_gitignore(root)
         temp_manifest = prune_stale_atomic_tempfiles(root, older_than_seconds=max(3600, older_than_seconds // 2))
+        event_manifest = rotate_quest_events_segments(
+            root,
+            max_bytes=max(1, event_segment_max_mb) * 1024 * 1024,
+        )
         log_manifest = compact_completed_runtime_logs(
             root,
             older_than_seconds=older_than_seconds,
@@ -986,15 +1308,23 @@ def maintain_quest_runtime_storage(
             older_than_seconds=older_than_seconds,
             threshold_bytes=0 if slim_jsonl_threshold_mb is None else max(1, slim_jsonl_threshold_mb) * 1024 * 1024,
         )
+        report_history_retention_manifest = apply_report_history_retention(root)
         codex_home_manifest = prune_codex_home_tempdirs(root, older_than_seconds=older_than_seconds)
+        cold_archive_manifest = archive_cold_runtime_payloads(
+            root,
+            older_than_seconds=older_than_seconds,
+        )
         manifest["roots"].append(
             {
                 "root": str(root),
                 "gitignore": gitignore_manifest,
                 "tempfiles": temp_manifest,
+                "events": event_manifest,
                 "runtime_logs": log_manifest,
                 "oversized_jsonl": oversized_jsonl_manifest,
+                "report_history_retention": report_history_retention_manifest,
                 "codex_homes": codex_home_manifest,
+                "cold_archive": cold_archive_manifest,
             }
         )
     if include_worktrees and dedupe_worktree_min_mb is not None:

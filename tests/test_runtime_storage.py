@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import gzip
 import json
 import os
@@ -71,8 +72,10 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     compacted_log = (bash_root / "log.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(compacted_log) == 5
     assert any("compacted completed runtime log" in line for line in compacted_log)
-    archived_log = bash_root / "log.full.jsonl.gz"
+    archived_log = quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "log.full.jsonl.gz"
     assert archived_log.exists()
+    assert not (bash_root / "log.full.jsonl.gz").exists()
+    assert (bash_root / "log.full.jsonl.gz.index.json").exists()
     with gzip.open(archived_log, "rt", encoding="utf-8") as handle:
         archived_lines = handle.read().splitlines()
     assert len(archived_lines) == 10
@@ -80,12 +83,17 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     compacted_terminal = (bash_root / "terminal.log").read_text(encoding="utf-8").splitlines()
     assert len(compacted_terminal) == 5
     assert any("compacted completed runtime log" in line for line in compacted_terminal)
-    assert (bash_root / "terminal.full.log.gz").exists()
+    assert (
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "terminal.full.log.gz"
+    ).exists()
+    assert not (bash_root / "terminal.full.log.gz").exists()
     assert not stale_tmp.exists()
     assert not codex_tmp.parent.exists()
     assert not codex_execve_tmp.parent.parent.parent.exists()
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 2
+    cold_archive = result["roots"][0]["cold_archive"]
+    assert cold_archive["moved_file_count"] == 2
     gitignore_text = (quest_root / ".gitignore").read_text(encoding="utf-8")
     assert ".ds/**/*.tmp" in gitignore_text
     assert ".ds/bash_exec/" in gitignore_text
@@ -121,7 +129,10 @@ def test_runtime_storage_maintenance_compacts_large_single_line_terminal_logs(tm
 
     compacted_terminal = (bash_root / "terminal.log").read_text(encoding="utf-8")
     assert "compacted completed runtime log" in compacted_terminal
-    assert (bash_root / "terminal.full.log.gz").exists()
+    assert (
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-002" / "terminal.full.log.gz"
+    ).exists()
+    assert not (bash_root / "terminal.full.log.gz").exists()
     assert (bash_root / "terminal.log").stat().st_size < 1_000_000
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
@@ -162,7 +173,10 @@ def test_runtime_storage_maintenance_compacts_large_single_line_jsonl_logs(tmp_p
 
     compacted_log = (bash_root / "log.jsonl").read_text(encoding="utf-8")
     assert "compacted completed runtime log" in compacted_log
-    assert (bash_root / "log.full.jsonl.gz").exists()
+    assert (
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-003" / "log.full.jsonl.gz"
+    ).exists()
+    assert not (bash_root / "log.full.jsonl.gz").exists()
     assert (bash_root / "log.jsonl").stat().st_size < 1_000_000
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
@@ -289,12 +303,117 @@ def test_runtime_storage_maintenance_compacts_cold_codex_session_logs(tmp_path: 
         tail_lines=2,
     )
 
-    compacted_session = session_path.read_text(encoding="utf-8").splitlines()
+    compacted_session_path = session_path.with_name("rollout.compact.ndjson")
+    compacted_session = compacted_session_path.read_text(encoding="utf-8").splitlines()
     assert len(compacted_session) == 5
     assert any("compacted completed runtime log" in line for line in compacted_session)
-    assert session_path.with_name("rollout.full.jsonl.gz").exists()
+    cold_session = (
+        quest_root
+        / ".ds"
+        / "cold_archive"
+        / "codex_sessions"
+        / ".ds"
+        / "codex_homes"
+        / run_id
+        / "sessions"
+        / "2026"
+        / "04"
+        / "15"
+        / "rollout.jsonl.gz"
+    )
+    assert cold_session.exists()
+    assert not session_path.exists()
+    assert session_path.with_name("rollout.jsonl.index.json").exists()
+    assert not session_path.with_name("rollout.full.jsonl.gz").exists()
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert any(item["path"].endswith("rollout.jsonl") for item in runtime_logs)
+    cold_archive = result["roots"][0]["cold_archive"]
+    assert any(item["kind"] == "codex_session_jsonl" for item in cold_archive["moved_files"])
+
+
+def test_runtime_storage_maintenance_rotates_quest_events_into_segments(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    events_path = quest_root / ".ds" / "events.jsonl"
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "event:" + ("x" * 80_000)
+    events_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "event_id": f"evt-{index}",
+                    "type": "runner.tool_result",
+                    "run_id": "run-001",
+                    "created_at": "2026-04-10T00:00:00+00:00",
+                    "output": payload,
+                },
+                ensure_ascii=False,
+            )
+            for index in range(20)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=0,
+        event_segment_max_mb=1,
+    )
+
+    events_manifest = result["roots"][0]["events"]
+    assert events_manifest["rotated_segment_count"] == 1
+    assert events_path.exists()
+    assert events_path.read_text(encoding="utf-8") == ""
+    manifest_path = quest_root / ".ds" / "events" / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["segment_count"] == 1
+    segment_ref = manifest["segments"][0]["path"]
+    segment_path = quest_root / segment_ref
+    assert segment_path.exists()
+    with gzip.open(segment_path, "rt", encoding="utf-8") as handle:
+        assert len(handle.read().splitlines()) == 20
+
+
+def test_runtime_storage_maintenance_applies_report_history_retention_contract(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    reports_root = quest_root / "artifacts" / "reports" / "runtime_events"
+    reports_root.mkdir(parents=True, exist_ok=True)
+    (reports_root / "latest.json").write_text('{"keep":"latest"}\n', encoding="utf-8")
+    (reports_root / "state.json").write_text('{"keep":"state"}\n', encoding="utf-8")
+    now = datetime.now(UTC)
+
+    def _write_report(name: str, age_hours: int) -> Path:
+        path = reports_root / name
+        path.write_text(json.dumps({"name": name}, ensure_ascii=False) + "\n", encoding="utf-8")
+        timestamp = (now - timedelta(hours=age_hours)).timestamp()
+        os.utime(path, (timestamp, timestamp))
+        return path
+
+    recent_kept = _write_report("20260419T010000Z_runtime_state_observed.json", 2)
+    recent_archived = _write_report("20260419T013000Z_runtime_state_observed.json", 2)
+    old_kept = _write_report("20260414T010000Z_runtime_state_observed.json", 120)
+    old_archived = _write_report("20260414T020000Z_runtime_state_observed.json", 120)
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=0,
+    )
+
+    retention = result["roots"][0]["report_history_retention"]
+    assert retention["retention_contract"]["recent_hourly_window_hours"] == 72
+    assert retention["archived_file_count"] == 2
+    assert (reports_root / "latest.json").exists()
+    assert (reports_root / "state.json").exists()
+    assert recent_kept.exists()
+    assert old_kept.exists()
+    assert not recent_archived.exists()
+    assert not old_archived.exists()
+    manifest_path = quest_root / "artifacts" / "reports" / "retention_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["retention_contract"]["older_sampling"] == "daily"
+    assert manifest["archived_file_count"] == 2
 
 
 def test_runtime_storage_maintenance_slims_oversized_run_and_history_jsonl_entries(tmp_path: Path) -> None:
