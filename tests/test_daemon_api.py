@@ -5724,7 +5724,7 @@ def test_daemon_auto_resume_respects_persisted_retry_backoff_and_attempt_index(t
         "max_attempts": 5,
         "last_run_id": "run-failed-retry-002",
         "last_error": "previous retry failed",
-        "next_retry_at": (datetime.now(UTC) + timedelta(seconds=0.35)).isoformat(),
+        "next_retry_at": (datetime.now(UTC) + timedelta(seconds=1.0)).isoformat(),
     }
     write_json(quest_root / ".ds" / "runtime_state.json", runtime_state)
 
@@ -5767,7 +5767,7 @@ def test_daemon_auto_resume_respects_persisted_retry_backoff_and_attempt_index(t
     assert recovered_item["scheduled"]["delayed"] is True
     assert float(recovered_item["scheduled"]["delay_seconds"]) > 0
 
-    time.sleep(0.12)
+    time.sleep(0.2)
     assert runner.requests == []
 
     deadline = time.time() + 3
