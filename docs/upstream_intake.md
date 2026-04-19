@@ -11,6 +11,7 @@ This workflow exists to filter occasional upstream changes. It is not the primar
 ## Active Intake Audits
 
 - [`docs/upstream_intake_round_2026_04_01.md`](./upstream_intake_round_2026_04_01.md): first audited upstream intake split for the current `behind_count=7` gap against `upstream/main`
+- [`docs/upstream_intake_round_2026_04_19.md`](./upstream_intake_round_2026_04_19.md): targeted runtime and launcher hardening intake for stalled-turn recovery, Codex provider compatibility, and launcher management diagnostics
 
 ## Remote Convention
 

@@ -29,6 +29,46 @@
       "commit": "bf97bfbf3fa4119924b10e2ff2c9edabece0b402",
       "kind": "runtime_bugfix",
       "summary": "stabilize stage routing for bootstrap quests"
+    },
+    {
+      "commit": "ec845f3306cd75ef2b01c7644b3a9be430969f8a",
+      "kind": "runtime_bugfix",
+      "summary": "Normalize list-wrapped bash_exec commands"
+    },
+    {
+      "commit": "b9280980ab4b2e8d97438d7a26215ccd0c8b0dab",
+      "kind": "runtime_bugfix",
+      "summary": "Recover stalled live turns before queued user messages stall"
+    },
+    {
+      "commit": "6e60e3f77a8af8d884e99de2fe6077a52c5d1df1",
+      "kind": "launcher_bugfix",
+      "summary": "Harden launcher self-update and uv bootstrap env"
+    },
+    {
+      "commit": "4c82f68d72a8c776bff99e38213dbec42cdbd8a0",
+      "kind": "runtime_bugfix",
+      "summary": "Harden Codex provider profile compatibility"
+    },
+    {
+      "commit": "a027ef34162bf7d3338e47cc278f08ebc389793e",
+      "kind": "runtime_bugfix",
+      "summary": "Materialize run-scoped Codex homes from provider overlays"
+    },
+    {
+      "commit": "9043bb3b1969c3768eef99ec52f01fb92072c1b7",
+      "kind": "runtime_bugfix",
+      "summary": "Serialize chat-wire Codex tool calls"
+    },
+    {
+      "commit": "14bc6951d7c56a6f37aee5a835dcf062bf6303f5",
+      "kind": "runtime_bugfix",
+      "summary": "Hide Codex runner windows through process control helper"
+    },
+    {
+      "commit": "f15ccdb89d62277f6c4efe82f5b2cc2ad4577b35",
+      "kind": "launcher_bugfix",
+      "summary": "Improve launcher management home diagnostics"
     }
   ],
   "lock_policy": {
