@@ -187,6 +187,9 @@ model_provider = "minimax"
 DeepScientist 现在对它的支持方式是：
 
 - 如果你使用的是这类 profile-only MiniMax 配置，再配合 Codex CLI `0.57.0`，DeepScientist 会在自己的 probe / 运行时临时 `.codex/config.toml` 里，把所选 profile 的 `model_provider` 和 `model` 自动提升到顶层
+- 对 provider-backed 的 MiniMax profile，DeepScientist 会强制使用 `model: inherit`，保留 Codex profile 选择的模型
+- 当 `requires_openai_auth = false` 时，DeepScientist 会自动移除冲突的 `OPENAI_API_KEY` 和 `OPENAI_BASE_URL`
+- 对 MiniMax 这类 `Codex CLI 0.57.0 + wire_api = "chat"` 的会话，DeepScientist 会额外注入兼容约束，要求 Codex 把 MCP 工具调用串行化，一次只发一个 tool call
 - 这意味着即使终端里原样执行 `codex --profile m27` 还会失败，DeepScientist 也可以先兼容跑起来
 
 如果你还希望终端里的 `codex --profile <name>` 也直接可用，请使用显式顶层兼容写法：

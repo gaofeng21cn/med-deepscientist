@@ -521,6 +521,81 @@ model_provider = "minimax"
     assert "OPENAI_BASE_URL" not in env
 
 
+def test_codex_runner_appends_single_tool_guard_for_chat_wire_profile(temp_home) -> None:  # type: ignore[no-untyped-def]
+    source_home = temp_home / "provider-codex-home"
+    source_home.mkdir(parents=True, exist_ok=True)
+    (source_home / "config.toml").write_text(
+        """[model_providers.minimax]
+name = "MiniMax Chat Completions API"
+base_url = "https://api.minimaxi.com/v1"
+env_key = "MINIMAX_API_KEY"
+wire_api = "chat"
+requires_openai_auth = false
+
+[profiles.m27]
+model = "MiniMax-M2.7"
+model_provider = "minimax"
+""",
+        encoding="utf-8",
+    )
+
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=object(),  # type: ignore[arg-type]
+        prompt_builder=object(),  # type: ignore[arg-type]
+        artifact_service=object(),  # type: ignore[arg-type]
+    )
+
+    prompt = runner._apply_chat_wire_tool_call_guard(
+        "BASE PROMPT",
+        runner_config={"config_dir": str(source_home), "profile": "m27"},
+    )
+
+    assert "BASE PROMPT" in prompt
+    assert "## Codex Chat-Wire Tool Call Compatibility" in prompt
+    assert "active_provider_profile: m27" in prompt
+    assert "single_tool_call_per_turn_rule" in prompt
+    assert "no_batched_mcp_rule" in prompt
+    assert "no_immediate_repeat_rule" in prompt
+
+
+def test_codex_runner_skips_single_tool_guard_for_non_chat_profile(temp_home) -> None:  # type: ignore[no-untyped-def]
+    source_home = temp_home / "provider-codex-home"
+    source_home.mkdir(parents=True, exist_ok=True)
+    (source_home / "config.toml").write_text(
+        """[model_providers.local]
+name = "Local Responses"
+base_url = "http://127.0.0.1:8004/v1"
+env_key = "LOCAL_API_KEY"
+wire_api = "responses"
+requires_openai_auth = false
+
+[profiles.local]
+model = "gpt-oss"
+model_provider = "local"
+""",
+        encoding="utf-8",
+    )
+
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=object(),  # type: ignore[arg-type]
+        prompt_builder=object(),  # type: ignore[arg-type]
+        artifact_service=object(),  # type: ignore[arg-type]
+    )
+
+    prompt = runner._apply_chat_wire_tool_call_guard(
+        "BASE PROMPT",
+        runner_config={"config_dir": str(source_home), "profile": "local"},
+    )
+
+    assert prompt == "BASE PROMPT"
+
+
 def test_codex_runner_prepares_run_scoped_codex_home(temp_home) -> None:  # type: ignore[no-untyped-def]
     source_home = temp_home / "provider-codex-home"
     source_home.mkdir(parents=True, exist_ok=True)

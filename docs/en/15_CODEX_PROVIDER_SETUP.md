@@ -186,6 +186,9 @@ model_provider = "minimax"
 What DeepScientist supports now:
 
 - if you use this profile-only MiniMax config with Codex CLI `0.57.0`, DeepScientist automatically promotes the selected profile's `model_provider` and `model` to the top level inside its probe/runtime copy of `.codex/config.toml`
+- DeepScientist forces provider-backed MiniMax runs to use `model: inherit`, preserving the model selected by the Codex profile
+- when `requires_openai_auth = false`, DeepScientist strips conflicting `OPENAI_API_KEY` and `OPENAI_BASE_URL` values from the probe/runtime environment
+- for chat-wire provider sessions such as MiniMax on Codex CLI `0.57.0`, DeepScientist injects a compatibility guard that tells Codex to serialize MCP tool calls one at a time
 - this means DeepScientist can start even when plain terminal `codex --profile m27` still fails on that exact profile-only shape
 
 If you want plain terminal `codex --profile <name>` to work too, use the explicit top-level compatibility form instead:

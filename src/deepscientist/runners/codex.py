@@ -75,6 +75,7 @@ _PROVIDER_ENV_CONFLICT_KEYS = (
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
 )
+_CHAT_WIRE_TOOL_CALL_GUARD_MARKER = "## Codex Chat-Wire Tool Call Compatibility"
 
 
 def _compact_text(value: object, *, limit: int = 1200) -> str:
@@ -701,6 +702,7 @@ class CodexRunner:
             turn_mode=request.turn_mode,
             retry_context=request.retry_context,
         )
+        prompt = self._apply_chat_wire_tool_call_guard(prompt, runner_config=runner_config)
         write_text(run_root / "prompt.md", prompt)
 
         codex_home = self._prepare_project_codex_home(
@@ -1050,6 +1052,44 @@ class CodexRunner:
             command.extend(["--sandbox", request.sandbox_mode])
         command.append("-")
         return command
+
+    def _apply_chat_wire_tool_call_guard(
+        self,
+        prompt: str,
+        *,
+        runner_config: dict[str, Any] | None = None,
+    ) -> str:
+        prompt_text = str(prompt or "")
+        if not prompt_text or _CHAT_WIRE_TOOL_CALL_GUARD_MARKER in prompt_text:
+            return prompt_text
+
+        resolved_runner_config = runner_config if isinstance(runner_config, dict) else self._load_runner_config()
+        profile = str(resolved_runner_config.get("profile") or "").strip()
+        if not profile:
+            return prompt_text
+        config_home = str(resolved_runner_config.get("config_dir") or os.environ.get("CODEX_HOME") or "").strip()
+        if not config_home:
+            return prompt_text
+
+        metadata = provider_profile_metadata_from_home(config_home, profile=profile)
+        wire_api = str(metadata.get("wire_api") or "").strip().lower()
+        if wire_api != "chat":
+            return prompt_text
+
+        provider = str(metadata.get("provider") or "").strip() or "unknown"
+        guard_lines = [
+            _CHAT_WIRE_TOOL_CALL_GUARD_MARKER,
+            f"active_provider_profile: {profile}",
+            f"active_provider_name: {provider}",
+            "active_provider_wire_api: chat",
+            "single_tool_call_per_turn_rule: emit at most one tool call in each assistant message.",
+            "tool_call_serialization_rule: after each tool result, decide whether to make the next tool call or produce the answer.",
+            "no_batched_mcp_rule: never bundle multiple `artifact.*`, `memory.*`, or `bash_exec.*` calls into the same response, even when the reads look independent.",
+            "no_immediate_repeat_rule: if a tool already returned the information needed for the current subtask, do not immediately call that same tool again; move to the next tool or answer.",
+            "tool_call_json_rule: every tool call must contain exactly one complete JSON object argument with no trailing characters.",
+        ]
+        guard_block = "\n".join(guard_lines)
+        return f"{prompt_text.rstrip()}\n\n{guard_block}\n"
 
     def _prepare_project_codex_home(
         self,
