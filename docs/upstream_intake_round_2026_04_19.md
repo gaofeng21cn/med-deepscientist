@@ -10,7 +10,7 @@ This audit records the second controlled upstream intake round for MedDeepScient
 - merge_base: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
 - rev_list_main_vs_upstream: `ahead=97, behind=105`
 - audit_status: `classified_and_executed`
-- execution_status: `round2_absorbed_on_intake_branch`
+- execution_status: `round2_absorbed_on_main_with_followup`
 
 ## Evidence
 
@@ -99,12 +99,28 @@ This round intentionally left out prompt wording, stage-skill wording, README ch
    - local commit: `f15ccdb`
    - rationale: status payload diagnostics, cwd-local managed-home discovery, and forceable wrapper repair help real launcher operations; install-index fallback was intentionally left out because this fork does not currently maintain install-index infrastructure.
 
+### Batch E: runtime follow-up fixes
+
+1. upstream commit `ea1329ddacf9c7a919f71c40bdb1ca1438943656` `Fix corrupted older event history pagination`
+   - decision: `absorb`
+   - intake branch commit: `fde32bd`
+   - merged `main` commit: `fcba71f`
+   - rationale: `GET /api/quests/{quest_id}/events` is part of the stable daemon/runtime surface, so cursor semantics must remain correct even when older history contains corrupted JSONL lines.
+
+2. upstream commit `54a460070d0cdf3efb82a4d8f7368ee0488d707d` `Improve runtime recovery and doctor diagnosis`
+   - decision: `absorb_adapted`
+   - intake branch commit: `06e4d24`
+   - merged `main` commit: `838f87e`
+   - local follow-up commit: `a32ef0b`
+   - rationale: persisted retry recovery, deterministic non-retryable failure diagnosis, and doctor-side `problem / why / fix` reporting all strengthen MAS-facing runtime recovery without widening product surface.
+
 ## Explicitly Deferred
 
 The following upstream groups remain outside this round by design:
 
 - prompt and stage-skill wording bundles such as `5a3c1c6`, `f2c85bc`, `76c135c`, `6d30f47`, `4b63ddc`, `01202f2`, and `56d3cd4`
-- UI, TUI, product-surface, and workspace-mode features such as `77e97d9`, `7c9c03f`, `27211b3`, `5247232`, `ea1329d`, `3fbc9be`, `b707d94`, and `4c3fbbc`
+- UI, TUI, and product-surface features such as `77e97d9`, `7c9c03f`, `27211b3`, `5247232`, `3fbc9be`, `b707d94`, and `4c3fbbc`
+- workspace-mode continuation fixes `d58a655` and `d9d4bd6`, because this fork already uses `workspace_mode` for durable workspace/layout semantics while the stable control field remains `startup_contract.decision_policy`
 - connector-specific fixes such as `c3abc96` and `efe6c57`
 - docs / README / release / badge churn
 - optional companion skill `1c151a8` `skills: add paper-plot companion skill`
@@ -121,6 +137,9 @@ This round used a dedicated intake worktree and produced the following local int
 6. `9043bb3` `Serialize chat-wire Codex tool calls`
 7. `14bc695` `Hide Codex runner windows through process control helper`
 8. `f15ccdb` `Improve launcher management home diagnostics`
+9. `fcba71f` `Fix corrupted older event history pagination`
+10. `838f87e` `feat: improve runtime recovery diagnosis`
+11. `a32ef0b` `test: stabilize retry recovery timing coverage`
 
 Merge-back verification on the same intake branch also exposed 5 pre-existing `main` failures in `tests/test_init_and_quest.py`. Those were repaired locally before merge-back by:
 
@@ -141,6 +160,9 @@ uv run pytest -q tests/test_codex_cli_compat.py tests/test_codex_runner.py tests
 uv run pytest -q tests/test_codex_runner.py tests/test_windows_support.py -k "windows or popen or process_session"
 uv run pytest -q tests/test_launcher_status.py
 uv run pytest -q tests/test_init_and_quest.py
+uv run pytest -q tests/test_acp_api.py
+uv run pytest -q tests/test_doctor.py
+uv run pytest -q tests/test_daemon_api.py
 uv run pytest -q
 scripts/verify.sh
 ```
@@ -154,13 +176,16 @@ Key outcomes:
 - `tests/test_launcher_status.py`: `1 passed`
 - `tests/launcher_uv.test.cjs`: `23 tests, 23 pass`
 - `tests/test_init_and_quest.py`: `35 passed`
+- `tests/test_acp_api.py`: `9 passed`
+- `tests/test_doctor.py`: `5 passed`
+- `tests/test_daemon_api.py`: `144 passed in 224.75s (0:03:44)`
 - full `uv run pytest -q`: `747 passed, 5 warnings in 1177.68s (0:19:37)`
 - `scripts/verify.sh`: `55 passed`
 
 ## Next Action
 
-Round 2 intake is ready for merge-back to `main`, followed by:
+Round 2 follow-up is now absorbed on `main`. Remaining future review items are:
 
-- fork-wide verification on the merged branch
-- cleanup of the intake worktree and branch
-- optional future review of `1c151a8` as a separate companion-skill lane if paper-plotting becomes a real MAS runtime need
+- keep `d58a655` + `d9d4bd6` in `defer` until they are rewritten around the fork's stable decision-policy contract
+- keep `4c3fbbc` as a separate Windows daemon/UI supporting-fix lane
+- keep optional companion skill `1c151a8` outside the runtime seam unless paper-plotting becomes a concrete MAS runtime need
