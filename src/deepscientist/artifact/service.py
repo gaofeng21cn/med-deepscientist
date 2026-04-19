@@ -2894,6 +2894,7 @@ class ArtifactService:
         story: str | None,
         ten_questions: list[object] | None,
         detailed_outline: dict[str, Any] | None,
+        sections_payload: object = None,
         review_result: str | None,
         status: str,
         created_at: str | None = None,
@@ -2901,7 +2902,7 @@ class ArtifactService:
         normalized_detailed = dict(detailed_outline or {})
         experimental_designs = self._normalize_string_list(normalized_detailed.get("experimental_designs"))
         sections = self._normalize_outline_sections(
-            normalized_detailed.get("sections"),
+            normalized_detailed.get("sections") or sections_payload,
             experimental_designs=experimental_designs,
         )
         resolved_title = (
@@ -3501,6 +3502,21 @@ class ArtifactService:
         _, path, payload = candidates[-1]
         return path, payload
 
+    def _resolve_paper_json_override(
+        self,
+        override: tuple[Path | str | None, dict[str, Any]] | None,
+    ) -> tuple[Path | None, dict[str, Any]]:
+        if override is None:
+            return None, {}
+        raw_source_path, raw_payload = override
+        source_path = (
+            Path(raw_source_path).expanduser().resolve(strict=False)
+            if raw_source_path is not None
+            else None
+        )
+        payload = copy.deepcopy(raw_payload if isinstance(raw_payload, dict) else {})
+        return source_path, payload
+
     def repair_paper_live_paths(
         self,
         quest_root: Path,
@@ -3509,6 +3525,9 @@ class ArtifactService:
         current_workspace_root: Path,
         legacy_workspace_roots: list[Path] | None = None,
         extra_paper_roots: list[Path] | None = None,
+        selected_outline_override: tuple[Path | str | None, dict[str, Any]] | None = None,
+        evidence_ledger_override: tuple[Path | str | None, dict[str, Any]] | None = None,
+        claim_evidence_map_override: tuple[Path | str | None, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         active_workspace_root = self._workspace_root_for(quest_root, workspace_root).resolve(strict=False)
         effective_workspace_root = (
@@ -3529,10 +3548,12 @@ class ArtifactService:
 
         repaired_files: list[str] = []
 
-        selected_source_path, selected_source_payload = self._read_latest_paper_json_payload(
-            default_paper_roots,
-            "selected_outline.json",
-        )
+        selected_source_path, selected_source_payload = self._resolve_paper_json_override(selected_outline_override)
+        if not selected_source_payload:
+            selected_source_path, selected_source_payload = self._read_latest_paper_json_payload(
+                default_paper_roots,
+                "selected_outline.json",
+            )
         if not selected_source_payload:
             selected_source_path, selected_source_payload = self._read_latest_paper_json_payload(
                 target_paper_roots,
@@ -3565,10 +3586,12 @@ class ArtifactService:
                 write_json(path, normalized)
                 repaired_files.append(str(path))
 
-        ledger_source_path, ledger_source_payload = self._read_latest_paper_json_payload(
-            default_paper_roots,
-            "evidence_ledger.json",
-        )
+        ledger_source_path, ledger_source_payload = self._resolve_paper_json_override(evidence_ledger_override)
+        if not ledger_source_payload:
+            ledger_source_path, ledger_source_payload = self._read_latest_paper_json_payload(
+                default_paper_roots,
+                "evidence_ledger.json",
+            )
         if ledger_source_payload:
             ledger_source_root = (
                 ledger_source_path.parent.parent.resolve(strict=False) if ledger_source_path is not None else active_workspace_root
@@ -3589,10 +3612,14 @@ class ArtifactService:
                     ]
                 )
 
-        claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
-            default_paper_roots,
-            "claim_evidence_map.json",
+        claim_map_source_path, claim_map_source_payload = self._resolve_paper_json_override(
+            claim_evidence_map_override
         )
+        if not claim_map_source_payload:
+            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
+                default_paper_roots,
+                "claim_evidence_map.json",
+            )
         if not claim_map_source_payload:
             claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
                 target_paper_roots,
@@ -9837,6 +9864,7 @@ class ArtifactService:
                 story=story or existing.get("story"),
                 ten_questions=ten_questions or existing.get("ten_questions"),
                 detailed_outline=detailed_outline or existing.get("detailed_outline"),
+                sections_payload=existing.get("sections"),
                 review_result=review_result or existing.get("review_result"),
                 status="candidate",
                 created_at=str(existing.get("created_at") or "") or None,
@@ -9897,6 +9925,7 @@ class ArtifactService:
             story=story or source_record.get("story"),
             ten_questions=ten_questions or source_record.get("ten_questions"),
             detailed_outline=detailed_outline or source_record.get("detailed_outline"),
+            sections_payload=source_record.get("sections"),
             review_result=review_result or source_record.get("review_result"),
             status="selected" if normalized_mode == "select" else "revised",
             created_at=str(source_record.get("created_at") or "") or None,
@@ -10079,6 +10108,21 @@ class ArtifactService:
                 + "; ".join(problems)
                 + "."
             )
+        paper_live_roots = self._paper_active_sync_roots(quest_root, workspace_root=workspace_root)
+        selected_outline_override = self._read_latest_paper_json_payload(
+            paper_live_roots,
+            "selected_outline.json",
+        )
+        if not selected_outline_override[1] and selected_outline:
+            selected_outline_override = (None, dict(selected_outline))
+        evidence_ledger_override = self._read_latest_paper_json_payload(
+            paper_live_roots,
+            "evidence_ledger.json",
+        )
+        claim_evidence_map_override = self._read_latest_paper_json_payload(
+            paper_live_roots,
+            "claim_evidence_map.json",
+        )
         self._synchronize_paper_reference_materials(quest_root, workspace_root=workspace_root)
         reference_materialization = self.quest_service._paper_reference_materialization_payload(
             quest_root,
@@ -10134,6 +10178,14 @@ class ArtifactService:
                 },
                 workspace_root=workspace_root,
             )
+        self.repair_paper_live_paths(
+            quest_root,
+            workspace_root=workspace_root,
+            current_workspace_root=workspace_root,
+            selected_outline_override=selected_outline_override,
+            evidence_ledger_override=evidence_ledger_override,
+            claim_evidence_map_override=claim_evidence_map_override,
+        )
         experiment_matrix_path = paper_root / "paper_experiment_matrix.md"
         experiment_matrix_json_path = self._paper_experiment_matrix_json_path(quest_root, workspace_root=workspace_root)
         source_branch = str(paper_context.get("source_branch") or "").strip() or None

@@ -2226,6 +2226,226 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     assert any(item["label"] == "Bundle Manifest" for item in stage_view["sections"]["key_files"])
 
 
+def test_submit_paper_outline_select_preserves_candidate_sections_and_required_items(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("outline section preservation quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Section-rich Outline",
+        detailed_outline={
+            "title": "Section-rich Outline",
+            "research_questions": ["RQ-sections"],
+            "experimental_designs": ["Exp-thin"],
+            "sections": [
+                {
+                    "section_id": "main-results",
+                    "title": "Main Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["main_transportability_run", "ranking_robustness"],
+                    "optional_items": [],
+                },
+                {
+                    "section_id": "discussion",
+                    "title": "Discussion",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["collapse_attribution"],
+                    "optional_items": [],
+                },
+            ],
+        },
+    )
+
+    assert [item["section_id"] for item in candidate["record"]["sections"]] == ["main-results", "discussion"]
+    assert [item["required_items"] for item in candidate["record"]["sections"]] == [
+        ["main_transportability_run", "ranking_robustness"],
+        ["collapse_attribution"],
+    ]
+
+    selected = artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Preserve the richer section contract from the candidate record.",
+    )
+
+    assert [item["section_id"] for item in selected["record"]["sections"]] == ["main-results", "discussion"]
+    assert [item["required_items"] for item in selected["record"]["sections"]] == [
+        ["main_transportability_run", "ranking_robustness"],
+        ["collapse_attribution"],
+    ]
+
+
+def test_submit_paper_bundle_syncs_authoritative_contract_surface_into_thin_paper_workspace(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("thin paper workspace bundle sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Thin Surface Outline",
+        detailed_outline={
+            "title": "Thin Surface Outline",
+            "research_questions": ["RQ-thin"],
+            "experimental_designs": ["Exp-thin"],
+            "sections": [
+                {
+                    "section_id": "main-results",
+                    "title": "Main Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["main_transportability_run", "ranking_robustness"],
+                    "optional_items": [],
+                },
+                {
+                    "section_id": "discussion",
+                    "title": "Discussion",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["collapse_attribution"],
+                    "optional_items": [],
+                },
+            ],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use the outline to test thin paper workspace synchronization.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    canonical_paper_root.mkdir(parents=True, exist_ok=True)
+
+    _write_citation_rich_draft(paper_root)
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(paper_root / "build" / "compile_report.json", {"ok": True})
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
+
+    write_json(
+        canonical_paper_root / "claim_evidence_map.json",
+        {
+            "schema_version": 1,
+            "updated_at": "2026-04-15T13:00:00+00:00",
+            "current_judgment": "The canonical paper surface is complete.",
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "statement": "The canonical paper surface should remain authoritative.",
+                    "status": "supported",
+                    "sections": ["Results", "Discussion"],
+                    "display_bindings": [],
+                    "evidence_items": [
+                        {
+                            "item_id": "main_transportability_run",
+                            "support_level": "primary",
+                            "source_paths": ["paper/evidence_ledger.json"],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    write_json(
+        canonical_paper_root / "evidence_ledger.json",
+        {
+            "schema_version": 1,
+            "selected_outline_ref": "outline-001",
+            "updated_at": "2026-04-15T13:00:00+00:00",
+            "items": [
+                {
+                    "item_id": "main_transportability_run",
+                    "title": "Main transportability run",
+                    "kind": "main_experiment",
+                    "paper_role": "main_text",
+                    "status": "completed",
+                    "section_id": "main-results",
+                    "result_summary": "The main run is complete.",
+                    "source_paths": ["experiments/main/run-001/result.json"],
+                },
+                {
+                    "item_id": "ranking_robustness",
+                    "title": "Ranking robustness",
+                    "kind": "analysis_slice",
+                    "paper_role": "main_text",
+                    "status": "completed",
+                    "section_id": "main-results",
+                    "result_summary": "Ranking robustness is complete.",
+                    "source_paths": ["experiments/analysis/ranking/result.json"],
+                },
+                {
+                    "item_id": "collapse_attribution",
+                    "title": "Attribution collapse",
+                    "kind": "analysis_slice",
+                    "paper_role": "main_text",
+                    "status": "completed",
+                    "section_id": "discussion",
+                    "result_summary": "Collapse attribution is complete.",
+                    "source_paths": ["experiments/analysis/collapse/result.json"],
+                },
+            ],
+        },
+    )
+
+    local_selected_outline = paper_root / "selected_outline.json"
+    if local_selected_outline.exists():
+        local_selected_outline.unlink()
+    local_claim_map = paper_root / "claim_evidence_map.json"
+    if local_claim_map.exists():
+        local_claim_map.unlink()
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "schema_version": 1,
+            "selected_outline_ref": "outline-001",
+            "updated_at": "2026-04-15T12:00:00+00:00",
+            "items": [],
+        },
+    )
+
+    result = artifact.submit_paper_bundle(
+        quest_root,
+        title="Thin Surface Bundle",
+        summary="Bundle should preserve the authoritative paper contract surface.",
+        pdf_path="paper/paper.pdf",
+    )
+
+    manifest = read_json(Path(result["manifest_path"]), {})
+    outline_target = paper_workspace / str(manifest.get("outline_path") or "")
+    claim_map_target = paper_workspace / str(manifest.get("claim_evidence_map_path") or "")
+    ledger_target = paper_workspace / str(manifest.get("evidence_ledger_path") or "")
+
+    assert outline_target.exists()
+    assert claim_map_target.exists()
+    assert ledger_target.exists()
+    assert read_json(outline_target, {}).get("outline_id") == "outline-001"
+    assert read_json(claim_map_target, {}).get("claims")
+    assert read_json(ledger_target, {}).get("items")
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    assert snapshot["paper_contract_health"]["contract_ok"] is True
+    assert snapshot["paper_contract_health"]["unresolved_required_count"] == 0
+    assert result["paper_line_state"]["contract_ok"] is True
+    assert result["paper_line_state"]["ready_required_count"] == 3
+
+
 def test_submit_paper_bundle_can_prepare_open_source_when_enabled(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
