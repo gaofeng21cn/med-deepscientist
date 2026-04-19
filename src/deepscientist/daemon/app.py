@@ -2435,6 +2435,20 @@ class DaemonApp:
         append_jsonl(self.home / "quests" / quest_id / ".ds" / "events.jsonl", payload)
         return payload
 
+    @staticmethod
+    def _is_controller_owned_auto_reroute_notice(
+        *,
+        action: str,
+        source: str,
+        snapshot: dict,
+    ) -> bool:
+        if action != "stop":
+            return False
+        if source not in {"medautosci-figure-loop-guard", "codex-medical-publication-surface"}:
+            return False
+        continuation_policy = str(snapshot.get("continuation_policy") or "auto").strip().lower() or "auto"
+        return continuation_policy == "auto"
+
     def _announce_control_state(
         self,
         quest_id: str,
@@ -2486,6 +2500,12 @@ class DaemonApp:
         ]
         delivery_targets: list[str] = []
         importance = "warning" if action in {"pause", "stop"} else "info"
+        if self._is_controller_owned_auto_reroute_notice(
+            action=action,
+            source=source,
+            snapshot=snapshot,
+        ):
+            importance = "info"
         for target in targets:
             channel_name = self.artifact_service._normalize_channel_name(target)
             payload = {
@@ -2546,6 +2566,21 @@ class DaemonApp:
                 self._polite_copy(
                     zh="当前 Git 分支与 worktree 已保留。如需继续，请直接在当前聊天或 connector 中发送任意新指令，或使用 /resume；系统会沿用当前 quest 上下文继续。",
                     en="The current Git branch and worktree were kept intact. To continue, send any new instruction in this chat or connector, or use /resume; the quest will resume from the current context.",
+                ),
+            ]
+        elif self._is_controller_owned_auto_reroute_notice(
+            action=action,
+            source=source,
+            snapshot=snapshot,
+        ):
+            lines = [
+                self._polite_copy(
+                    zh="MedAutoScience 已接管当前运行，并将 quest 切回受监管主线。",
+                    en="MedAutoScience has taken over this run and is routing the quest back to the supervised mainline.",
+                ),
+                self._polite_copy(
+                    zh="当前 Git 分支与 worktree 已保留，系统会沿用当前研究上下文继续推进。",
+                    en="The current Git branch and worktree were kept intact, and the system will continue from the current research context.",
                 ),
             ]
         else:
