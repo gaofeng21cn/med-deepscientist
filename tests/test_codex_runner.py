@@ -308,6 +308,34 @@ def test_codex_runner_includes_profile_when_runner_config_requests_it(temp_home)
     assert command[1:4] == ["--search", "--profile", "m27"]
 
 
+def test_codex_runner_profile_forces_inherit_model_flag(temp_home) -> None:  # type: ignore[no-untyped-def]
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=object(),  # type: ignore[arg-type]
+        prompt_builder=object(),  # type: ignore[arg-type]
+        artifact_service=object(),  # type: ignore[arg-type]
+    )
+    request = RunRequest(
+        quest_id="q-001",
+        quest_root=temp_home,
+        worktree_root=None,
+        run_id="run-001",
+        skill_id="baseline",
+        message="hello",
+        model="gpt-5.4",
+        approval_policy="on-request",
+        sandbox_mode="workspace-write",
+        reasoning_effort="",
+    )
+
+    command = runner._build_command(request, "prompt", runner_config={"profile": "m27"})
+
+    assert command[1:4] == ["--search", "--profile", "m27"]
+    assert "--model" not in command
+
+
 def test_codex_runner_downgrades_xhigh_for_legacy_codex_cli(monkeypatch, temp_home) -> None:  # type: ignore[no-untyped-def]
     runner = CodexRunner(
         home=temp_home,
@@ -458,6 +486,39 @@ model_provider = "minimax"
     config_text = (Path(target) / "config.toml").read_text(encoding="utf-8")
     assert 'model_provider = "minimax"' in config_text
     assert 'model = "MiniMax-M2.7"' in config_text
+
+
+def test_codex_runner_sanitizes_openai_env_for_provider_without_openai_auth(temp_home) -> None:  # type: ignore[no-untyped-def]
+    source_home = temp_home / "provider-codex-home"
+    source_home.mkdir(parents=True, exist_ok=True)
+    (source_home / "config.toml").write_text(
+        """[model_providers.minimax]
+name = "MiniMax Chat Completions API"
+base_url = "https://api.minimaxi.com/v1"
+env_key = "MINIMAX_API_KEY"
+wire_api = "chat"
+requires_openai_auth = false
+
+[profiles.m27]
+model = "MiniMax-M2.7"
+model_provider = "minimax"
+""",
+        encoding="utf-8",
+    )
+
+    env = CodexRunner._sanitize_provider_env(
+        {
+            "CODEX_HOME": str(source_home),
+            "OPENAI_API_KEY": "openai-secret",
+            "OPENAI_BASE_URL": "https://api.openai.com/v1",
+            "MINIMAX_API_KEY": "minimax-secret",
+        },
+        runner_config={"config_dir": str(source_home), "profile": "m27"},
+    )
+
+    assert env["MINIMAX_API_KEY"] == "minimax-secret"
+    assert "OPENAI_API_KEY" not in env
+    assert "OPENAI_BASE_URL" not in env
 
 
 def test_codex_runner_prepares_run_scoped_codex_home(temp_home) -> None:  # type: ignore[no-untyped-def]

@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from ..artifact import ArtifactService
-from ..codex_cli_compat import adapt_profile_only_provider_config, normalize_codex_reasoning_effort
+from ..codex_cli_compat import (
+    adapt_profile_only_provider_config,
+    normalize_codex_reasoning_effort,
+    provider_profile_metadata_from_home,
+)
 from ..config import ConfigManager
 from ..gitops import export_git_graph
 from ..prompts import PromptBuilder
@@ -68,6 +72,10 @@ _BUILTIN_MCP_TOOL_APPROVALS: dict[str, tuple[str, ...]] = {
         "bash_exec",
     ),
 }
+_PROVIDER_ENV_CONFLICT_KEYS = (
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+)
 
 
 def _compact_text(value: object, *, limit: int = 1200) -> str:
@@ -729,6 +737,7 @@ class CodexRunner:
                 continue
             env[env_key] = env_value
         env["CODEX_HOME"] = str(codex_home)
+        env = self._sanitize_provider_env(env, runner_config=runner_config)
         env["DEEPSCIENTIST_HOME"] = str(self.home)
         env["DS_HOME"] = str(self.home)
         env["DS_QUEST_ID"] = request.quest_id
@@ -994,6 +1003,14 @@ class CodexRunner:
         resolved_runner_config = runner_config if isinstance(runner_config, dict) else self._load_runner_config()
         profile = str(resolved_runner_config.get("profile") or "").strip()
         normalized_model = str(request.model or "").strip()
+        if profile and normalized_model.lower() not in {
+            "",
+            "inherit",
+            "default",
+            "codex-default",
+            "inherit_local_codex_default",
+        }:
+            normalized_model = "inherit"
         command = [
             resolved_binary or self.binary,
             "--search",
@@ -1185,3 +1202,22 @@ class CodexRunner:
         except (TypeError, ValueError):
             return None
         return timeout if timeout > 0 else None
+
+    @staticmethod
+    def _sanitize_provider_env(
+        env: dict[str, str],
+        *,
+        runner_config: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        resolved_runner_config = runner_config if isinstance(runner_config, dict) else {}
+        profile = str(resolved_runner_config.get("profile") or "").strip()
+        config_home = str(resolved_runner_config.get("config_dir") or env.get("CODEX_HOME") or "").strip()
+        if not profile or not config_home:
+            return env
+        metadata = provider_profile_metadata_from_home(config_home, profile=profile)
+        if metadata.get("requires_openai_auth") is not False:
+            return env
+        sanitized = dict(env)
+        for key in _PROVIDER_ENV_CONFLICT_KEYS:
+            sanitized.pop(key, None)
+        return sanitized
