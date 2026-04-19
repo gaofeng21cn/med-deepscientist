@@ -17,6 +17,7 @@ from ..codex_cli_compat import (
 )
 from ..config import ConfigManager
 from ..gitops import export_git_graph
+from ..process_control import process_session_popen_kwargs
 from ..prompts import PromptBuilder
 from ..runtime_logs import JsonlLogger
 from ..shared import append_jsonl, ensure_dir, generate_id, read_yaml, resolve_runner_binary, utc_now, write_json, write_text
@@ -687,6 +688,18 @@ class CodexRunner:
         self._process_lock = threading.Lock()
         self._active_processes: dict[str, subprocess.Popen[str]] = {}
 
+    @staticmethod
+    def _subprocess_popen_kwargs(*, workspace_root: Path, env: dict[str, str]) -> dict[str, Any]:
+        return {
+            "cwd": str(workspace_root),
+            "env": env,
+            "stdin": subprocess.PIPE,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            **process_session_popen_kwargs(hide_window=True),
+        }
+
     def run(self, request: RunRequest) -> RunResult:
         workspace_root = request.worktree_root or request.quest_root
         run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
@@ -753,18 +766,7 @@ class CodexRunner:
         env["DS_CONVERSATION_ID"] = f"quest:{request.quest_id}"
         env["DS_AGENT_ROLE"] = request.skill_id
         env["DS_TEAM_MODE"] = "single"
-        popen_kwargs: dict[str, Any] = {
-            "cwd": str(workspace_root),
-            "env": env,
-            "stdin": subprocess.PIPE,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "text": True,
-        }
-        if os.name == "nt" and hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
-            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP")
-        else:
-            popen_kwargs["start_new_session"] = True
+        popen_kwargs = self._subprocess_popen_kwargs(workspace_root=workspace_root, env=env)
         process = subprocess.Popen(command, **popen_kwargs)
         with self._process_lock:
             self._active_processes[request.quest_id] = process

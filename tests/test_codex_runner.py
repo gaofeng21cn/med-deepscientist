@@ -596,6 +596,30 @@ model_provider = "local"
     assert prompt == "BASE PROMPT"
 
 
+def test_codex_runner_subprocess_popen_kwargs_hide_windows_console(monkeypatch, temp_home) -> None:  # type: ignore[no-untyped-def]
+    captured: dict[str, object] = {}
+
+    def fake_process_session_popen_kwargs(*, hide_window: bool = False, new_process_group: bool = True):  # noqa: ANN001
+        captured["hide_window"] = hide_window
+        captured["new_process_group"] = new_process_group
+        return {"creationflags": 1536, "startupinfo": object()}
+
+    monkeypatch.setattr("deepscientist.runners.codex.process_session_popen_kwargs", fake_process_session_popen_kwargs)
+
+    kwargs = CodexRunner._subprocess_popen_kwargs(
+        workspace_root=Path(temp_home),
+        env={"TEST_ENV": "1"},
+    )
+
+    assert captured["hide_window"] is True
+    assert captured["new_process_group"] is True
+    assert kwargs["cwd"] == str(temp_home)
+    assert kwargs["env"] == {"TEST_ENV": "1"}
+    assert kwargs["text"] is True
+    assert kwargs["creationflags"] == 1536
+    assert "startupinfo" in kwargs
+
+
 def test_codex_runner_prepares_run_scoped_codex_home(temp_home) -> None:  # type: ignore[no-untyped-def]
     source_home = temp_home / "provider-codex-home"
     source_home.mkdir(parents=True, exist_ok=True)
