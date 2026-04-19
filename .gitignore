@@ -50,6 +50,7 @@ dist.bak.*/
 /test-results/
 /src/ui/test-results/
 /runtime/
+/.worktrees/
 /tmp-*.png
 /Codex
 docs/superpowers/

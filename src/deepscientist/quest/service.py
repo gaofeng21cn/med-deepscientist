@@ -1876,15 +1876,48 @@ class QuestService:
         return table_ids
 
     @staticmethod
-    def _catalog_ids_materialized_in_package(catalog_ids: set[str], package_paths: list[str]) -> set[str]:
+    def _catalog_id_aliases(
+        catalog_id: str,
+        *,
+        naming_aliases: dict[str, str] | None = None,
+    ) -> set[str]:
+        aliases = {str(catalog_id).strip()}
+        normalized_id = str(catalog_id).strip()
+        if naming_aliases:
+            alias = str(naming_aliases.get(normalized_id) or "").strip()
+            if alias:
+                aliases.add(alias)
+        match = re.fullmatch(r"([A-Za-z]+)(\d+)", normalized_id)
+        if match:
+            prefix, number = match.groups()
+            prefix_lower = prefix.lower()
+            if prefix_lower == "f":
+                aliases.add(f"Figure{number}")
+            elif prefix_lower == "t":
+                aliases.add(f"Table{number}")
+            elif prefix_lower == "ta":
+                aliases.add(f"AppendixTable{number}")
+        return {alias for alias in aliases if alias}
+
+    @staticmethod
+    def _catalog_ids_materialized_in_package(
+        catalog_ids: set[str],
+        package_paths: list[str],
+        *,
+        naming_aliases: dict[str, str] | None = None,
+    ) -> set[str]:
         matched: set[str] = set()
         normalized_paths = [PurePosixPath(path).as_posix() for path in package_paths if str(path).strip()]
         for catalog_id in catalog_ids:
-            pattern = re.compile(rf"(^|[^A-Za-z0-9]){re.escape(catalog_id)}([^A-Za-z0-9]|$)")
-            for raw_path in normalized_paths:
-                path = PurePosixPath(raw_path)
-                if pattern.search(path.name) or pattern.search(path.stem) or pattern.search(raw_path):
-                    matched.add(catalog_id)
+            aliases = QuestService._catalog_id_aliases(catalog_id, naming_aliases=naming_aliases)
+            for alias in aliases:
+                pattern = re.compile(rf"(^|[^A-Za-z0-9]){re.escape(alias)}([^A-Za-z0-9]|$)")
+                for raw_path in normalized_paths:
+                    path = PurePosixPath(raw_path)
+                    if pattern.search(path.name) or pattern.search(path.stem) or pattern.search(raw_path):
+                        matched.add(catalog_id)
+                        break
+                if catalog_id in matched:
                     break
         return matched
 
@@ -3147,6 +3180,30 @@ class QuestService:
                     normalized.append(text)
             return normalized
 
+        def _normalize_blocking_item_details(payload: dict[str, Any]) -> list[dict[str, str]]:
+            raw_items = payload.get("items")
+            if not isinstance(raw_items, list):
+                return []
+            normalized: list[dict[str, str]] = []
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                status = str(item.get("status") or "").strip()
+                status_lower = status.lower()
+                if status_lower.startswith("pass") or status_lower.startswith("ready") or status_lower in {
+                    "complete",
+                    "completed",
+                }:
+                    continue
+                detail: dict[str, str] = {}
+                for key in ("item_id", "title", "status", "next_action"):
+                    text = str(item.get(key) or "").strip()
+                    if text:
+                        detail[key] = text
+                if detail:
+                    normalized.append(detail)
+            return normalized
+
         def _normalized_status_values(payload: dict[str, Any]) -> tuple[str, ...]:
             values: list[str] = []
             for key in ("overall_status", "package_status", "status"):
@@ -3199,6 +3256,7 @@ class QuestService:
         if not isinstance(submission_checklist, dict):
             submission_checklist = {}
         submission_blocking_items = _normalize_blocking_items(submission_checklist)
+        submission_blocking_item_details = _normalize_blocking_item_details(submission_checklist)
         submission_minimal_manifest_path = _first_existing(
             [paper_root / "submission_minimal" / "submission_manifest.json" for paper_root in paper_roots]
         )
@@ -3210,14 +3268,38 @@ class QuestService:
         if not isinstance(submission_minimal_manifest, dict):
             submission_minimal_manifest = {}
         submission_minimal_package_paths: list[str] = []
+        seen_submission_minimal_paths: set[str] = set()
+
+        def _record_submission_minimal_path(raw_path: str) -> None:
+            normalized = str(raw_path or "").strip()
+            if not normalized:
+                return
+            resolved = _resolve_workspace_relative_path(normalized)
+            if resolved is None:
+                return
+            key = PurePosixPath(normalized).as_posix()
+            if key in seen_submission_minimal_paths:
+                return
+            seen_submission_minimal_paths.add(key)
+            submission_minimal_package_paths.append(key)
+
         for item in submission_minimal_manifest.get("package_files") or []:
             if not isinstance(item, dict):
                 continue
-            path_value = str(item.get("path") or "").strip()
-            if not path_value:
+            _record_submission_minimal_path(str(item.get("path") or ""))
+        for item in submission_minimal_manifest.get("figures") or []:
+            if not isinstance(item, dict):
                 continue
-            if _resolve_workspace_relative_path(path_value) is not None:
-                submission_minimal_package_paths.append(path_value)
+            paper_role = str(item.get("paper_role") or "").strip().lower()
+            if paper_role and paper_role != "main_text":
+                continue
+            for path_value in item.get("output_paths") or []:
+                _record_submission_minimal_path(str(path_value or ""))
+        for item in submission_minimal_manifest.get("tables") or []:
+            if not isinstance(item, dict):
+                continue
+            for path_value in item.get("output_paths") or []:
+                _record_submission_minimal_path(str(path_value or ""))
         manuscript_payload = (
             dict(submission_minimal_manifest.get("manuscript") or {})
             if isinstance(submission_minimal_manifest.get("manuscript"), dict)
@@ -3246,13 +3328,30 @@ class QuestService:
         )
         expected_main_text_figure_ids = self._main_text_figure_ids(figure_catalog)
         expected_table_ids = self._table_ids_from_catalog(table_catalog)
+        naming_map = (
+            dict(submission_minimal_manifest.get("naming_map") or {})
+            if isinstance(submission_minimal_manifest.get("naming_map"), dict)
+            else {}
+        )
+        figure_naming_aliases = {
+            str(catalog_id).strip(): str(alias).strip()
+            for catalog_id, alias in dict(naming_map.get("figures") or {}).items()
+            if str(catalog_id).strip() and str(alias).strip()
+        }
+        table_naming_aliases = {
+            str(catalog_id).strip(): str(alias).strip()
+            for catalog_id, alias in dict(naming_map.get("tables") or {}).items()
+            if str(catalog_id).strip() and str(alias).strip()
+        }
         materialized_main_text_figure_ids = self._catalog_ids_materialized_in_package(
             expected_main_text_figure_ids,
             submission_minimal_package_paths,
+            naming_aliases=figure_naming_aliases,
         )
         materialized_table_ids = self._catalog_ids_materialized_in_package(
             expected_table_ids,
             submission_minimal_package_paths,
+            naming_aliases=table_naming_aliases,
         )
         submission_minimal_display_exports_ready = (
             materialized_main_text_figure_ids == expected_main_text_figure_ids
@@ -3278,6 +3377,7 @@ class QuestService:
             "submission_checklist_package_status": submission_checklist_package_status,
             "submission_blocking_item_count": len(submission_blocking_items),
             "submission_blocking_items": submission_blocking_items,
+            "submission_blocking_item_details": submission_blocking_item_details,
             "submission_minimal_manifest_path": submission_minimal_manifest_path,
             "submission_minimal_docx_path": submission_minimal_docx_path,
             "submission_minimal_pdf_path": submission_minimal_pdf_path,
@@ -3354,6 +3454,44 @@ class QuestService:
             return False
         return saw_incomplete_item
 
+    @staticmethod
+    def _submission_checklist_nonfinal_maintenance_only(
+        submission_checklist: dict[str, Any],
+        *,
+        submission_minimal_ready: bool,
+    ) -> bool:
+        if not isinstance(submission_checklist, dict) or not submission_minimal_ready:
+            return False
+        if submission_checklist.get("handoff_ready") is not False:
+            return False
+        status_values = [
+            str(submission_checklist.get("overall_status") or "").strip().lower(),
+            str(submission_checklist.get("package_status") or "").strip().lower(),
+            str(submission_checklist.get("status") or "").strip().lower(),
+        ]
+        if not any("nonfinal" in value for value in status_values if value):
+            return False
+        blocking_items = submission_checklist.get("blocking_items") or []
+        return len(blocking_items) == 0
+
+    @staticmethod
+    def _managed_publication_gate_allows_nonfinal_write_review_maintenance(
+        payload: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        if bool(payload.get("clear")):
+            return True
+        status = str(payload.get("status") or "").strip().lower()
+        if status != "promising":
+            return False
+        recommended_action_types = {
+            str(item).strip().lower()
+            for item in (payload.get("recommended_action_types") or [])
+            if str(item).strip()
+        }
+        return bool({"continue_same_line", "continue_bundle_stage"} & recommended_action_types)
+
     @classmethod
     def _paper_content_milestone_payload(
         cls,
@@ -3382,11 +3520,31 @@ class QuestService:
                 submission_minimal_ready=submission_minimal_ready,
             )
         )
+        nonfinal_write_review_maintenance_only = (
+            content_milestone_reached
+            and not submission_ready
+            and cls._submission_checklist_nonfinal_maintenance_only(
+                submission_checklist,
+                submission_minimal_ready=submission_minimal_ready,
+            )
+        )
         if submission_ready:
             milestone_id = "submission_ready"
             remaining_scope = "none"
             status_summary_zh = "投稿里程碑已达成：论文内容和投稿包已经就绪，可以进入外投。"
             status_summary_en = "Submission milestone reached: the manuscript content and submission package are ready for external submission."
+        elif content_milestone_reached and nonfinal_write_review_maintenance_only:
+            milestone_id = "content_complete_nonfinal_write_review_maintenance"
+            remaining_scope = "nonfinal_write_review_support"
+            status_summary_zh = (
+                "内容里程碑已达成：论文内容已经完成，当前可以给人审阅；"
+                "但仍处于非终局的 write/review 维护，投稿支持工作与客观信息占位仍属下游支持面。"
+            )
+            status_summary_en = (
+                "Content milestone reached: the manuscript is review-ready, but it remains on "
+                "non-final write/review maintenance while submission-support work and objective "
+                "metadata placeholders remain downstream support surfaces."
+            )
         elif content_milestone_reached and objective_metadata_only_remaining:
             milestone_id = "content_complete_pending_objective_info"
             remaining_scope = "objective_info_only"
@@ -3416,6 +3574,7 @@ class QuestService:
             "review_ready": review_ready,
             "submission_ready": submission_ready,
             "objective_metadata_only_remaining": objective_metadata_only_remaining,
+            "nonfinal_write_review_maintenance_only": nonfinal_write_review_maintenance_only,
             "remaining_scope": remaining_scope,
             "milestone_label_zh": "已达成" if content_milestone_reached else "未达成",
             "status_summary_zh": status_summary_zh,
@@ -3597,6 +3756,33 @@ class QuestService:
             if isinstance(paper_contract.get("bundle_manifest"), dict)
             else {}
         )
+        metadata_closeout_raw = (
+            dict(bundle_manifest.get("metadata_closeout") or {})
+            if isinstance(bundle_manifest.get("metadata_closeout"), dict)
+            else {}
+        )
+        metadata_field_status_summary_raw = (
+            dict(metadata_closeout_raw.get("field_status_summary") or {})
+            if isinstance(metadata_closeout_raw.get("field_status_summary"), dict)
+            else {}
+        )
+        metadata_closeout: dict[str, Any] = {}
+        metadata_closeout_status = str(metadata_closeout_raw.get("status") or "").strip()
+        if metadata_closeout_status:
+            metadata_closeout["status"] = metadata_closeout_status
+        if metadata_field_status_summary_raw:
+            metadata_closeout["field_status_summary"] = {
+                "total_open_fields": int(metadata_field_status_summary_raw.get("total_open_fields") or 0),
+                "external_confirmation_required": int(
+                    metadata_field_status_summary_raw.get("external_confirmation_required") or 0
+                ),
+                "local_candidate_needs_external_confirmation": int(
+                    metadata_field_status_summary_raw.get("local_candidate_needs_external_confirmation") or 0
+                ),
+                "optional_external_confirmation": int(
+                    metadata_field_status_summary_raw.get("optional_external_confirmation") or 0
+                ),
+            }
         submission_checklist_path = str(closure_evidence.get("submission_checklist_path") or "").strip() or None
         submission_checklist = read_json(Path(submission_checklist_path), {}) if submission_checklist_path else {}
         submission_checklist = submission_checklist if isinstance(submission_checklist, dict) else {}
@@ -3615,6 +3801,12 @@ class QuestService:
         submission_checklist_package_status = (
             str(closure_evidence.get("submission_checklist_package_status") or "").strip() or None
         )
+        submission_blocking_items = list(closure_evidence.get("submission_blocking_items") or [])
+        submission_blocking_item_details = [
+            dict(item)
+            for item in (closure_evidence.get("submission_blocking_item_details") or [])
+            if isinstance(item, dict)
+        ]
         submission_blocking_item_count = int(closure_evidence.get("submission_blocking_item_count") or 0)
         submission_minimal_manifest_path = str(closure_evidence.get("submission_minimal_manifest_path") or "").strip() or None
         submission_minimal_docx_present = bool(closure_evidence.get("submission_minimal_docx_present"))
@@ -3648,6 +3840,18 @@ class QuestService:
             and submission_checklist_handoff_ready
             and submission_minimal_ready
             and managed_publication_gate_clear
+        )
+        nonfinal_write_review_maintenance_only = (
+            audit_package_ready
+            and submission_blocking_item_count == 0
+            and not submission_checklist_handoff_ready
+            and self._managed_publication_gate_allows_nonfinal_write_review_maintenance(
+                managed_publication_gate
+            )
+            and self._submission_checklist_nonfinal_maintenance_only(
+                submission_checklist,
+                submission_minimal_ready=submission_minimal_ready,
+            )
         )
         closure_state = "bundle_not_ready"
         delivery_state = "not_ready"
@@ -3700,8 +3904,12 @@ class QuestService:
             or not submission_checklist_handoff_ready
             or not submission_minimal_ready
         ):
-            recommended_next_stage = "write"
-            recommended_action = "finish_proofing_and_submission_checks"
+            if nonfinal_write_review_maintenance_only:
+                recommended_next_stage = "write"
+                recommended_action = "continue_nonfinal_write_review_maintenance"
+            else:
+                recommended_next_stage = "write"
+                recommended_action = "finish_proofing_and_submission_checks"
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
@@ -3768,16 +3976,27 @@ class QuestService:
                 "(`paper/review/submission_checklist.json`)"
             )
         elif submission_blocking_item_count > 0:
-            blocking_reasons.append(
-                "submission packaging checklist still has "
-                f"{submission_blocking_item_count} blocking item(s)"
-            )
+            if submission_blocking_items:
+                blocking_reasons.extend(
+                    item for item in submission_blocking_items if item and item not in blocking_reasons
+                )
+            else:
+                blocking_reasons.append(
+                    "submission packaging checklist still has "
+                    f"{submission_blocking_item_count} blocking item(s)"
+                )
         elif not submission_checklist_handoff_ready:
             status_bits = [item for item in (submission_checklist_status, submission_checklist_package_status) if item]
-            blocking_reasons.append(
-                "submission packaging checklist is not marked handoff-ready"
-                + (f" ({', '.join(status_bits)})" if status_bits else "")
-            )
+            if nonfinal_write_review_maintenance_only:
+                blocking_reasons.append(
+                    "submission packaging checklist intentionally remains non-final for write/review maintenance"
+                    + (f" ({', '.join(status_bits)})" if status_bits else "")
+                )
+            else:
+                blocking_reasons.append(
+                    "submission packaging checklist is not marked handoff-ready"
+                    + (f" ({', '.join(status_bits)})" if status_bits else "")
+                )
         if not submission_minimal_ready:
             missing_parts: list[str] = []
             if not submission_minimal_manifest_path:
@@ -3803,7 +4022,7 @@ class QuestService:
                     f"({submission_minimal_materialized_table_count}/"
                     f"{submission_minimal_expected_table_count} tables materialized)"
                 )
-        if not managed_publication_gate_clear:
+        if not managed_publication_gate_clear and not blocking_reasons:
             gap_preview = ", ".join(
                 item for item in managed_publication_gate_gap_summaries[:4] if item
             )
@@ -3879,6 +4098,9 @@ class QuestService:
                 "scope_id": human_milestone.get("remaining_scope"),
                 "objective_metadata_only_remaining": bool(
                     human_milestone.get("objective_metadata_only_remaining")
+                ),
+                "nonfinal_write_review_maintenance_only": bool(
+                    human_milestone.get("nonfinal_write_review_maintenance_only")
                 ),
             },
             current_blockers=blocking_reasons[:8],
@@ -3974,6 +4196,8 @@ class QuestService:
             "submission_checklist_package_status": submission_checklist_package_status,
             "submission_blocking_item_count": int(closure_evidence.get("submission_blocking_item_count") or 0),
             "submission_blocking_items": list(closure_evidence.get("submission_blocking_items") or []),
+            "submission_blocking_item_details": submission_blocking_item_details,
+            "metadata_closeout": metadata_closeout or None,
             "submission_minimal_manifest_path": submission_minimal_manifest_path,
             "submission_minimal_docx_present": submission_minimal_docx_present,
             "submission_minimal_pdf_present": submission_minimal_pdf_present,

@@ -2337,6 +2337,12 @@ def test_submit_paper_bundle_blocks_unmapped_completed_analysis(temp_home: Path)
             ],
         },
     )
+    analysis_result_root = paper_workspace / "experiments" / "analysis-results" / "analysis-gate"
+    analysis_result_root.mkdir(parents=True, exist_ok=True)
+    (analysis_result_root / "ablation.md").write_text(
+        "# Gate ablation\n\nCompleted but not mapped into the paper contract.\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(ValueError) as exc_info:
         artifact.submit_paper_bundle(
@@ -2347,6 +2353,69 @@ def test_submit_paper_bundle_blocks_unmapped_completed_analysis(temp_home: Path)
         )
 
     assert "unmapped" in str(exc_info.value)
+
+
+def test_paper_bundle_gate_ignores_manifest_only_analysis_absent_from_current_health_inventory(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper bundle stale manifest gate quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Stale Manifest Gate Outline",
+        detailed_outline={
+            "title": "Stale Manifest Gate Outline",
+            "research_questions": ["RQ-stale-manifest"],
+            "experimental_designs": ["Exp-stale-manifest"],
+            "sections": [
+                {
+                    "section_id": "results-stale-manifest",
+                    "title": "Stale Manifest Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": [],
+                    "optional_items": [],
+                }
+            ],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use the stale-manifest outline for bundle gate validation.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+
+    write_json(
+        quest_root / ".ds" / "analysis_campaigns" / "analysis-stale-manifest.json",
+        {
+            "campaign_id": "analysis-stale-manifest",
+            "selected_outline_ref": "outline-001",
+            "paper_line_id": "paper-line-legacy-comparator",
+            "slices": [
+                {
+                    "slice_id": "legacy-comparator-audit",
+                    "title": "Legacy comparator audit",
+                    "status": "completed",
+                }
+            ],
+        },
+    )
+
+    health = artifact._paper_contract_health_payload(quest_root, workspace_root=paper_workspace)
+    assert health["unmapped_completed_count"] == 0
+    assert health["unmapped_completed_items"] == []
+
+    gate_status = artifact._paper_bundle_gate_status(quest_root, workspace_root=paper_workspace)
+    assert gate_status["unmapped_completed_items"] == []
+    assert gate_status["ok"] is True
 
 
 def test_submit_paper_bundle_blocks_missing_reference_materialization(temp_home: Path) -> None:
@@ -5536,6 +5605,143 @@ def test_paper_line_sync_preserves_stop_route_for_unchanged_finalize_park(
     assert "- Recommendation scope: `paper_line_local_only`" in refreshed_summary
 
 
+def test_progress_interact_does_not_refresh_paper_line_sync_after_route_decision(
+    temp_home: Path,
+    monkeypatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper progress sync guard quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Progress Sync Guard Outline",
+        detailed_outline={
+            "title": "Progress Sync Guard Outline",
+            "research_questions": ["RQ-progress-sync-guard"],
+            "experimental_designs": ["EXP-progress-sync-guard"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n\nRoute guard maintenance.\n", encoding="utf-8")
+
+    monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        artifact,
+        "_paper_contract_health_payload",
+        lambda *args, **kwargs: {
+            "contract_ok": True,
+            "writing_ready": True,
+            "audit_package_ready": True,
+            "finalize_ready": False,
+            "bundle_present": True,
+            "delivery_state": "audit_ready",
+            "closure_state": "audit_ready_with_blockers",
+            "delivered_at": None,
+            "keep_bundle_fixed_by_default": False,
+            "selected_outline_ref": "outline-001",
+            "section_count": 1,
+            "ready_section_count": 1,
+            "ledger_item_count": 1,
+            "unresolved_required_count": 0,
+            "unmapped_completed_count": 0,
+            "open_supplementary_count": 0,
+            "reference_materialization_ready": True,
+            "bibliography_ready": True,
+            "bibliography_entry_count": 20,
+            "references_path": None,
+            "literature_ready": True,
+            "literature_record_count": 20,
+            "literature_record_counts": {},
+            "literature_record_paths": [],
+            "reference_gate": "ready",
+            "surface_consistency_ok": True,
+            "surface_counts": [],
+            "citation_usage_ready": True,
+            "draft_available": True,
+            "draft_citation_count": 0,
+            "draft_unique_citation_count": 0,
+            "draft_citation_keys": [],
+            "cited_bibliography_ready": True,
+            "cited_bibliography_entry_count": 20,
+            "minimum_cited_bibliography_entries": 20,
+            "citation_key_resolution_ok": True,
+            "unresolved_citation_key_count": 0,
+            "unresolved_citation_keys": [],
+            "citation_usage_by_section": [],
+            "review_outputs_ready": True,
+            "review_report_path": None,
+            "review_revision_log_path": None,
+            "proofing_outputs_ready": True,
+            "proofing_report_path": None,
+            "proofing_language_issues_path": None,
+            "submission_checklist_ready": True,
+            "submission_checklist_path": None,
+            "submission_blocking_item_count": 0,
+            "submission_blocking_items": [],
+            "final_claim_ledger_ready": False,
+            "final_claim_ledger_path": None,
+            "finalize_resume_packet_ready": False,
+            "finalize_resume_packet_path": None,
+            "completion_approval_ready": False,
+            "completion_blocking_reasons": [],
+            "blocking_reasons": [],
+            "recommended_next_stage": "write",
+            "recommended_action": "finish_proofing_and_submission_checks",
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "unresolved_required_items": [],
+            "unmapped_completed_items": [],
+        },
+    )
+
+    artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "blocked",
+            "action": "stop",
+            "next_stage": "decision",
+            "reason": "Freeze the paper line and keep the engineering route on the upstream repair handoff.",
+            "summary": "Quest route is already decided; ordinary progress updates should not rewrite paper-line sync.",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    status_before = (quest_root / "status.md").read_text(encoding="utf-8")
+    summary_before = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+    paper_state_before = read_json(quest_root / "paper" / "paper_line_state.json")
+    monkeypatch.setattr("deepscientist.artifact.service.utc_now", lambda: "2099-01-01T00:00:00+00:00")
+
+    progress = artifact.interact(
+        quest_root,
+        kind="progress",
+        message="老师，我正在继续上游修复定位，不需要改写论文线状态摘要。",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+    )
+
+    assert progress["status"] == "ok"
+    assert (quest_root / "status.md").read_text(encoding="utf-8") == status_before
+    assert (quest_root / "SUMMARY.md").read_text(encoding="utf-8") == summary_before
+    assert read_json(quest_root / "paper" / "paper_line_state.json") == paper_state_before
+
+
 def test_semantically_equivalent_paper_decision_still_refreshes_paper_state(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -5731,6 +5937,86 @@ def test_render_paper_line_status_and_summary_fall_back_to_publication_gate_gaps
     assert "- medical_publication_surface_blocked" in status_text
     assert "- active_run_drifting_into_write_without_gate_approval" in summary_text
     assert "- medical_publication_surface_blocked" in summary_text
+
+
+def test_render_paper_line_status_and_summary_surface_metadata_only_blocker_details(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    artifact = ArtifactService(temp_home)
+    payload = {
+        "recommended_next_stage": "write",
+        "recommended_action": "finish_proofing_and_submission_checks",
+        "paper_branch": "paper/main",
+        "updated_at": "2026-04-18T13:31:37+00:00",
+        "paper_line_id": "paper-main-outline-001-run",
+        "title": "Route Sync Outline",
+        "selected_outline_ref": "outline-001",
+        "contract_ok": True,
+        "reference_materialization_ready": True,
+        "writing_ready": True,
+        "audit_package_ready": True,
+        "finalize_ready": False,
+        "draft_status": "present",
+        "bundle_status": "present",
+        "ready_required_count": 4,
+        "required_count": 4,
+        "ready_section_count": 3,
+        "section_count": 4,
+        "open_supplementary_count": 0,
+        "bibliography_entry_count": 32,
+        "literature_record_count": 32,
+        "recommendation_scope": "paper_line_local_only",
+        "global_stage_authority": "publication_gate",
+        "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+        "blocking_reasons": ["submission packaging checklist still has 1 blocking item(s)"],
+        "submission_blocking_items": [
+            (
+                "The title-page and declaration packet still needs externally confirmed final author order, "
+                "affiliation numbering/map, corresponding-author contact details, and paste-ready wording for "
+                "funding, conflicts of interest, authors' contributions, ethics approval plus identifier, "
+                "consent / waiver, and data availability."
+            )
+        ],
+        "submission_blocking_item_details": [
+            {
+                "item_id": "CHK-011",
+                "title": (
+                    "Title page, manuscript Declarations, authorship metadata, affiliations, and final "
+                    "submission declarations still require the externally confirmed packet"
+                ),
+                "status": "open_blocker",
+                "next_action": (
+                    "Fill the metadata confirmation template, copy the confirmed wording into the title-page "
+                    "and manuscript-facing declaration surfaces, then run one targeted package re-audit plus "
+                    "one changed-page visual recheck."
+                ),
+            }
+        ],
+        "metadata_closeout": {
+            "status": "external_metadata_blocker_only",
+            "field_status_summary": {
+                "total_open_fields": 15,
+                "external_confirmation_required": 11,
+                "local_candidate_needs_external_confirmation": 2,
+                "optional_external_confirmation": 2,
+            },
+        },
+    }
+
+    status_text = artifact._render_paper_line_status_markdown(payload)
+    summary_text = artifact._render_paper_line_summary_markdown(payload)
+
+    assert "- Open Submission Blocker: `CHK-011`" in status_text
+    assert "- CHK-011 Meaning: Title page, manuscript Declarations, authorship metadata, affiliations, and final submission declarations still require the externally confirmed packet" in status_text
+    assert "- Field Split: `15` open fields (`11` externally required, `2` local-candidate fields still need explicit external confirmation, `2` optional)" in status_text
+    assert "- Next Local Action After Packet Arrival: Fill the metadata confirmation template, copy the confirmed wording into the title-page and manuscript-facing declaration surfaces, then run one targeted package re-audit plus one changed-page visual recheck." in status_text
+    assert "submission packaging checklist still has 1 blocking item(s)" not in status_text
+    assert "- Open Submission Blocker: `CHK-011`" in summary_text
+    assert "- Field Split: `15` open fields (`11` externally required, `2` local-candidate fields still need explicit external confirmation, `2` optional)" in summary_text
+    assert "submission packaging checklist still has 1 blocking item(s)" not in summary_text
+    assert "- The title-page and declaration packet still needs externally confirmed final author order, affiliation numbering/map, corresponding-author contact details, and paste-ready wording for funding, conflicts of interest, authors' contributions, ethics approval plus identifier, consent / waiver, and data availability." in summary_text
 
 
 def test_read_quest_documents_accepts_single_string_without_comma_splitting(temp_home: Path) -> None:
@@ -6590,6 +6876,15 @@ def test_get_paper_contract_health_accepts_schema_v1_submission_checklist_surfac
             "paper_branch": "paper/artifact-schema-v1-checklist",
             "selected_outline_ref": "outline-001",
             "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+            "metadata_closeout": {
+                "status": "external_metadata_blocker_only",
+                "field_status_summary": {
+                    "total_open_fields": 15,
+                    "external_confirmation_required": 11,
+                    "local_candidate_needs_external_confirmation": 2,
+                    "optional_external_confirmation": 2,
+                },
+            },
         },
     )
     write_json(
@@ -6658,9 +6953,460 @@ def test_get_paper_contract_health_accepts_schema_v1_submission_checklist_surfac
     assert health["submission_blocking_items"] == [
         "The title-page packet still needs externally confirmed final author order."
     ]
+    assert health["submission_blocking_item_details"] == [
+        {
+            "item_id": "CHK-011",
+            "title": "Title-page packet needs external metadata",
+            "status": "blocked_external_metadata_only",
+            "next_action": "Collect final author order and declaration wording.",
+        }
+    ]
+    assert health["metadata_closeout"] == {
+        "status": "external_metadata_blocker_only",
+        "field_status_summary": {
+            "total_open_fields": 15,
+            "external_confirmation_required": 11,
+            "local_candidate_needs_external_confirmation": 2,
+            "optional_external_confirmation": 2,
+        },
+    }
     assert health["audit_package_ready"] is True
     assert health["finalize_ready"] is False
     assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+
+
+def test_get_paper_contract_health_keeps_nonfinal_write_review_maintenance_route_when_gate_is_clear(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact nonfinal write review maintenance quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Nonfinal Maintenance Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-nonfinal-maintenance",
+            "paper_branch": "paper/nonfinal-maintenance",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Nonfinal Maintenance Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/nonfinal-maintenance",
+            "selected_outline_ref": "outline-001",
+            "status": "bundle_ready",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+            "study_root": "managed-study",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "schema_version": 1,
+            "overall_status": "write_review_maintenance_nonfinal",
+            "package_status": "review_bundle_synced_nonfinal_write_review",
+            "handoff_ready": False,
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    _materialize_submission_minimal_projection(paper_root, include_display_exports=False)
+
+    publication_eval_root = quest_root / "managed-study" / "artifacts" / "publication_eval"
+    publication_eval_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        publication_eval_root / "latest.json",
+        {
+            "verdict": {
+                "overall_verdict": "clear",
+                "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+            },
+            "gaps": [],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_bundle_stage",
+                }
+            ],
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["managed_publication_gate_status"] == "clear"
+    assert health["managed_publication_gate_clear"] is True
+    assert health["submission_checklist_handoff_ready"] is False
+    assert health["submission_minimal_ready"] is True
+    assert health["audit_package_ready"] is True
+    assert health["finalize_ready"] is False
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "continue_nonfinal_write_review_maintenance"
+    assert health["human_milestone"]["milestone_id"] == "content_complete_nonfinal_write_review_maintenance"
+    assert health["human_milestone"]["objective_metadata_only_remaining"] is False
+    assert health["human_milestone"]["remaining_scope"] == "nonfinal_write_review_support"
+    assert "只差客观信息" not in health["human_milestone"]["status_summary_zh"]
+    assert "only objective submission metadata remains" not in health["human_milestone"]["status_summary_en"]
+    assert "non-final write/review maintenance" in health["human_milestone"]["status_summary_en"]
+    assert (
+        health["status_narration_contract"]["remaining_scope"]["scope_id"]
+        == "nonfinal_write_review_support"
+    )
+    assert (
+        health["status_narration_contract"]["remaining_scope"]["objective_metadata_only_remaining"]
+        is False
+    )
+    joined = " ".join(health["blocking_reasons"])
+    assert "non-final for write/review maintenance" in joined
+
+    state = artifact._write_paper_line_state(quest_root)
+    status_text = (quest_root / "status.md").read_text(encoding="utf-8")
+    summary_text = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert state["recommended_action"] == "continue_nonfinal_write_review_maintenance"
+    assert "continue_nonfinal_write_review_maintenance" in status_text
+    assert "finish_proofing_and_submission_checks" not in status_text
+    assert "continue_nonfinal_write_review_maintenance" in summary_text
+    assert "只差客观信息" not in status_text
+    assert "只差客观信息" not in summary_text
+
+
+def test_get_paper_contract_health_does_not_promote_optimistic_publication_gate_hint_into_local_blocker(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact optimistic publication gate hint quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Optimistic Publication Gate Hint Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-optimistic-publication-gate-hint",
+            "paper_branch": "paper/artifact-optimistic-publication-gate-hint",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Optimistic Publication Gate Hint Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-optimistic-publication-gate-hint",
+            "selected_outline_ref": "outline-001",
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+            "metadata_closeout": {
+                "status": "external_metadata_blocker_only",
+                "field_status_summary": {
+                    "total_open_fields": 15,
+                    "external_confirmation_required": 11,
+                    "local_candidate_needs_external_confirmation": 2,
+                    "optional_external_confirmation": 2,
+                },
+            },
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+            "study_root": "managed-study",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text(
+        "# Review\n\nReady except for author-side declarations.\n",
+        encoding="utf-8",
+    )
+    (review_root / "revision_log.md").write_text(
+        "# Revision Log\n\nPending author-side declarations.\n",
+        encoding="utf-8",
+    )
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "schema_version": 1,
+            "overall_status": "pituitary_target_package_rebuilt_with_external_metadata_gap",
+            "package_status": "auditable_package_ready_with_external_metadata_blocker",
+            "handoff_ready": True,
+            "blocking_items": [
+                "The title-page packet still needs externally confirmed final author order."
+            ],
+            "items": [
+                {
+                    "item_id": "CHK-011",
+                    "title": "Title-page packet needs external metadata",
+                    "status": "blocked_external_metadata_only",
+                    "next_action": "Collect final author order and declaration wording.",
+                }
+            ],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text(
+        "# Proofing Report\n\nLayout is clean.\n",
+        encoding="utf-8",
+    )
+    (proofing_root / "language_issues.md").write_text(
+        "# Language Issues\n\nNone.\n",
+        encoding="utf-8",
+    )
+
+    publication_eval_root = quest_root / "managed-study" / "artifacts" / "publication_eval"
+    publication_eval_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        publication_eval_root / "latest.json",
+        {
+            "verdict": {
+                "overall_verdict": "promising",
+                "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+            },
+            "gaps": [
+                {
+                    "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_same_line",
+                }
+            ],
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["managed_publication_gate_status"] == "promising"
+    assert health["managed_publication_gate_clear"] is False
+    assert health["submission_blocking_items"] == [
+        "The title-page packet still needs externally confirmed final author order."
+    ]
+    assert not any("managed publication gate blocks completion" in item for item in health["blocking_reasons"])
+    assert any("The title-page packet still needs externally confirmed final author order." in item for item in health["blocking_reasons"])
+
+
+def test_get_paper_contract_health_keeps_nonfinal_write_review_route_when_publication_eval_is_promising(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact promising publication gate nonfinal maintenance quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Promising Publication Gate Nonfinal Maintenance Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-promising-publication-gate-nonfinal-maintenance",
+            "paper_branch": "paper/artifact-promising-publication-gate-nonfinal-maintenance",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Promising Publication Gate Nonfinal Maintenance Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-promising-publication-gate-nonfinal-maintenance",
+            "selected_outline_ref": "outline-001",
+            "status": "proof_ready_with_author_metadata_and_submission_declarations_pending",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+            "study_root": "managed-study",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "schema_version": 1,
+            "overall_status": "write_review_maintenance_nonfinal",
+            "package_status": "review_bundle_synced_nonfinal_write_review",
+            "handoff_ready": False,
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    _materialize_submission_minimal_projection(
+        paper_root,
+        include_display_exports=True,
+        display_exports_in_package_files=False,
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    publication_eval_root = quest_root / "managed-study" / "artifacts" / "publication_eval"
+    publication_eval_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        publication_eval_root / "latest.json",
+        {
+            "verdict": {
+                "overall_verdict": "promising",
+                "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+            },
+            "gaps": [
+                {
+                    "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_same_line",
+                }
+            ],
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["managed_publication_gate_status"] == "promising"
+    assert health["managed_publication_gate_clear"] is False
+    assert health["submission_minimal_ready"] is True
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "continue_nonfinal_write_review_maintenance"
+    assert health["human_milestone"]["milestone_id"] == "content_complete_nonfinal_write_review_maintenance"
+    assert health["human_milestone"]["objective_metadata_only_remaining"] is False
+    assert health["human_milestone"]["remaining_scope"] == "nonfinal_write_review_support"
+    assert "只差客观信息" not in health["human_milestone"]["status_summary_zh"]
+    assert "only objective submission metadata remains" not in health["human_milestone"]["status_summary_en"]
+    assert "non-final write/review maintenance" in health["human_milestone"]["status_summary_en"]
+    assert (
+        health["status_narration_contract"]["remaining_scope"]["scope_id"]
+        == "nonfinal_write_review_support"
+    )
+    assert (
+        health["status_narration_contract"]["remaining_scope"]["objective_metadata_only_remaining"]
+        is False
+    )
+    joined = " ".join(health["blocking_reasons"])
+    assert "non-final for write/review maintenance" in joined
+    assert "managed publication gate blocks completion" not in joined
+
+    state = artifact._write_paper_line_state(quest_root)
+    status_text = (quest_root / "status.md").read_text(encoding="utf-8")
+    summary_text = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+
+    assert state["recommended_action"] == "continue_nonfinal_write_review_maintenance"
+    assert "continue_nonfinal_write_review_maintenance" in status_text
+    assert "finish_proofing_and_submission_checks" not in status_text
+    assert "continue_nonfinal_write_review_maintenance" in summary_text
+    assert "只差客观信息" not in status_text
+    assert "只差客观信息" not in summary_text
 
 
 def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_surface_is_missing(
@@ -7381,6 +8127,167 @@ def test_get_paper_contract_health_accepts_submission_minimal_display_exports_wi
     assert health["submission_minimal_missing_main_text_figure_ids"] == []
     assert health["submission_minimal_expected_table_count"] == 1
     assert health["submission_minimal_materialized_table_count"] == 1
+    assert health["submission_minimal_missing_table_ids"] == []
+    assert health["submission_minimal_ready"] is True
+
+
+def test_get_paper_contract_health_accepts_appendix_table_aliases_in_submission_minimal_projection(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact submission appendix table naming quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Submission Appendix Table Naming Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-submission-appendix-table-naming",
+            "paper_branch": "paper/artifact-submission-appendix-table-naming",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Submission Appendix Table Naming Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-submission-appendix-table-naming",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    (paper_root / "final_claim_ledger.md").write_text(
+        "# Final Claim Ledger\n\nAll claims closed.\n",
+        encoding="utf-8",
+    )
+    (quest_root / "handoffs" / "finalize_resume_packet.md").write_text(
+        "# Finalize Resume Packet\n\nReady.\n",
+        encoding="utf-8",
+    )
+
+    submission_root = paper_root / "submission_minimal"
+    (submission_root / "figures").mkdir(parents=True, exist_ok=True)
+    (submission_root / "tables").mkdir(parents=True, exist_ok=True)
+    (submission_root / "manuscript.docx").write_text("docx", encoding="utf-8")
+    (submission_root / "paper.pdf").write_text("%PDF-1.4\n", encoding="utf-8")
+    (submission_root / "figures" / "Figure1.png").write_text("figure", encoding="utf-8")
+    (submission_root / "tables" / "Table1.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    (submission_root / "tables" / "AppendixTable1.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    write_json(
+        submission_root / "submission_manifest.json",
+        {
+            "manuscript": {
+                "docx_path": "paper/submission_minimal/manuscript.docx",
+                "pdf_path": "paper/submission_minimal/paper.pdf",
+            },
+            "package_files": [
+                {"path": "paper/submission_minimal/submission_manifest.json", "role": "manifest"},
+                {"path": "paper/submission_minimal/paper.pdf", "role": "pdf"},
+                {"path": "paper/submission_minimal/manuscript.docx", "role": "docx"},
+            ],
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "output_paths": ["paper/submission_minimal/figures/Figure1.png"],
+                }
+            ],
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "paper_role": "main_text",
+                    "output_paths": ["paper/submission_minimal/tables/Table1.csv"],
+                },
+                {
+                    "table_id": "TA1",
+                    "paper_role": "supplementary",
+                    "output_paths": ["paper/submission_minimal/tables/AppendixTable1.csv"],
+                },
+            ],
+        },
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                },
+                {
+                    "table_id": "TA1",
+                    "title": "Appendix public evidence counts",
+                },
+            ]
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["submission_minimal_docx_present"] is True
+    assert health["submission_minimal_pdf_present"] is True
+    assert health["submission_minimal_expected_main_text_figure_count"] == 1
+    assert health["submission_minimal_materialized_main_text_figure_count"] == 1
+    assert health["submission_minimal_missing_main_text_figure_ids"] == []
+    assert health["submission_minimal_expected_table_count"] == 2
+    assert health["submission_minimal_materialized_table_count"] == 2
     assert health["submission_minimal_missing_table_ids"] == []
     assert health["submission_minimal_ready"] is True
 

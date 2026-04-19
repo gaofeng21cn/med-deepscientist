@@ -3857,84 +3857,30 @@ class ArtifactService:
     def _paper_bundle_gate_status(self, quest_root: Path, *, workspace_root: Path | None = None) -> dict[str, Any]:
         outline_path, selected_outline = self._read_selected_outline_for_sync(quest_root, workspace_root=workspace_root)
         selected_outline = selected_outline if isinstance(selected_outline, dict) else {}
-        detailed_outline = (
-            dict(selected_outline.get("detailed_outline") or {})
-            if isinstance(selected_outline.get("detailed_outline"), dict)
-            else {}
+        health = self._paper_contract_health_payload(quest_root, workspace_root=workspace_root)
+        unresolved_required_items = [
+            dict(item) for item in (health.get("unresolved_required_items") or []) if isinstance(item, dict)
+        ]
+        unmapped_completed_items = [
+            dict(item) for item in (health.get("unmapped_completed_items") or []) if isinstance(item, dict)
+        ]
+        selected_outline_ref = (
+            str(
+                health.get("selected_outline_ref")
+                or selected_outline.get("outline_id")
+                or selected_outline.get("selected_outline_ref")
+                or ""
+            ).strip()
+            or None
         )
-        sections = self._normalize_outline_sections(
-            selected_outline.get("sections"),
-            experimental_designs=self._normalize_string_list(detailed_outline.get("experimental_designs")),
-        )
-        ledger = self._read_paper_evidence_ledger(quest_root)
-        ledger_items = [dict(item) for item in (ledger.get("items") or []) if isinstance(item, dict)]
-        ledger_by_item = {
-            str(item.get("item_id") or "").strip(): dict(item)
-            for item in ledger_items
-            if str(item.get("item_id") or "").strip()
-        }
-        unresolved_required_items: list[dict[str, Any]] = []
-        ready_sections = 0
-        for section in sections:
-            required_items = self._normalize_string_list(section.get("required_items"))
-            section_ready = True
-            for item_id in required_items:
-                ledger_item = ledger_by_item.get(item_id)
-                if ledger_item is None or not self._paper_ready_status(ledger_item.get("status")):
-                    unresolved_required_items.append(
-                        {
-                            "section_id": section.get("section_id"),
-                            "section_title": section.get("title"),
-                            "item_id": item_id,
-                            "status": ledger_item.get("status") if isinstance(ledger_item, dict) else None,
-                        }
-                    )
-                    section_ready = False
-            if section_ready and required_items:
-                ready_sections += 1
-        selected_outline_ref = str(selected_outline.get("outline_id") or ledger.get("selected_outline_ref") or "").strip() or None
-        completed_analysis: list[dict[str, Any]] = []
-        campaigns_root = quest_root / ".ds" / "analysis_campaigns"
-        if campaigns_root.exists():
-            for path in sorted(campaigns_root.glob("analysis-*.json")):
-                manifest = read_json(path, {})
-                if not isinstance(manifest, dict) or not manifest:
-                    continue
-                manifest_outline_ref = str(manifest.get("selected_outline_ref") or "").strip() or None
-                if selected_outline_ref and manifest_outline_ref != selected_outline_ref:
-                    continue
-                for slice_item in manifest.get("slices") or []:
-                    if not isinstance(slice_item, dict):
-                        continue
-                    status = str(slice_item.get("status") or "").strip().lower()
-                    if status in {"", "pending"}:
-                        continue
-                    completed_analysis.append(
-                        {
-                            "campaign_id": str(manifest.get("campaign_id") or "").strip() or None,
-                            "slice_id": str(slice_item.get("slice_id") or "").strip() or None,
-                            "item_id": str(slice_item.get("item_id") or "").strip() or None,
-                            "section_id": str(slice_item.get("section_id") or "").strip() or None,
-                            "status": status,
-                            "title": str(slice_item.get("title") or slice_item.get("slice_id") or "").strip() or None,
-                        }
-                    )
-        unmapped_completed_items: list[dict[str, Any]] = []
-        for item in completed_analysis:
-            item_id = str(item.get("item_id") or "").strip()
-            if not item_id:
-                unmapped_completed_items.append(item)
-                continue
-            ledger_item = ledger_by_item.get(item_id)
-            if ledger_item is None or not str(ledger_item.get("section_id") or "").strip():
-                unmapped_completed_items.append(item)
+        # Keep submit-time bundle gating on the same paper-line-aware source of truth as contract health.
         return {
             "ok": not unresolved_required_items and not unmapped_completed_items,
             "outline_path": str(outline_path) if outline_path else None,
             "selected_outline_ref": selected_outline_ref,
-            "section_count": len(sections),
-            "ready_section_count": ready_sections,
-            "ledger_item_count": len(ledger_items),
+            "section_count": int(health.get("section_count") or 0),
+            "ready_section_count": int(health.get("ready_section_count") or 0),
+            "ledger_item_count": int(health.get("ledger_item_count") or 0),
             "unresolved_required_items": unresolved_required_items,
             "unmapped_completed_items": unmapped_completed_items,
         }
@@ -4048,8 +3994,27 @@ class ArtifactService:
 
     def _paper_line_display_blockers(self, payload: dict[str, Any]) -> list[str]:
         blocking_reasons = [str(item).strip() for item in (payload.get("blocking_reasons") or []) if str(item).strip()]
+        submission_blocking_items = [
+            str(item).strip() for item in (payload.get("submission_blocking_items") or []) if str(item).strip()
+        ]
+        if blocking_reasons and submission_blocking_items:
+            normalized: list[str] = []
+            replaced_submission_count = False
+            for item in blocking_reasons:
+                if item.startswith("submission packaging checklist still has "):
+                    if not replaced_submission_count:
+                        normalized.extend(
+                            detail for detail in submission_blocking_items if detail not in normalized
+                        )
+                        replaced_submission_count = True
+                    continue
+                normalized.append(item)
+            if normalized:
+                return normalized
         if blocking_reasons:
             return blocking_reasons
+        if submission_blocking_items:
+            return submission_blocking_items
         if str(payload.get("global_stage_authority") or "").strip() == "publication_gate" and not bool(
             payload.get("managed_publication_gate_clear")
         ):
@@ -4069,8 +4034,53 @@ class ArtifactService:
                 return completion_blocking_reasons
         return []
 
+    def _paper_line_metadata_closeout_lines(self, payload: dict[str, Any]) -> list[str]:
+        metadata_closeout = (
+            dict(payload.get("metadata_closeout") or {})
+            if isinstance(payload.get("metadata_closeout"), dict)
+            else {}
+        )
+        if str(metadata_closeout.get("status") or "").strip() != "external_metadata_blocker_only":
+            return []
+        blocking_item_details = [
+            dict(item)
+            for item in (payload.get("submission_blocking_item_details") or [])
+            if isinstance(item, dict)
+        ]
+        blocking_item = blocking_item_details[0] if blocking_item_details else {}
+        lines: list[str] = []
+        blocker_id = str(blocking_item.get("item_id") or "").strip()
+        blocker_title = str(blocking_item.get("title") or "").strip()
+        if blocker_id:
+            lines.append(f"- Open Submission Blocker: `{blocker_id}`")
+        if blocker_title:
+            label = f"{blocker_id} Meaning" if blocker_id else "Submission Blocker Meaning"
+            lines.append(f"- {label}: {blocker_title}")
+        field_status_summary = (
+            dict(metadata_closeout.get("field_status_summary") or {})
+            if isinstance(metadata_closeout.get("field_status_summary"), dict)
+            else {}
+        )
+        total_open_fields = int(field_status_summary.get("total_open_fields") or 0)
+        external_required = int(field_status_summary.get("external_confirmation_required") or 0)
+        local_candidate_fields = int(field_status_summary.get("local_candidate_needs_external_confirmation") or 0)
+        optional_fields = int(field_status_summary.get("optional_external_confirmation") or 0)
+        if total_open_fields or external_required or local_candidate_fields or optional_fields:
+            lines.append(
+                "- Field Split: "
+                f"`{total_open_fields}` open fields "
+                f"(`{external_required}` externally required, "
+                f"`{local_candidate_fields}` local-candidate fields still need explicit external confirmation, "
+                f"`{optional_fields}` optional)"
+            )
+        next_action = str(blocking_item.get("next_action") or "").strip()
+        if next_action:
+            lines.append(f"- Next Local Action After Packet Arrival: {next_action}")
+        return lines
+
     def _render_paper_line_status_markdown(self, payload: dict[str, Any]) -> str:
         blocking_reasons = self._paper_line_display_blockers(payload)
+        metadata_closeout_lines = self._paper_line_metadata_closeout_lines(payload)
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
@@ -4116,9 +4126,6 @@ class ArtifactService:
             f"- Recommendation Scope: `{recommendation_scope}`",
             f"- Global Stage Authority: `{str(payload.get('global_stage_authority') or 'none').strip() or 'none'}`",
             f"- Global Stage Rule: `{str(payload.get('global_stage_rule') or 'none').strip() or 'none'}`",
-            "",
-            "## Blocking Reasons",
-            "",
         ]
         if milestone_summary_zh:
             lines.insert(10, f"- 当前判断：{milestone_summary_zh}")
@@ -4131,6 +4138,11 @@ class ArtifactService:
                 21,
                 f"- Quest-Level Next Stage: `{str(route.get('display_stage') or 'none').strip() or 'none'}`",
             )
+        if metadata_closeout_lines:
+            lines.extend(metadata_closeout_lines)
+            lines.extend(["", "## Blocking Reasons", ""])
+        else:
+            lines.extend(["## Blocking Reasons", ""])
         if blocking_reasons:
             lines.extend(f"- {item}" for item in blocking_reasons)
         else:
@@ -4139,6 +4151,7 @@ class ArtifactService:
 
     def _render_paper_line_summary_markdown(self, payload: dict[str, Any]) -> str:
         blocking_reasons = self._paper_line_display_blockers(payload)
+        metadata_closeout_lines = self._paper_line_metadata_closeout_lines(payload)
         route = self._paper_line_route_projection(payload)
         route_source = str(route.get("route_source") or "").strip()
         human_milestone = self._human_milestone_payload(payload)
@@ -4165,9 +4178,6 @@ class ArtifactService:
             f"- Literature records: `{int(payload.get('literature_record_count') or 0)}`",
             f"- {next_step_label}: `{str(route.get('display_stage') or 'none').strip() or 'none'}` / `{str(route.get('display_action') or 'none').strip() or 'none'}`",
             f"- Recommendation scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
-            "",
-            "## Current Blockers",
-            "",
         ]
         if milestone_summary_zh:
             lines.insert(8, f"- 当前判断：{milestone_summary_zh}")
@@ -4180,6 +4190,11 @@ class ArtifactService:
                     f"`{str(route.get('local_action') or 'none').strip() or 'none'}`"
                 ),
             )
+        if metadata_closeout_lines:
+            lines.extend(metadata_closeout_lines[:3])
+            lines.extend(["", "## Current Blockers", ""])
+        else:
+            lines.extend(["## Current Blockers", ""])
         if blocking_reasons:
             lines.extend(f"- {item}" for item in blocking_reasons)
         else:
@@ -4288,6 +4303,17 @@ class ArtifactService:
             "unmapped_completed_count": int(health.get("unmapped_completed_count") or 0),
             "blocking_reasons": list(health.get("blocking_reasons") or []),
             "completion_blocking_reasons": list(health.get("completion_blocking_reasons") or []),
+            "submission_blocking_items": list(health.get("submission_blocking_items") or []),
+            "submission_blocking_item_details": [
+                dict(item)
+                for item in (health.get("submission_blocking_item_details") or [])
+                if isinstance(item, dict)
+            ],
+            "metadata_closeout": (
+                dict(health.get("metadata_closeout") or {})
+                if isinstance(health.get("metadata_closeout"), dict)
+                else None
+            ),
             "recommended_next_stage": str(health.get("recommended_next_stage") or "").strip() or None,
             "recommended_action": str(health.get("recommended_action") or "").strip() or None,
             "recommendation_scope": str(health.get("recommendation_scope") or "").strip() or None,
@@ -4817,6 +4843,17 @@ class ArtifactService:
                 "delivery_state": str(paper_health.get("delivery_state") or "").strip() or None,
                 "blocking_reasons": list(paper_health.get("blocking_reasons") or []),
                 "completion_blocking_reasons": list(paper_health.get("completion_blocking_reasons") or []),
+                "submission_blocking_items": list(paper_health.get("submission_blocking_items") or []),
+                "submission_blocking_item_details": [
+                    dict(item)
+                    for item in (paper_health.get("submission_blocking_item_details") or [])
+                    if isinstance(item, dict)
+                ],
+                "metadata_closeout": (
+                    dict(paper_health.get("metadata_closeout") or {})
+                    if isinstance(paper_health.get("metadata_closeout"), dict)
+                    else None
+                ),
                 "recommended_next_stage": str(paper_health.get("recommended_next_stage") or "").strip() or None,
                 "recommended_action": str(paper_health.get("recommended_action") or "").strip() or None,
                 "recommendation_scope": str(paper_health.get("recommendation_scope") or "").strip() or None,
@@ -6922,14 +6959,16 @@ class ArtifactService:
             }
 
         write_root = self._workspace_root_for(quest_root, workspace_root)
+        payload_kind = str(payload.get("kind") or "").strip()
         if (
-            str(payload.get("kind") or "").strip() == "decision"
+            payload_kind == "decision"
             and str(payload.get("action") or "").strip() == "request_user_decision"
             and self._interaction_decision_type(payload) == QUEST_COMPLETION_DECISION_TYPE
         ):
             completion_gate_block = self._completion_approval_gate_block(quest_root)
             if completion_gate_block is not None:
-                self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
+                if self._should_refresh_paper_line_state_for_record_kind(payload_kind):
+                    self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
                 return {
                     "ok": False,
                     "status": str(completion_gate_block.get("status") or "completion_gate_blocked"),
@@ -6956,16 +6995,17 @@ class ArtifactService:
         suppress_equivalent = (
             bool(payload.get("suppress_if_semantically_equivalent"))
             if "suppress_if_semantically_equivalent" in payload
-            else str(payload.get("kind") or "").strip() in {"decision", "report"}
+            else payload_kind in {"decision", "report"}
         )
         if suppress_equivalent and semantic_key:
             existing = self._latest_semantically_equivalent_artifact(
                 quest_root,
-                kind=str(payload.get("kind") or "").strip(),
+                kind=payload_kind,
                 semantic_key=semantic_key,
             )
             if existing is not None:
-                self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
+                if self._should_refresh_paper_line_state_for_record_kind(payload_kind):
+                    self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
                 existing_record = dict(existing.get("payload") or {})
                 guidance_vm = dict(existing_record.get("guidance_vm") or {}) if isinstance(existing_record.get("guidance_vm"), dict) else {}
                 guidance_text = guidance_summary(guidance_vm) or guidance_for_kind(str(existing_record.get("kind") or payload.get("kind") or "report"))
@@ -7148,7 +7188,8 @@ class ArtifactService:
                     closing_artifact_id=artifact_id,
                 )
 
-        self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
+        if self._should_refresh_paper_line_state_for_record_kind(record["kind"]):
+            self._refresh_paper_line_state_if_present(quest_root, workspace_root=write_root)
 
         return {
             "ok": True,
@@ -7168,6 +7209,10 @@ class ArtifactService:
             "checkpoint": checkpoint_result,
             "baseline_registry_entry": baseline_registry_entry,
         }
+
+    @staticmethod
+    def _should_refresh_paper_line_state_for_record_kind(kind: str | None) -> bool:
+        return str(kind or "").strip() == "decision"
 
     def _refresh_paper_line_state_if_present(
         self,
