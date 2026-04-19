@@ -4902,6 +4902,386 @@ def test_quest_runtime_audit_reconciles_stale_live_turn_with_pending_queue_messa
     )
 
 
+def test_submit_user_message_recovers_stalled_live_turn_and_starts_new_run(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("stalled live turn recovery quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(quest_root, policy="none")
+
+    stale_run_id = "run-stalled-live-001"
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+
+    interrupt_requested = threading.Event()
+
+    def _old_worker() -> None:
+        while not interrupt_requested.is_set():
+            time.sleep(0.02)
+
+    old_worker = threading.Thread(target=_old_worker, daemon=True, name=f"pytest-stalled-worker-{quest_id}")
+    old_worker.start()
+
+    class RecoveryRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.interrupt_calls: list[str] = []
+            self.requests: list[str] = []
+
+        def run(self, request):
+            self.requests.append(request.message)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text=f"Recovered stalled turn: {request.message}",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+        def interrupt(self, target_quest_id: str) -> bool:
+            self.interrupt_calls.append(target_quest_id)
+            interrupt_requested.set()
+            return True
+
+    runner = RecoveryRunner()
+    app.runners["codex"] = runner
+    app._turn_state[quest_id] = {
+        "running": True,
+        "pending": False,
+        "stop_requested": False,
+        "reason": "user_message",
+        "worker": old_worker,
+    }
+
+    def _fake_stalled_running_turn_details(
+        target_quest_id: str,
+        *,
+        snapshot: dict | None = None,
+        turn_state: dict[str, object] | None = None,
+        turn_reason: str,
+    ) -> dict[str, int] | None:
+        if target_quest_id != quest_id or turn_reason != "user_message":
+            return None
+        if not dict(turn_state or {}).get("running"):
+            return None
+        return {
+            "pending_user_count": int((snapshot or {}).get("pending_user_message_count") or 1),
+            "silent_seconds": 1800,
+        }
+
+    monkeypatch.setattr(app, "_stalled_running_turn_details", _fake_stalled_running_turn_details)
+
+    payload = app.submit_user_message(
+        quest_id,
+        text="Please recover the stalled worker.",
+        source="web-react",
+    )
+
+    assert payload["started"] is True
+    assert payload["queued"] is False
+
+    deadline = time.time() + _ASYNC_TURN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if not old_worker.is_alive() and runner.requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("stalled live turn was not recovered into a fresh run")
+
+    assert runner.interrupt_calls == [quest_id]
+    assert runner.requests == ["Please recover the stalled worker."]
+
+    deadline = time.time() + _ASYNC_TURN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        if snapshot["active_run_id"] is None:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("recovered run did not clear active_run_id after completing")
+
+    events = app.quest_service.events(quest_id)["events"]
+    assert any(
+        item.get("type") == "quest.turn_state_reconciled"
+        and item.get("abandoned_run_id") == stale_run_id
+        and item.get("recovery_kind") == "stalled_live_turn"
+        for item in events
+    )
+
+
+def test_stalled_live_turn_recovery_pending_does_not_reinterrupt_or_clear_stop_requested(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("stalled recovery pending quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(quest_root, policy="none")
+
+    stale_run_id = "run-stalled-live-pending-001"
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+
+    release_worker = threading.Event()
+
+    def _old_worker() -> None:
+        while not release_worker.is_set():
+            time.sleep(0.02)
+
+    old_worker = threading.Thread(target=_old_worker, daemon=True, name=f"pytest-stalled-pending-{quest_id}")
+    old_worker.start()
+
+    class PendingRecoveryRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.interrupt_calls: list[str] = []
+            self.requests: list[str] = []
+
+        def run(self, request):
+            self.requests.append(request.message)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text=f"Recovered after wait: {request.message}",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+        def interrupt(self, target_quest_id: str) -> bool:
+            self.interrupt_calls.append(target_quest_id)
+            return True
+
+    runner = PendingRecoveryRunner()
+    app.runners["codex"] = runner
+    app._turn_state[quest_id] = {
+        "running": True,
+        "pending": False,
+        "stop_requested": False,
+        "reason": "user_message",
+        "worker": old_worker,
+    }
+
+    def _fake_stalled_running_turn_details(
+        target_quest_id: str,
+        *,
+        snapshot: dict | None = None,
+        turn_state: dict[str, object] | None = None,
+        turn_reason: str,
+    ) -> dict[str, int] | None:
+        if target_quest_id != quest_id or turn_reason != "user_message":
+            return None
+        if not dict(turn_state or {}).get("running"):
+            return None
+        return {
+            "pending_user_count": int((snapshot or {}).get("pending_user_message_count") or 1),
+            "silent_seconds": 1800,
+        }
+
+    monkeypatch.setattr(app, "_stalled_running_turn_details", _fake_stalled_running_turn_details)
+    monkeypatch.setattr(
+        app,
+        "_wait_for_turn_worker_exit",
+        lambda target_quest_id, timeout_seconds: app._refresh_turn_worker_state(target_quest_id),
+    )
+
+    payload = app.submit_user_message(
+        quest_id,
+        text="Please recover once the stale worker exits.",
+        source="web-react",
+    )
+
+    assert payload["started"] is False
+    assert payload["queued"] is True
+    assert payload["reason"] == "stalled_turn_recovery_pending"
+    assert runner.interrupt_calls == [quest_id]
+
+    state = dict(app._turn_state.get(quest_id) or {})
+    assert state["running"] is True
+    assert state["stop_requested"] is True
+    assert state["pending"] is False
+    assert state["recovery_pending"] is True
+    assert state["recovery_watch_active"] is True
+
+    second_payload = app.schedule_turn(quest_id, reason="user_message")
+
+    assert second_payload["started"] is False
+    assert second_payload["queued"] is True
+    assert second_payload["reason"] == "stalled_turn_recovery_pending"
+    assert runner.interrupt_calls == [quest_id]
+    assert runner.requests == []
+
+    release_worker.set()
+    old_worker.join(timeout=2)
+    assert old_worker.is_alive() is False
+
+    deadline = time.time() + _ASYNC_TURN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        if runner.requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("queued user message was not automatically processed after the stale worker exited")
+
+    assert runner.requests == ["Please recover once the stale worker exits."]
+    assert runner.interrupt_calls == [quest_id]
+
+    deadline = time.time() + _ASYNC_TURN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        state = dict(app._turn_state.get(quest_id) or {})
+        if not state.get("recovery_pending") and not state.get("recovery_watch_active"):
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("recovery watch state was not cleared after automatic reschedule")
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_status"),
+    [
+        ("pause", "paused"),
+        ("stop", "stopped"),
+    ],
+)
+def test_stalled_live_turn_recovery_pending_respects_later_control_action(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    expected_status: str,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(f"stalled recovery {action} quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(quest_root, policy="none")
+
+    stale_run_id = f"run-stalled-live-{action}-001"
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+
+    release_worker = threading.Event()
+
+    def _old_worker() -> None:
+        while not release_worker.is_set():
+            time.sleep(0.02)
+
+    old_worker = threading.Thread(target=_old_worker, daemon=True, name=f"pytest-stalled-{action}-{quest_id}")
+    old_worker.start()
+
+    class RecoveryRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.interrupt_calls: list[str] = []
+            self.requests: list[str] = []
+
+        def run(self, request):
+            self.requests.append(request.message)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text=f"Unexpected recovery: {request.message}",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+        def interrupt(self, target_quest_id: str) -> bool:
+            self.interrupt_calls.append(target_quest_id)
+            return True
+
+    runner = RecoveryRunner()
+    app.runners["codex"] = runner
+    app._turn_state[quest_id] = {
+        "running": True,
+        "pending": False,
+        "stop_requested": False,
+        "reason": "user_message",
+        "worker": old_worker,
+    }
+
+    def _fake_stalled_running_turn_details(
+        target_quest_id: str,
+        *,
+        snapshot: dict | None = None,
+        turn_state: dict[str, object] | None = None,
+        turn_reason: str,
+    ) -> dict[str, int] | None:
+        if target_quest_id != quest_id or turn_reason != "user_message":
+            return None
+        if not dict(turn_state or {}).get("running"):
+            return None
+        return {
+            "pending_user_count": int((snapshot or {}).get("pending_user_message_count") or 1),
+            "silent_seconds": 1800,
+        }
+
+    monkeypatch.setattr(app, "_stalled_running_turn_details", _fake_stalled_running_turn_details)
+    monkeypatch.setattr(
+        app,
+        "_wait_for_turn_worker_exit",
+        lambda target_quest_id, timeout_seconds: app._refresh_turn_worker_state(target_quest_id),
+    )
+
+    payload = app.submit_user_message(
+        quest_id,
+        text=f"Please recover unless I {action}.",
+        source="web-react",
+    )
+
+    assert payload["started"] is False
+    assert payload["queued"] is True
+    assert payload["reason"] == "stalled_turn_recovery_pending"
+
+    control_payload = app.handlers.quest_control(quest_id, {"action": action, "source": "web-react"})
+    assert control_payload["ok"] is True
+    assert control_payload["snapshot"]["status"] == expected_status
+
+    release_worker.set()
+    old_worker.join(timeout=2)
+    assert old_worker.is_alive() is False
+
+    deadline = time.time() + _ASYNC_TURN_TIMEOUT_SECONDS
+    while time.time() < deadline:
+        state = dict(app._turn_state.get(quest_id) or {})
+        if not state.get("running") and not state.get("recovery_pending") and not state.get("recovery_watch_active"):
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("recovery state was not cleared after the later control action")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["status"] == expected_status
+    assert snapshot["pending_user_message_count"] == 1
+
+    state = dict(app._turn_state.get(quest_id) or {})
+    assert state.get("stop_requested") is True
+    assert state.get("pending") is False
+    assert runner.requests == []
+
+
 def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_message(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
