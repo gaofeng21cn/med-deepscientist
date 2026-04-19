@@ -69,6 +69,26 @@
       "commit": "f15ccdb89d62277f6c4efe82f5b2cc2ad4577b35",
       "kind": "launcher_bugfix",
       "summary": "Improve launcher management home diagnostics"
+    },
+    {
+      "commit": "fcba71f1831baaaffd7f525cec04d498b982967b",
+      "kind": "runtime_bugfix",
+      "summary": "Fix corrupted older event history pagination"
+    },
+    {
+      "commit": "838f87e0535b0d40cd0e425d9d6c6e5f46bdce19",
+      "kind": "runtime_bugfix",
+      "summary": "Improve runtime recovery diagnosis"
+    },
+    {
+      "commit": "a255de45e7deae44316995b3513f5c9072ec24b8",
+      "kind": "runtime_bugfix",
+      "summary": "Harden Windows asset and git subprocess handling"
+    },
+    {
+      "commit": "223f08615899c74e51d6195a96ff8085ad10f190",
+      "kind": "runtime_bugfix",
+      "summary": "Refine baseline labels and idea interaction text"
     }
   ],
   "lock_policy": {

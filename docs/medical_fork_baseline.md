@@ -111,6 +111,42 @@ Remote semantics are explicit:
   - `node --test tests/launcher_uv.test.cjs`
   - `uv run pytest -q tests/test_launcher_status.py`
 
+- local_commit: `fcba71f`
+- upstream_commit: `ea1329ddacf9c7a919f71c40bdb1ca1438943656`
+- kind: `runtime_bugfix`
+- reason: older corrupted event history lines no longer break daemon event pagination, so the stable `/api/quests/{quest_id}/events` surface keeps returning usable cursors and history slices.
+- verification: `uv run pytest -q tests/test_acp_api.py`
+
+- local_commit: `838f87e`
+- upstream_commit: `54a460070d0cdf3efb82a4d8f7368ee0488d707d`
+- kind: `runtime_bugfix`
+- reason: runtime recovery now records clearer retry classification and doctor diagnostics, which strengthens MAS-facing stalled-run repair without widening the runtime contract.
+- verification:
+  - `uv run pytest -q tests/test_doctor.py`
+  - `uv run pytest -q tests/test_daemon_api.py`
+
+- local_commit: `a255de4`
+- upstream_bundle:
+  - `4c3fbbcbcadb670c26b86453632a6bd4b1cab59a`
+  - `f417d82be02a4f6dc53d58b230fdcad20d3476a1`
+  - `1b18d2e0ff54bba61ef7f317313983cb47e74725`
+- kind: `runtime_bugfix`
+- reason: daemon-served assets and hidden-window git subprocesses now behave consistently on Windows, reducing cross-platform runtime friction while preserving the existing API and layout boundaries.
+- verification:
+  - `uv run pytest -q tests/test_daemon_api.py -k ui_asset_prefers_explicit_javascript_mime_over_platform_guess`
+  - `uv run pytest -q tests/test_shared.py tests/test_windows_support.py`
+
+### Round 2 follow-up partial intake
+
+- local_commit: `223f086`
+- upstream_partial: `1865fa5e608e5ccc0f9b92ba72fc770791538847`
+- kind: `runtime_bugfix`
+- reason: current metrics timelines now prefer human-readable baseline variant labels, and idea interaction messages keep full connector-facing text instead of truncating the substantive tail inline.
+- verification:
+  - `uv run pytest -q tests/test_metrics_overview_surface.py`
+  - `uv run pytest -q tests/test_memory_and_artifact.py -k idea_interaction_message`
+  - `scripts/verify.sh`
+
 ## Lock Policy
 
 - mode: `regenerate_in_fork`
