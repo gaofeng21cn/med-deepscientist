@@ -3669,6 +3669,34 @@ def test_idea_interaction_message_stays_concise_and_design_focused(temp_home: Pa
     assert len(message.splitlines()) <= 4
 
 
+def test_idea_interaction_message_keeps_full_text_without_inline_truncation(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    artifact = ArtifactService(temp_home)
+    quest = quest_service.create("full idea interaction quest")
+    quest_root = Path(quest["quest_root"])
+
+    long_tail = "final detail token for the user-facing idea message"
+    message = artifact._build_idea_interaction_message(
+        quest_root=quest_root,
+        action="create",
+        idea_id="idea-002",
+        title="Long-form routing adapter",
+        mechanism=f"Add a routing adapter that keeps the quantized path stable and preserves {long_tail}.",
+        method_brief=f"Use a staged router with explicit fallback control and preserve {long_tail}.",
+        foundation_label="baseline model",
+        branch_name="idea/quest-idea-002",
+        change_layer="adapter block and scheduling policy",
+        source_lens="conditional routing with explicit fallback stability constraints",
+        expected_gain=f"improve calibration and preserve {long_tail}",
+        next_target="experiment",
+    )
+
+    assert long_tail in message
+    assert "…" not in message
+
+
 def test_submit_idea_lineage_intent_creates_child_and_sibling_like_nodes(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

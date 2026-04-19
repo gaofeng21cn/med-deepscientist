@@ -65,6 +65,33 @@ def test_metrics_timeline_uses_primary_metric_when_baseline_summary_is_missing()
     assert series_by_id["acc"]["baselines"][0]["value"] == 0.83
 
 
+def test_metrics_timeline_prefers_variant_labels_for_baseline_series() -> None:
+    timeline = build_metrics_timeline(
+        quest_id="quest-baseline-variant-label",
+        run_records=[],
+        baseline_entry={
+            "baseline_id": "baseline-series",
+            "default_variant_id": "stable",
+            "baseline_variants": [
+                {
+                    "variant_id": "stable",
+                    "label": "Stable comparator",
+                    "metrics_summary": {"acc": 0.88},
+                    "primary_metric": {"name": "acc", "value": 0.88},
+                }
+            ],
+            "metric_contract": {
+                "primary_metric_id": "acc",
+                "metrics": [{"metric_id": "acc", "direction": "higher", "label": "Accuracy"}],
+            },
+        },
+        selected_variant_id="stable",
+    )
+
+    series_by_id = {item["metric_id"]: item for item in timeline["series"]}
+    assert series_by_id["acc"]["baselines"][0]["label"] == "baseline-series:Stable comparator"
+
+
 def test_details_surface_explicitly_handles_baseline_only_metrics_state() -> None:
     source = (REPO_ROOT / "src/ui/src/components/workspace/QuestWorkspaceSurface.tsx").read_text(
         encoding="utf-8"

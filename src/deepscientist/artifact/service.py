@@ -246,6 +246,13 @@ class ArtifactService:
         return text[: max(0, limit - 1)].rstrip() + "…"
 
     @staticmethod
+    def _clean_text(value: object) -> str | None:
+        text = " ".join(str(value or "").split()).strip()
+        if not text:
+            return None
+        return text
+
+    @staticmethod
     def _decision_continuation_anchor(record: dict[str, Any]) -> str | None:
         normalized = str(record.get("next_stage") or "").strip().lower() or None
         if normalized is None:
@@ -273,16 +280,13 @@ class ArtifactService:
         expected_gain: str | None,
         next_target: str | None,
     ) -> str:
-        normalized_title = self._short_text(title or idea_id, limit=80) or idea_id
-        design_text = self._short_text(method_brief or mechanism, limit=140) or self.quest_service.localized_copy(
+        normalized_title = self._clean_text(title or idea_id) or idea_id
+        design_text = self._clean_text(method_brief or mechanism) or self.quest_service.localized_copy(
             quest_root=quest_root,
             zh="核心设计还未写清楚",
             en="the core design is not written clearly yet",
         )
-        compared_target = self._short_text(
-            foundation_label,
-            limit=48,
-        ) or self.quest_service.localized_copy(
+        compared_target = self._clean_text(foundation_label) or self.quest_service.localized_copy(
             quest_root=quest_root,
             zh="当前方案",
             en="the current approach",
@@ -292,16 +296,16 @@ class ArtifactService:
             delta_parts.append(
                 self.quest_service.localized_copy(
                     quest_root=quest_root,
-                    zh=f"重点改 `{self._short_text(change_layer, limit=36) or change_layer}`",
-                    en=f"changes `{self._short_text(change_layer, limit=36) or change_layer}` first",
+                    zh=f"重点改 `{self._clean_text(change_layer) or change_layer}`",
+                    en=f"changes `{self._clean_text(change_layer) or change_layer}` first",
                 )
             )
         if source_lens:
             delta_parts.append(
                 self.quest_service.localized_copy(
                     quest_root=quest_root,
-                    zh=f"引入 `{self._short_text(source_lens, limit=36) or source_lens}` 的设计视角",
-                    en=f"adds a `{self._short_text(source_lens, limit=36) or source_lens}` design angle",
+                    zh=f"引入 `{self._clean_text(source_lens) or source_lens}` 的设计视角",
+                    en=f"adds a `{self._clean_text(source_lens) or source_lens}` design angle",
                 )
             )
         if not delta_parts:
@@ -312,8 +316,8 @@ class ArtifactService:
                     en=f"directly adds `{design_text}` into the main design",
                 )
             )
-        delta_text = self._short_text("；".join(delta_parts), limit=160) or delta_parts[0]
-        expected_text = self._short_text(expected_gain, limit=96)
+        delta_text = self._clean_text("；".join(delta_parts)) or delta_parts[0]
+        expected_text = self._clean_text(expected_gain)
         next_target_text = self._format_route_label(next_target) if next_target else None
         if action == "candidate":
             headline = self.quest_service.localized_copy(

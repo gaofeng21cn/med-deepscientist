@@ -639,12 +639,13 @@ def baseline_metric_lines(entry: dict[str, Any] | None, selected_variant_id: str
         if not isinstance(variant, dict):
             continue
         variant_id = str(variant.get("variant_id") or "").strip() or None
+        variant_label = str(variant.get("label") or variant_id or "variant").strip() or "variant"
         metrics_summary = metrics_with_primary(variant.get("metrics_summary"), variant.get("primary_metric"))
         for metric_id, value in metrics_summary.items():
             lines.append(
                 {
                     "metric_id": metric_id,
-                    "label": f"{baseline_id or 'baseline'}:{variant_id or 'variant'}",
+                    "label": f"{baseline_id or 'baseline'}:{variant_label}",
                     "baseline_id": baseline_id,
                     "variant_id": variant_id,
                     "selected": bool(selected_id and variant_id == selected_id),
