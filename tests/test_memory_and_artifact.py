@@ -2333,6 +2333,7 @@ def test_submit_paper_bundle_syncs_authoritative_contract_surface_into_thin_pape
     canonical_paper_root.mkdir(parents=True, exist_ok=True)
 
     _write_citation_rich_draft(paper_root)
+    _write_citation_rich_draft(canonical_paper_root)
     (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
     _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
     (paper_root / "build").mkdir(parents=True, exist_ok=True)
