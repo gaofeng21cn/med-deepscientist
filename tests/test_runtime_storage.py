@@ -6,6 +6,7 @@ import json
 import os
 import time
 from pathlib import Path
+import tarfile
 
 from deepscientist.runtime_storage import maintain_quest_runtime_storage
 
@@ -69,24 +70,27 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
         tail_lines=2,
     )
 
-    compacted_log = (bash_root / "log.jsonl").read_text(encoding="utf-8").splitlines()
+    compacted_log = (bash_root / "log.compact.ndjson").read_text(encoding="utf-8").splitlines()
     assert len(compacted_log) == 5
     assert any("compacted completed runtime log" in line for line in compacted_log)
-    archived_log = quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "log.full.jsonl.gz"
+    archived_log = quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "log.jsonl.gz"
     assert archived_log.exists()
+    assert not (bash_root / "log.jsonl").exists()
     assert not (bash_root / "log.full.jsonl.gz").exists()
-    assert (bash_root / "log.full.jsonl.gz.index.json").exists()
+    assert (bash_root / "log.jsonl.index.json").exists()
     with gzip.open(archived_log, "rt", encoding="utf-8") as handle:
         archived_lines = handle.read().splitlines()
     assert len(archived_lines) == 10
 
-    compacted_terminal = (bash_root / "terminal.log").read_text(encoding="utf-8").splitlines()
+    compacted_terminal = (bash_root / "terminal.compact.log").read_text(encoding="utf-8").splitlines()
     assert len(compacted_terminal) == 5
     assert any("compacted completed runtime log" in line for line in compacted_terminal)
     assert (
-        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "terminal.full.log.gz"
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-001" / "terminal.log.gz"
     ).exists()
+    assert not (bash_root / "terminal.log").exists()
     assert not (bash_root / "terminal.full.log.gz").exists()
+    assert (bash_root / "terminal.log.index.json").exists()
     assert not stale_tmp.exists()
     assert not codex_tmp.parent.exists()
     assert not codex_execve_tmp.parent.parent.parent.exists()
@@ -94,6 +98,7 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     assert len(runtime_logs) == 2
     cold_archive = result["roots"][0]["cold_archive"]
     assert cold_archive["moved_file_count"] == 2
+    assert cold_archive["moved_by_kind"]["bash_exec_session_log"] == 2
     gitignore_text = (quest_root / ".gitignore").read_text(encoding="utf-8")
     assert ".ds/**/*.tmp" in gitignore_text
     assert ".ds/bash_exec/" in gitignore_text
@@ -127,13 +132,14 @@ def test_runtime_storage_maintenance_compacts_large_single_line_terminal_logs(tm
         tail_lines=2,
     )
 
-    compacted_terminal = (bash_root / "terminal.log").read_text(encoding="utf-8")
+    compacted_terminal = (bash_root / "terminal.compact.log").read_text(encoding="utf-8")
     assert "compacted completed runtime log" in compacted_terminal
     assert (
-        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-002" / "terminal.full.log.gz"
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-002" / "terminal.log.gz"
     ).exists()
+    assert not (bash_root / "terminal.log").exists()
     assert not (bash_root / "terminal.full.log.gz").exists()
-    assert (bash_root / "terminal.log").stat().st_size < 1_000_000
+    assert (bash_root / "terminal.compact.log").stat().st_size < 1_000_000
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
 
@@ -171,13 +177,14 @@ def test_runtime_storage_maintenance_compacts_large_single_line_jsonl_logs(tmp_p
         tail_lines=2,
     )
 
-    compacted_log = (bash_root / "log.jsonl").read_text(encoding="utf-8")
+    compacted_log = (bash_root / "log.compact.ndjson").read_text(encoding="utf-8")
     assert "compacted completed runtime log" in compacted_log
     assert (
-        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-003" / "log.full.jsonl.gz"
+        quest_root / ".ds" / "cold_archive" / "bash_exec" / ".ds" / "bash_exec" / "bash-003" / "log.jsonl.gz"
     ).exists()
+    assert not (bash_root / "log.jsonl").exists()
     assert not (bash_root / "log.full.jsonl.gz").exists()
-    assert (bash_root / "log.jsonl").stat().st_size < 1_000_000
+    assert (bash_root / "log.compact.ndjson").stat().st_size < 1_000_000
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
 
@@ -207,8 +214,10 @@ def test_runtime_storage_maintenance_compacts_stale_running_sessions_with_finish
         tail_lines=2,
     )
 
-    compacted_terminal = (bash_root / "terminal.log").read_text(encoding="utf-8")
+    compacted_terminal = (bash_root / "terminal.compact.log").read_text(encoding="utf-8")
     assert "compacted completed runtime log" in compacted_terminal
+    assert not (bash_root / "terminal.log").exists()
+    assert (bash_root / "terminal.log.index.json").exists()
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 1
 
@@ -328,7 +337,8 @@ def test_runtime_storage_maintenance_compacts_cold_codex_session_logs(tmp_path: 
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert any(item["path"].endswith("rollout.jsonl") for item in runtime_logs)
     cold_archive = result["roots"][0]["cold_archive"]
-    assert any(item["kind"] == "codex_session_jsonl" for item in cold_archive["moved_files"])
+    assert cold_archive["moved_by_kind"]["codex_session_jsonl"] == 1
+    assert any(item["kind"] == "codex_session_jsonl" for item in cold_archive["moved_samples"])
 
 
 def test_runtime_storage_maintenance_rotates_quest_events_into_segments(tmp_path: Path) -> None:
@@ -414,6 +424,91 @@ def test_runtime_storage_maintenance_applies_report_history_retention_contract(t
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["retention_contract"]["older_sampling"] == "daily"
     assert manifest["archived_file_count"] == 2
+    assert manifest["kept_file_count"] == 4
+    assert "archived_files" not in manifest
+    assert "kept_files" not in manifest
+    assert manifest["ledger_ref"]
+    ledger_path = quest_root / manifest["ledger_ref"]
+    assert ledger_path.exists()
+    with gzip.open(ledger_path, "rt", encoding="utf-8") as handle:
+        ledger = json.load(handle)
+    assert len(ledger["archived_files"]) == 2
+    assert len(ledger["kept_files"]) == 4
+
+
+def test_runtime_storage_maintenance_retains_inactive_codex_home_payloads(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_id = "run-cold-home-001"
+    history_root = quest_root / ".ds" / "codex_history" / run_id
+    run_home = quest_root / ".ds" / "codex_homes" / run_id
+    session_path = run_home / "sessions" / "2026" / "04" / "15" / "rollout.jsonl"
+    history_root.mkdir(parents=True, exist_ok=True)
+    session_path.parent.mkdir(parents=True, exist_ok=True)
+    (run_home / "config.toml").write_text("model = 'gpt-5.4'\n", encoding="utf-8")
+    (run_home / "auth.json").write_text('{"token":"abc"}\n', encoding="utf-8")
+    (run_home / "logs_1.sqlite").write_text("sqlite-log\n", encoding="utf-8")
+    (run_home / "state_1.sqlite").write_text("sqlite-state\n", encoding="utf-8")
+    (run_home / "skills" / "demo" / "SKILL.md").parent.mkdir(parents=True, exist_ok=True)
+    (run_home / "skills" / "demo" / "SKILL.md").write_text("# demo\n", encoding="utf-8")
+    (run_home / "memories" / "note.txt").parent.mkdir(parents=True, exist_ok=True)
+    (run_home / "memories" / "note.txt").write_text("memory\n", encoding="utf-8")
+    session_path.write_text(
+        "\n".join(
+            json.dumps({"seq": index + 1, "item": {"type": "message", "text": f"line-{index}"}}, ensure_ascii=False)
+            for index in range(4)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (history_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "completed_at": "2026-04-10T00:00:00+00:00",
+                "updated_at": "2026-04-10T00:00:00+00:00",
+                "exit_code": 0,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=3600,
+        jsonl_max_mb=8,
+        text_max_mb=8,
+        head_lines=2,
+        tail_lines=2,
+    )
+
+    assert (run_home / "config.toml").exists()
+    assert not (run_home / "auth.json").exists()
+    assert not (run_home / "logs_1.sqlite").exists()
+    assert not (run_home / "state_1.sqlite").exists()
+    assert not (run_home / "skills").exists()
+    assert not (run_home / "memories").exists()
+    assert (run_home / "sessions" / "2026" / "04" / "15" / "rollout.compact.ndjson").exists()
+    assert (run_home / "sessions" / "2026" / "04" / "15" / "rollout.jsonl.index.json").exists()
+    run_manifest_path = run_home / "runtime_retention.index.json"
+    assert run_manifest_path.exists()
+    run_manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    assert run_manifest["run_id"] == run_id
+    assert "config.toml" in run_manifest["retained_items"]
+    cold_archive = result["roots"][0]["cold_archive"]
+    assert cold_archive["moved_by_kind"]["codex_home_payload"] >= 5
+    assert any(item["kind"] == "codex_home_payload" for item in cold_archive["moved_samples"])
+    auth_archive = quest_root / ".ds" / "cold_archive" / "codex_home_runs" / ".ds" / "codex_homes" / run_id / "auth.json.gz"
+    skills_archive = quest_root / ".ds" / "cold_archive" / "codex_home_runs" / ".ds" / "codex_homes" / run_id / "skills.tar.gz"
+    assert auth_archive.exists()
+    assert skills_archive.exists()
+    with gzip.open(auth_archive, "rt", encoding="utf-8") as handle:
+        assert "abc" in handle.read()
+    with tarfile.open(skills_archive, "r:gz") as archive:
+        assert any(member.name.endswith("SKILL.md") for member in archive.getmembers())
 
 
 def test_runtime_storage_maintenance_slims_oversized_run_and_history_jsonl_entries(tmp_path: Path) -> None:

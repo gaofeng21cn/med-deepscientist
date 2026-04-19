@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import tarfile
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -38,9 +39,21 @@ _WORKTREE_RUNTIME_DIR_NAMES = (
     "codex_homes",
     "slim_backups",
 )
-_REPORT_RETENTION_KEEP_FILENAMES = {"latest.json", "state.json", "retention_manifest.json"}
+_REPORT_RETENTION_KEEP_FILENAMES = {
+    "latest.json",
+    "state.json",
+    "retention_manifest.json",
+    "retention_manifest.ledger.json.gz",
+}
 _REPORT_RETENTION_RECENT_HOURLY_WINDOW_HOURS = 72
 _REPORT_RETENTION_OLDER_SAMPLING = "daily"
+_MANIFEST_SAMPLE_LIMIT = 20
+_CODEX_HOME_RETENTION_KEEP_NAMES = {"config.toml", "runtime_retention.index.json", "sessions"}
+_BASH_SESSION_LOG_SPECS = (
+    ("log.jsonl", "jsonl"),
+    ("terminal.log", "text"),
+    ("monitor.log", "text"),
+)
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -214,6 +227,16 @@ def _unique_path(path: Path) -> Path:
     raise RuntimeError(f"unable to allocate unique archive path for {path}")
 
 
+def _manifest_ledger_path(path: Path) -> Path:
+    return path.with_name(f"{path.stem}.ledger.json.gz")
+
+
+def _compact_view_path(path: Path) -> Path:
+    if path.suffix == ".jsonl":
+        return path.with_name(f"{path.stem}.compact.ndjson")
+    return path.with_name(f"{path.stem}.compact{path.suffix}")
+
+
 def _relative_ref(path: Path, *, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
@@ -244,6 +267,19 @@ def _write_gzip_copy(source: Path, archive_path: Path) -> None:
     ensure_dir(archive_path.parent)
     with source.open("rb") as input_handle, gzip.open(archive_path, "wb", compresslevel=6) as output_handle:
         shutil.copyfileobj(input_handle, output_handle)
+
+
+def _write_gzip_json(path: Path, payload: dict[str, Any]) -> None:
+    ensure_dir(path.parent)
+    with gzip.open(path, "wt", encoding="utf-8", compresslevel=6) as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def _archive_directory_as_tar_gz(source_dir: Path, archive_path: Path) -> None:
+    ensure_dir(archive_path.parent)
+    with tarfile.open(archive_path, "w:gz") as archive:
+        archive.add(source_dir, arcname=source_dir.name)
 
 
 def _collect_line_windows(path: Path, *, head_lines: int, tail_lines: int) -> tuple[list[str], list[str], int]:
@@ -350,7 +386,9 @@ def _compact_jsonl_file(
     head_lines: int,
     tail_lines: int,
     root: Path,
+    destination_path: Path | None = None,
 ) -> dict[str, Any] | None:
+    output_path = destination_path or path
     head, tail, total_lines = _collect_line_windows(path, head_lines=head_lines, tail_lines=tail_lines)
     head_last_seq = _extract_seq(head[-1]) if head else None
     tail_first_seq = _extract_seq(tail[0]) if tail else None
@@ -373,9 +411,10 @@ def _compact_jsonl_file(
             "archive_ref": archive_path.relative_to(root).as_posix(),
         }
         rewritten = [*head, json.dumps(marker, ensure_ascii=False), *tail]
-        path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+        output_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
         return {
             "path": str(path.relative_to(root)),
+            "compact_view_path": str(output_path.relative_to(root)),
             "archive_path": str(archive_path.relative_to(root)),
             "original_bytes": original_bytes,
             "omitted_line_count": omitted_lines,
@@ -390,6 +429,16 @@ def _compact_jsonl_file(
         original_bytes - sum(len(line.encode("utf-8")) + 1 for line in rewritten_preview),
     )
     if omitted_bytes <= 0:
+        if destination_path is not None:
+            ensure_dir(output_path.parent)
+            shutil.copy2(path, output_path)
+            return {
+                "path": str(path.relative_to(root)),
+                "compact_view_path": str(output_path.relative_to(root)),
+                "archive_path": str(archive_path.relative_to(root)),
+                "original_bytes": original_bytes,
+                "mode": "jsonl_copy",
+            }
         return None
     marker = {
         "seq": marker_seq,
@@ -410,9 +459,10 @@ def _compact_jsonl_file(
         json.dumps(marker, ensure_ascii=False),
         *rewritten_preview[midpoint:],
     ]
-    path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    output_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     return {
         "path": str(path.relative_to(root)),
+        "compact_view_path": str(output_path.relative_to(root)),
         "archive_path": str(archive_path.relative_to(root)),
         "original_bytes": original_bytes,
         "omitted_byte_count": omitted_bytes,
@@ -428,7 +478,9 @@ def _compact_text_file(
     head_lines: int,
     tail_lines: int,
     root: Path,
+    destination_path: Path | None = None,
 ) -> dict[str, Any] | None:
+    output_path = destination_path or path
     head, tail, total_lines = _collect_line_windows(path, head_lines=head_lines, tail_lines=tail_lines)
     if total_lines > head_lines + tail_lines:
         omitted_lines = max(0, total_lines - len(head) - len(tail))
@@ -437,9 +489,10 @@ def _compact_text_file(
             f"full log archived at {archive_path.relative_to(root).as_posix()}]"
         )
         rewritten = [*head, marker, *tail]
-        path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+        output_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
         return {
             "path": str(path.relative_to(root)),
+            "compact_view_path": str(output_path.relative_to(root)),
             "archive_path": str(archive_path.relative_to(root)),
             "original_bytes": original_bytes,
             "omitted_line_count": omitted_lines,
@@ -455,15 +508,26 @@ def _compact_text_file(
         return None
     omitted_bytes = max(0, total_bytes - len(head_text.encode("utf-8")) - len(tail_text.encode("utf-8")))
     if omitted_bytes <= 0:
+        if destination_path is not None:
+            ensure_dir(output_path.parent)
+            shutil.copy2(path, output_path)
+            return {
+                "path": str(path.relative_to(root)),
+                "compact_view_path": str(output_path.relative_to(root)),
+                "archive_path": str(archive_path.relative_to(root)),
+                "original_bytes": original_bytes,
+                "mode": "text_copy",
+            }
         return None
     marker = (
         f"[compacted completed runtime log: omitted {omitted_bytes} bytes; "
         f"full log archived at {archive_path.relative_to(root).as_posix()}]"
     )
     rewritten = [segment for segment in (head_text.rstrip("\n"), marker, tail_text.lstrip("\n")) if segment]
-    path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    output_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
     return {
         "path": str(path.relative_to(root)),
+        "compact_view_path": str(output_path.relative_to(root)),
         "archive_path": str(archive_path.relative_to(root)),
         "original_bytes": original_bytes,
         "omitted_byte_count": omitted_bytes,
@@ -948,8 +1012,9 @@ def apply_report_history_retention(quest_root: Path) -> dict[str, Any]:
             "older_sampling": _REPORT_RETENTION_OLDER_SAMPLING,
         },
         "archived_file_count": 0,
-        "archived_files": [],
-        "kept_files": [],
+        "kept_file_count": 0,
+        "archived_samples": [],
+        "kept_samples": [],
     }
     if not reports_root.exists():
         return manifest
@@ -957,9 +1022,11 @@ def apply_report_history_retention(quest_root: Path) -> dict[str, Any]:
     now = datetime.now(UTC)
     bucket_winners: dict[tuple[str, str], Path] = {}
     candidates: list[Path] = []
+    kept_files: list[str] = []
+    archived_files: list[dict[str, str]] = []
     for path in sorted(item for item in reports_root.rglob("*") if item.is_file()):
-        if path.name in _REPORT_RETENTION_KEEP_FILENAMES:
-            manifest["kept_files"].append(_relative_ref(path, root=resolved_root))
+        if path.name in _REPORT_RETENTION_KEEP_FILENAMES or path.name.startswith("retention_manifest.ledger"):
+            kept_files.append(_relative_ref(path, root=resolved_root))
             continue
         bucket = _report_retention_bucket(path, root=resolved_root, now=now)
         current = bucket_winners.get(bucket)
@@ -970,7 +1037,7 @@ def apply_report_history_retention(quest_root: Path) -> dict[str, Any]:
     kept_paths = set(bucket_winners.values())
     for path in candidates:
         if path in kept_paths:
-            manifest["kept_files"].append(_relative_ref(path, root=resolved_root))
+            kept_files.append(_relative_ref(path, root=resolved_root))
             continue
         archive_target = _cold_archive_path(
             resolved_root,
@@ -979,62 +1046,254 @@ def apply_report_history_retention(quest_root: Path) -> dict[str, Any]:
             compress=False,
         )
         shutil.move(str(path), archive_target)
-        manifest["archived_files"].append(
+        archived_files.append(
             {
                 "source_path": _relative_ref(path, root=resolved_root),
                 "archive_path": _relative_ref(archive_target, root=resolved_root),
             }
         )
-    manifest["archived_file_count"] = len(manifest["archived_files"])
+    manifest["archived_file_count"] = len(archived_files)
+    manifest["kept_file_count"] = len(kept_files)
+    manifest["archived_samples"] = archived_files[:_MANIFEST_SAMPLE_LIMIT]
+    manifest["kept_samples"] = kept_files[:_MANIFEST_SAMPLE_LIMIT]
+    if archived_files or kept_files:
+        ledger_path = _manifest_ledger_path(manifest_path)
+        _write_gzip_json(
+            ledger_path,
+            {
+                "schema_version": 1,
+                "quest_root": str(resolved_root),
+                "reports_root": str(reports_root),
+                "archived_files": archived_files,
+                "kept_files": kept_files,
+            },
+        )
+        manifest["ledger_ref"] = _relative_ref(ledger_path, root=resolved_root)
     write_json(manifest_path, manifest)
     return manifest
+
+
+def _run_meta(root: Path, run_id: str) -> dict[str, Any]:
+    payload = read_json(root / ".ds" / "codex_history" / run_id / "meta.json", {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _run_is_cold(root: Path, run_id: str, *, now: datetime, older_than_seconds: int) -> bool:
+    meta = _run_meta(root, run_id)
+    timestamp = _parse_timestamp(meta.get("completed_at") or meta.get("finished_at") or meta.get("updated_at"))
+    if timestamp is not None:
+        return (now - timestamp).total_seconds() >= older_than_seconds
+    run_home = root / ".ds" / "codex_homes" / run_id
+    return _path_tree_is_cold(run_home, now=now, older_than_seconds=older_than_seconds)
+
+
+def _maybe_stage_bash_compact_view(
+    source_path: Path,
+    *,
+    mode: str,
+    archive_ref: str,
+    root: Path,
+    head_lines: int,
+    tail_lines: int,
+) -> Path | None:
+    if not source_path.exists():
+        return None
+    original_bytes = source_path.stat().st_size
+    if original_bytes == 0:
+        return None
+    compact_path = _compact_view_path(source_path)
+    archive_stub = root / archive_ref
+    if mode == "jsonl":
+        _compact_jsonl_file(
+            source_path,
+            archive_path=archive_stub,
+            original_bytes=original_bytes,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+            root=root,
+            destination_path=compact_path,
+        )
+    else:
+        _compact_text_file(
+            source_path,
+            archive_path=archive_stub,
+            original_bytes=original_bytes,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+            root=root,
+            destination_path=compact_path,
+        )
+    return compact_path if compact_path.exists() else None
+
+
+def _archive_bash_session_logs(
+    root: Path,
+    *,
+    older_than_seconds: int,
+    now: datetime,
+    head_lines: int,
+    tail_lines: int,
+) -> list[dict[str, Any]]:
+    moved_entries: list[dict[str, Any]] = []
+    bash_root = root / ".ds" / "bash_exec"
+    if not bash_root.exists():
+        return moved_entries
+    for session_dir in sorted(path for path in bash_root.iterdir() if path.is_dir()):
+        meta = read_json(session_dir / "meta.json", {})
+        if not _session_is_cold_terminal(meta or {}, now=now, older_than_seconds=older_than_seconds):
+            continue
+        for filename, mode in _BASH_SESSION_LOG_SPECS:
+            source_path = session_dir / filename
+            if not source_path.exists():
+                continue
+            index_path = source_path.with_name(f"{source_path.name}.index.json")
+            compact_path = _compact_view_path(source_path)
+            if index_path.exists() and (compact_path.exists() or source_path.stat().st_size == 0):
+                continue
+            relative_source = _relative_ref(source_path, root=root)
+            source_bytes = source_path.stat().st_size
+            cold_archive_ref: str | None = None
+            compact_ref: str | None = None
+            if source_bytes > 0:
+                legacy_archive_path = _archive_path(source_path)
+                target = _cold_archive_path(
+                    root,
+                    kind="bash_exec",
+                    relative_path=relative_source,
+                    compress=True,
+                )
+                if legacy_archive_path.exists():
+                    shutil.move(str(legacy_archive_path), target)
+                    legacy_index = legacy_archive_path.with_name(f"{legacy_archive_path.name}.index.json")
+                    legacy_index.unlink(missing_ok=True)
+                else:
+                    _write_gzip_copy(source_path, target)
+                cold_archive_ref = _relative_ref(target, root=root)
+                compact_view = _maybe_stage_bash_compact_view(
+                    source_path,
+                    mode=mode,
+                    archive_ref=cold_archive_ref,
+                    root=root,
+                    head_lines=head_lines,
+                    tail_lines=tail_lines,
+                )
+                if compact_view is not None:
+                    compact_ref = _relative_ref(compact_view, root=root)
+            source_path.unlink(missing_ok=True)
+            _write_json_index(
+                index_path,
+                {
+                    "schema_version": 1,
+                    "kind": "bash_exec_session_log",
+                    "source_path": relative_source,
+                    "compact_view_ref": compact_ref,
+                    "cold_archive_ref": cold_archive_ref,
+                    "archived_at": utc_now(),
+                    "original_bytes": source_bytes,
+                    "mode": mode,
+                },
+            )
+            moved_entries.append(
+                {
+                    "kind": "bash_exec_session_log",
+                    "source_path": relative_source,
+                    "compact_view_ref": compact_ref,
+                    "cold_archive_ref": cold_archive_ref,
+                }
+            )
+    return moved_entries
+
+
+def _archive_codex_home_payloads(
+    root: Path,
+    *,
+    older_than_seconds: int,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    moved_entries: list[dict[str, Any]] = []
+    codex_homes_root = root / ".ds" / "codex_homes"
+    if not codex_homes_root.exists():
+        return moved_entries
+    for run_home in sorted(path for path in codex_homes_root.iterdir() if path.is_dir()):
+        run_id = run_home.name
+        if not _run_is_cold(root, run_id, now=now, older_than_seconds=older_than_seconds):
+            continue
+        archived_items: list[dict[str, str]] = []
+        retained_items: list[str] = []
+        for child in sorted(run_home.iterdir()):
+            if child.name in _CODEX_HOME_RETENTION_KEEP_NAMES:
+                retained_items.append(child.name)
+                continue
+            if child.name.startswith("runtime_retention.") or child.name in {".tmp", "tmp"}:
+                continue
+            relative_child = _relative_ref(child, root=root)
+            if child.is_dir():
+                target = _cold_archive_path(
+                    root,
+                    kind="codex_home_runs",
+                    relative_path=f"{relative_child}.tar.gz",
+                    compress=False,
+                )
+                _archive_directory_as_tar_gz(child, target)
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                target = _cold_archive_path(
+                    root,
+                    kind="codex_home_runs",
+                    relative_path=relative_child,
+                    compress=True,
+                )
+                _write_gzip_copy(child, target)
+                child.unlink(missing_ok=True)
+            archived_entry = {
+                "kind": "codex_home_payload",
+                "run_id": run_id,
+                "source_path": relative_child,
+                "cold_archive_ref": _relative_ref(target, root=root),
+            }
+            archived_items.append(archived_entry)
+            moved_entries.append(archived_entry)
+        if archived_items:
+            write_json(
+                run_home / "runtime_retention.index.json",
+                {
+                    "schema_version": 1,
+                    "run_id": run_id,
+                    "run_home": _relative_ref(run_home, root=root),
+                    "retained_items": sorted(set(retained_items + ["runtime_retention.index.json"])),
+                    "archived_items": archived_items,
+                    "archived_at": utc_now(),
+                },
+            )
+    return moved_entries
 
 
 def archive_cold_runtime_payloads(
     quest_root: Path,
     *,
     older_than_seconds: int = 6 * 3600,
+    head_lines: int = 200,
+    tail_lines: int = 200,
 ) -> dict[str, Any]:
     resolved_root = Path(quest_root).expanduser().resolve()
+    manifest_path = resolved_root / ".ds" / "cold_archive" / "manifest.json"
+    moved_files: list[dict[str, Any]] = []
     manifest: dict[str, Any] = {
         "quest_root": str(resolved_root),
         "moved_file_count": 0,
-        "moved_files": [],
+        "moved_by_kind": {},
+        "moved_samples": [],
     }
     now = datetime.now(UTC)
-
-    bash_root = resolved_root / ".ds" / "bash_exec"
-    if bash_root.exists():
-        for archive_path in sorted(bash_root.glob("**/*.full.*.gz")):
-            if not archive_path.is_file():
-                continue
-            target = _cold_archive_path(
-                resolved_root,
-                kind="bash_exec",
-                relative_path=_relative_ref(archive_path, root=resolved_root),
-                compress=False,
-            )
-            original_bytes = archive_path.stat().st_size
-            shutil.move(str(archive_path), target)
-            index_path = archive_path.with_name(f"{archive_path.name}.index.json")
-            _write_json_index(
-                index_path,
-                {
-                    "schema_version": 1,
-                    "kind": "bash_exec_full_archive",
-                    "source_path": _relative_ref(archive_path, root=resolved_root),
-                    "cold_archive_ref": _relative_ref(target, root=resolved_root),
-                    "archived_at": utc_now(),
-                    "original_bytes": original_bytes,
-                },
-            )
-            manifest["moved_files"].append(
-                {
-                    "kind": "bash_exec_full_archive",
-                    "source_path": _relative_ref(archive_path, root=resolved_root),
-                    "cold_archive_ref": _relative_ref(target, root=resolved_root),
-                }
-            )
+    moved_files.extend(
+        _archive_bash_session_logs(
+            resolved_root,
+            older_than_seconds=older_than_seconds,
+            now=now,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
+        )
+    )
 
     for session_path in _iter_cold_runtime_jsonl_targets(resolved_root):
         relative = _relative_ref(session_path, root=resolved_root)
@@ -1076,7 +1335,7 @@ def archive_cold_runtime_payloads(
                 "compact_view_bytes": compact_path.stat().st_size,
             },
         )
-        manifest["moved_files"].append(
+        moved_files.append(
             {
                 "kind": "codex_session_jsonl",
                 "source_path": relative,
@@ -1085,12 +1344,32 @@ def archive_cold_runtime_payloads(
             }
         )
 
-    manifest["moved_file_count"] = len(manifest["moved_files"])
-    if manifest["moved_file_count"]:
-        _write_json_index(
-            resolved_root / ".ds" / "cold_archive" / "manifest.json",
-            manifest,
+    moved_files.extend(
+        _archive_codex_home_payloads(
+            resolved_root,
+            older_than_seconds=older_than_seconds,
+            now=now,
         )
+    )
+    manifest["moved_file_count"] = len(moved_files)
+    if moved_files:
+        moved_by_kind: dict[str, int] = {}
+        for item in moved_files:
+            kind = str(item.get("kind") or "unknown")
+            moved_by_kind[kind] = moved_by_kind.get(kind, 0) + 1
+        manifest["moved_by_kind"] = moved_by_kind
+        manifest["moved_samples"] = moved_files[:_MANIFEST_SAMPLE_LIMIT]
+        ledger_path = _manifest_ledger_path(manifest_path)
+        _write_gzip_json(
+            ledger_path,
+            {
+                "schema_version": 1,
+                "quest_root": str(resolved_root),
+                "moved_files": moved_files,
+            },
+        )
+        manifest["ledger_ref"] = _relative_ref(ledger_path, root=resolved_root)
+        _write_json_index(manifest_path, manifest)
     return manifest
 
 
@@ -1313,6 +1592,8 @@ def maintain_quest_runtime_storage(
         cold_archive_manifest = archive_cold_runtime_payloads(
             root,
             older_than_seconds=older_than_seconds,
+            head_lines=head_lines,
+            tail_lines=tail_lines,
         )
         manifest["roots"].append(
             {
