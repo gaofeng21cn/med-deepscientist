@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from deepscientist.bridges.base import BaseConnectorBridge
-from deepscientist.bridges.connectors import QQConnectorBridge
+from deepscientist.bridges.connectors import QQConnectorBridge, WeixinConnectorBridge
 from deepscientist.config import ConfigManager
 from deepscientist.daemon.app import DaemonApp
 from deepscientist.home import ensure_home_layout, repo_root
@@ -644,8 +644,10 @@ def test_bridge_direct_outbound_weixin_retries_text_send_after_ret_minus_2(monke
             raise RuntimeError("Weixin sendmessage failed with ret=-2 errcode=0")
         return {}
 
+    sleep_calls: list[float] = []
+
     monkeypatch.setattr("deepscientist.bridges.connectors.send_weixin_message", fake_send_weixin_message)
-    monkeypatch.setattr("deepscientist.bridges.connectors.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("deepscientist.bridges.connectors.time.sleep", lambda seconds: sleep_calls.append(seconds))
 
     result = app.channels["weixin"].send(
         {
@@ -656,6 +658,38 @@ def test_bridge_direct_outbound_weixin_retries_text_send_after_ret_minus_2(monke
 
     assert result["delivery"]["ok"] is True
     assert [body["msg"]["item_list"][0]["type"] for body in sends] == [1, 1]
+    assert sleep_calls == [WeixinConnectorBridge._TEXT_SEND_RETRY_DELAYS_SECONDS[0]]
+
+
+def test_weixin_send_items_uses_text_retry_budget_when_it_exceeds_media(monkeypatch) -> None:
+    bridge = WeixinConnectorBridge()
+    sends: list[dict] = []
+    sleep_calls: list[float] = []
+
+    def fake_send_weixin_message(*, base_url, token, body, route_tag=None, timeout_ms=15_000):  # noqa: ANN001
+        sends.append(body)
+        if len(sends) < 3:
+            raise RuntimeError("Weixin sendmessage failed with ret=-2 errcode=0")
+        return {}
+
+    monkeypatch.setattr(WeixinConnectorBridge, "_TEXT_SEND_RETRY_DELAYS_SECONDS", (0.1, 0.2))
+    monkeypatch.setattr(WeixinConnectorBridge, "_MEDIA_SEND_RETRY_DELAYS_SECONDS", ())
+    monkeypatch.setattr("deepscientist.bridges.connectors.send_weixin_message", fake_send_weixin_message)
+    monkeypatch.setattr("deepscientist.bridges.connectors.time.sleep", lambda seconds: sleep_calls.append(seconds))
+
+    result = bridge._send_items(
+        to_user_id="wx-user-text-budget@im.wechat",
+        context_token="ctx-token-budget",
+        item_list=[{"type": 1, "text_item": {"text": "retry text send budget"}}],
+        base_url="https://weixin.example.test",
+        token="wx-token",
+        route_tag=None,
+        timeout_ms=15_000,
+    )
+
+    assert result["ok"] is True
+    assert len(sends) == 3
+    assert sleep_calls == [0.1, 0.2]
 
 
 def test_bridge_direct_outbound_weixin_suppresses_low_priority_messages_when_context_is_stale(
