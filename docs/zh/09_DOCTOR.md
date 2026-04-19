@@ -57,9 +57,17 @@
 - 必需配置文件是否有效
 - 当前开源版本是否仍然使用 `codex` 作为可运行 runner
 - Codex CLI 是否存在并通过启动探测
+- 最近一次 quest 真实运行失败是否已经能指向已知的 provider / 协议 / retry 问题
 - 是否已经具备可选的本地 `pdflatex` 运行时，以便编译论文 PDF
 - Web / TUI bundle 是否存在
 - 当前 Web 端口是否空闲，或者是否已运行正确的 daemon
+
+现在 `ds doctor` 会尽量把失败项渲染成更可执行的结构：
+
+- `Problem`：出了什么问题
+- `Why`：为什么系统认为它是这个问题
+- `Fix`：现在应该先做什么修复动作
+- `Evidence`：命中的 quest/run/request 线索
 
 ## 常见修复方式
 
@@ -124,6 +132,8 @@ MiniMax 补充说明：
 - DeepScientist 现在可以在 probe 和运行时自动适配 MiniMax profile-only 的 `model_provider` / `model` 配置形态
 - 如果你还希望终端里的 `codex --profile <name>` 也直接可用，再在 `~/.codex/config.toml` 顶层补上 `model_provider = "minimax"` 和 `model = "MiniMax-M2.7"`
 - 当 DeepScientist 检测到 Codex CLI 版本低于 `0.63.0` 时，会自动把 `xhigh` 降级成 `high`
+- 如果 provider 返回 `tool call result does not follow tool call (2013)`，应优先把它当作 tool call / tool result 顺序错误，而不是普通网络抖动
+- 如果 provider 返回 `invalid function arguments json string` 或 `failed to parse tool call arguments` 这类错误，应该先修正 tool 调用串行化/参数编码路径，再继续重试
 
 ### 当前配置的 Codex 模型不可用
 

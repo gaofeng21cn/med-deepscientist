@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 import os
 import socket
 import subprocess
@@ -13,9 +14,13 @@ from urllib.request import Request, urlopen
 
 from .bash_exec.shells import build_exec_shell_launch, build_terminal_shell_launch
 from .config import ConfigManager
+from .diagnostics import diagnose_runner_failure
 from .home import ensure_home_layout
 from .runtime_tools import RuntimeToolService
-from .shared import resolve_runner_binary, utc_now
+from .shared import read_json, read_jsonl_tail, resolve_runner_binary, utc_now
+
+
+_RUNTIME_FAILURE_LOOKBACK = timedelta(hours=24)
 
 
 def _browser_ui_url(host: str, port: int) -> str:
@@ -42,6 +47,10 @@ def _make_check(
     errors: list[str] | None = None,
     guidance: list[str] | None = None,
     details: dict[str, Any] | None = None,
+    problem: str | None = None,
+    why: str | None = None,
+    fix: list[str] | None = None,
+    evidence: list[str] | None = None,
 ) -> dict[str, Any]:
     normalized_warnings = list(warnings or [])
     normalized_errors = list(errors or [])
@@ -55,6 +64,10 @@ def _make_check(
         "errors": normalized_errors,
         "guidance": list(guidance or []),
         "details": dict(details or {}),
+        "problem": str(problem or "").strip() or None,
+        "why": str(why or "").strip() or None,
+        "fix": [str(line) for line in (fix or []) if str(line).strip()],
+        "evidence": [str(line) for line in (evidence or []) if str(line).strip()],
     }
 
 
@@ -273,6 +286,13 @@ def _check_codex(config_manager: ConfigManager) -> dict[str, Any]:
     probe_warnings = [str(value) for value in probe.get("warnings") or []]
     probe_guidance = [str(value) for value in probe.get("guidance") or []]
     summary = str(probe.get("summary") or "Codex startup probe completed.")
+    probe_details = probe.get("details") if isinstance(probe.get("details"), dict) else {}
+    diagnosis = diagnose_runner_failure(
+        runner_name="codex",
+        summary="\n".join([summary, *probe_errors]),
+        stderr_text=str(probe_details.get("stderr_excerpt") or ""),
+        output_text=str(probe_details.get("stdout_excerpt") or ""),
+    )
     if probe.get("ok"):
         return _make_check(
             check_id="codex",
@@ -290,11 +310,182 @@ def _check_codex(config_manager: ConfigManager) -> dict[str, Any]:
         check_id="codex",
         label="Codex CLI",
         ok=False,
-        summary=summary,
+        summary=diagnosis.problem if diagnosis is not None else summary,
         warnings=probe_warnings,
         errors=probe_errors or ["Codex startup probe did not succeed."],
         guidance=probe_guidance,
         details={"resolved_binary": resolved_binary},
+        problem=diagnosis.problem if diagnosis is not None else None,
+        why=diagnosis.why if diagnosis is not None else None,
+        fix=list(diagnosis.guidance) if diagnosis is not None else None,
+        evidence=(
+            [f"matched: {diagnosis.matched_text}"] if diagnosis is not None and diagnosis.matched_text else None
+        ),
+    )
+
+
+def _parse_timestamp(value: object) -> datetime | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    candidate = normalized.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _read_runtime_failure_record(home: Path) -> dict[str, Any] | None:
+    quests_root = home / "quests"
+    if not quests_root.exists():
+        return None
+
+    latest: dict[str, Any] | None = None
+    latest_at: datetime | None = None
+    cutoff = datetime.now(UTC) - _RUNTIME_FAILURE_LOOKBACK
+    interesting_types = {
+        "runner.turn_error",
+        "runner.turn_retry_exhausted",
+        "quest.runtime_auto_resume_suppressed",
+    }
+
+    for quest_root in sorted(quests_root.glob("*/")):
+        events = read_jsonl_tail(quest_root / ".ds" / "events.jsonl", 300)
+        for event in reversed(events):
+            event_type = str(event.get("type") or "").strip()
+            if event_type not in interesting_types:
+                continue
+            created_at = _parse_timestamp(event.get("created_at"))
+            if created_at is None or created_at < cutoff:
+                continue
+            run_id = str(event.get("run_id") or "").strip() or None
+            stderr_text = ""
+            output_text = ""
+            if run_id:
+                run_root = quest_root / ".ds" / "runs" / run_id
+                result_payload = read_json(run_root / "result.json", {})
+                if isinstance(result_payload, dict):
+                    stderr_text = str(result_payload.get("stderr_text") or "").strip()
+                    output_text = str(result_payload.get("output_text") or "").strip()
+                stderr_path = run_root / "stderr.txt"
+                if not stderr_text and stderr_path.exists():
+                    try:
+                        stderr_text = stderr_path.read_text(encoding="utf-8")
+                    except OSError:
+                        stderr_text = ""
+            candidate = {
+                "quest_id": quest_root.name,
+                "run_id": run_id,
+                "event_type": event_type,
+                "summary": str(event.get("summary") or "").strip(),
+                "created_at": created_at.isoformat(),
+                "stderr_text": stderr_text,
+                "output_text": output_text,
+                "recent_attempts": event.get("recent_attempts"),
+            }
+            if latest_at is None or created_at > latest_at:
+                latest = candidate
+                latest_at = created_at
+            break
+    return latest
+
+
+def _check_recent_runtime_failures(home: Path) -> dict[str, Any]:
+    record = _read_runtime_failure_record(home)
+    if record is None:
+        return _make_check(
+            check_id="recent_runtime_failures",
+            label="Recent runtime failures",
+            ok=True,
+            summary="No recent quest runtime failures were found.",
+        )
+
+    event_type = str(record.get("event_type") or "").strip()
+    quest_id = str(record.get("quest_id") or "").strip() or None
+    run_id = str(record.get("run_id") or "").strip() or None
+    summary = str(record.get("summary") or "").strip()
+    details = {
+        "quest_id": quest_id,
+        "run_id": run_id,
+        "event_type": event_type,
+        "observed_at": record.get("created_at"),
+    }
+
+    if event_type == "quest.runtime_auto_resume_suppressed":
+        recent_attempts = int(record.get("recent_attempts") or 0)
+        return _make_check(
+            check_id="recent_runtime_failures",
+            label="Recent runtime failures",
+            ok=True,
+            summary="DeepScientist recently suppressed auto-resume to avoid a crash loop.",
+            warnings=["Automatic continuation was paused after repeated recovery attempts in a short window."],
+            guidance=[
+                "Inspect the most recent failing runner path before using `/resume` again.",
+                "If the failure was a provider-side 400/protocol error, fix that request path first instead of retrying immediately.",
+            ],
+            details=details,
+            problem="Automatic crash recovery was suppressed.",
+            why="The same quest hit repeated recovery attempts in a short window, so DeepScientist parked it instead of looping forever.",
+            fix=[
+                "Open the latest failing quest logs and identify the deterministic runner/provider error.",
+                "Resume manually only after the underlying runner or provider issue is corrected.",
+            ],
+            evidence=[
+                *([f"quest: {quest_id}"] if quest_id else []),
+                f"recent recovery attempts: {recent_attempts}",
+            ],
+        )
+
+    diagnosis = diagnose_runner_failure(
+        runner_name="codex",
+        summary=summary,
+        stderr_text=str(record.get("stderr_text") or ""),
+        output_text=str(record.get("output_text") or ""),
+    )
+    if diagnosis is None:
+        return _make_check(
+            check_id="recent_runtime_failures",
+            label="Recent runtime failures",
+            ok=True,
+            summary="A recent quest runtime failure was found.",
+            warnings=[summary or "The latest quest run failed, but doctor could not classify it precisely yet."],
+            guidance=[
+                "Open the latest run stderr and events journal for the failing quest.",
+                "If the same failure repeats, capture the run_id and provider response text before retrying again.",
+            ],
+            details=details,
+            problem="A recent quest run failed.",
+            why="Doctor found a recent runtime failure event but could not match it to a known deterministic error pattern.",
+            fix=[
+                "Inspect the failing run's stderr and provider response text.",
+                "If the error is deterministic, avoid burning the retry budget until the request shape or config is fixed.",
+            ],
+            evidence=[
+                *([f"quest: {quest_id}"] if quest_id else []),
+                *([f"run: {run_id}"] if run_id else []),
+                *([f"summary: {summary}"] if summary else []),
+            ],
+        )
+
+    return _make_check(
+        check_id="recent_runtime_failures",
+        label="Recent runtime failures",
+        ok=True,
+        summary=diagnosis.problem,
+        warnings=[summary] if summary and summary != diagnosis.problem else [],
+        guidance=list(diagnosis.guidance),
+        details=details,
+        problem=diagnosis.problem,
+        why=diagnosis.why,
+        fix=list(diagnosis.guidance),
+        evidence=[
+            *([f"quest: {quest_id}"] if quest_id else []),
+            *([f"run: {run_id}"] if run_id else []),
+            *([f"matched: {diagnosis.matched_text}"] if diagnosis.matched_text else []),
+        ],
     )
 
 
@@ -491,6 +682,7 @@ def run_doctor(home: Path, *, repo_root: Path) -> dict[str, Any]:
         _check_config_validation(config_manager),
         _check_runner_support(config_manager),
         _check_codex(config_manager),
+        _check_recent_runtime_failures(home),
         _check_latex_runtime(home),
         _check_bundles(repo_root),
         _check_ui_port(home, config_manager),
@@ -519,6 +711,18 @@ def render_doctor_report(report: dict[str, Any]) -> str:
         status = str(item.get("status") or "ok").upper()
         icon = {"OK": "[ok]", "WARN": "[warn]", "ERROR": "[fail]"}.get(status, "[info]")
         lines.append(f"{icon} {item.get('label')}: {item.get('summary')}")
+        problem = str(item.get("problem") or "").strip()
+        why = str(item.get("why") or "").strip()
+        fix_lines = [str(line) for line in item.get("fix") or [] if str(line).strip()]
+        evidence_lines = [str(line) for line in item.get("evidence") or [] if str(line).strip()]
+        if problem:
+            lines.append(f"  problem: {problem}")
+        if why:
+            lines.append(f"  why: {why}")
+        for line in fix_lines:
+            lines.append(f"  fix: {line}")
+        for line in evidence_lines:
+            lines.append(f"  evidence: {line}")
         for warning in item.get("warnings") or []:
             lines.append(f"  warning: {warning}")
         for error in item.get("errors") or []:

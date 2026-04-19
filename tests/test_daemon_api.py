@@ -5701,6 +5701,164 @@ def test_daemon_suppresses_auto_resume_after_repeated_crash_loop(temp_home: Path
     )
 
 
+def test_daemon_auto_resume_respects_persisted_retry_backoff_and_attempt_index(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    first_app = DaemonApp(temp_home)
+    quest = first_app.quest_service.create("auto recover persisted retry backoff quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
+    quest_yaml["status"] = "running"
+    quest_yaml["active_run_id"] = "run-crashed-retry-001"
+    quest_yaml["updated_at"] = utc_now()
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    runtime_state["status"] = "running"
+    runtime_state["active_run_id"] = "run-crashed-retry-001"
+    runtime_state["last_transition_at"] = utc_now()
+    runtime_state["retry_state"] = {
+        "turn_id": "turn-retry-recovery-001",
+        "attempt_index": 2,
+        "max_attempts": 5,
+        "last_run_id": "run-failed-retry-002",
+        "last_error": "previous retry failed",
+        "next_retry_at": (datetime.now(UTC) + timedelta(seconds=0.35)).isoformat(),
+    }
+    write_json(quest_root / ".ds" / "runtime_state.json", runtime_state)
+
+    app = DaemonApp(temp_home)
+
+    class RecoveryRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        def run(self, request):
+            self.requests.append(
+                {
+                    "attempt_index": request.attempt_index,
+                    "turn_id": request.turn_id,
+                    "message": request.message,
+                }
+            )
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            app.quest_service.mark_completed(request.quest_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="recovered after persisted retry backoff",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RecoveryRunner()
+    app.runners["codex"] = runner
+
+    recovered = app._resume_reconciled_quests()
+    assert any(item["quest_id"] == quest_id for item in recovered)
+    recovered_item = next(item for item in recovered if item["quest_id"] == quest_id)
+    assert recovered_item["scheduled"]["delayed"] is True
+    assert float(recovered_item["scheduled"]["delay_seconds"]) > 0
+
+    time.sleep(0.12)
+    assert runner.requests == []
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if runner.requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("persisted retry backoff did not resume after the stored delay")
+
+    assert runner.requests[0]["attempt_index"] == 3
+    assert runner.requests[0]["turn_id"] == "turn-retry-recovery-001"
+    assert runner.requests[0]["message"] == ""
+
+
+def test_daemon_auto_resume_keeps_in_progress_retry_attempt_index(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    first_app = DaemonApp(temp_home)
+    quest = first_app.quest_service.create("auto recover in-progress retry quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    quest_yaml = read_yaml(quest_root / "quest.yaml", {})
+    quest_yaml["status"] = "running"
+    quest_yaml["active_run_id"] = "run-crashed-retry-ongoing-001"
+    quest_yaml["updated_at"] = utc_now()
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    runtime_state["status"] = "running"
+    runtime_state["active_run_id"] = "run-crashed-retry-ongoing-001"
+    runtime_state["last_transition_at"] = utc_now()
+    runtime_state["retry_state"] = {
+        "turn_id": "turn-retry-recovery-ongoing-001",
+        "attempt_index": 3,
+        "max_attempts": 5,
+        "last_run_id": "run-retry-ongoing-003",
+        "last_error": "runner crashed mid retry attempt",
+        "next_retry_at": None,
+    }
+    write_json(quest_root / ".ds" / "runtime_state.json", runtime_state)
+
+    app = DaemonApp(temp_home)
+
+    class RecoveryRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        def run(self, request):
+            self.requests.append(
+                {
+                    "attempt_index": request.attempt_index,
+                    "turn_id": request.turn_id,
+                }
+            )
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            app.quest_service.mark_completed(request.quest_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="recovered ongoing retry attempt",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RecoveryRunner()
+    app.runners["codex"] = runner
+
+    recovered = app._resume_reconciled_quests()
+    assert any(item["quest_id"] == quest_id for item in recovered)
+    recovered_item = next(item for item in recovered if item["quest_id"] == quest_id)
+    assert recovered_item["scheduled"].get("delayed") in {None, False}
+
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if runner.requests:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("in-progress retry recovery did not resume immediately")
+
+    assert runner.requests[0]["attempt_index"] == 3
+    assert runner.requests[0]["turn_id"] == "turn-retry-recovery-ongoing-001"
+
+
 def test_auto_continue_parks_after_repeated_unchanged_finalize_state(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -6114,6 +6272,75 @@ def test_daemon_retry_exhausts_after_five_attempts(temp_home: Path) -> None:
         and str(item.get("content") or "") == "Partial failed output."
         for item in app.quest_service.history(quest_id, limit=20)
     )
+
+
+def test_daemon_skips_retry_for_non_retryable_minimax_protocol_error(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": True,
+            "retry_max_attempts": 5,
+            "retry_initial_backoff_sec": 0,
+            "retry_backoff_multiplier": 2,
+            "retry_max_backoff_sec": 0,
+        }
+    )
+    quest = app.quest_service.create("non retryable minimax protocol error quest")
+    quest_id = quest["quest_id"]
+
+    class DeterministicFailRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def run(self, request):
+            self.requests.append(request)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=False,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="",
+                exit_code=1,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text='{"type":"error","error":{"type":"bad_request_error","message":"invalid params, tool call result does not follow tool call (2013)","http_code":"400"}}',
+            )
+
+    runner = DeterministicFailRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Please continue.", "source": "tui-ink"})
+    assert payload["ok"] is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+        if any(item.get("type") == "runner.turn_error" for item in events):
+            if snapshot.get("retry_state") is None and str(snapshot.get("display_status") or "").strip() == "error":
+                break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("non-retryable failure did not settle into an immediate error state")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+    turn_errors = [item for item in events if item.get("type") == "runner.turn_error"]
+
+    assert len(runner.requests) == 1
+    assert snapshot["retry_state"] is None
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "non_retryable_runner_error"
+    assert snapshot["status"] == "error"
+    assert snapshot["display_status"] == "error"
+    assert not any(item.get("type") == "runner.turn_retry_scheduled" for item in events)
+    assert turn_errors
+    assert turn_errors[-1].get("diagnosis_code") == "minimax_tool_result_sequence_error"
 
 
 def test_chat_reply_auto_links_interaction_and_resumes_with_decision_skill(temp_home: Path) -> None:
