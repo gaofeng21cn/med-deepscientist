@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import tomllib
 from functools import lru_cache
 from pathlib import Path
 
+from .shared import ensure_dir, read_text, write_text
+
 _MIN_XHIGH_SUPPORTED_VERSION = (0, 63, 0)
 _CODEX_VERSION_PATTERN = re.compile(r"codex-cli\s+(\d+)\.(\d+)\.(\d+)", re.IGNORECASE)
+_CODEX_HOME_SYNCED_FILES = ("config.toml", "auth.json")
+_CODEX_HOME_SYNCED_DIRS = ("skills", "agents", "prompts")
+_CODEX_HOME_QUEST_OVERLAY_DIRS = ("skills", "prompts")
 _ROOT_TABLE_SECTION_PATTERN = re.compile(r"^\s*\[")
 _ROOT_MODEL_ASSIGNMENT_PATTERN = re.compile(r"^\s*(model_provider|model)\s*=")
 _COMPAT_BEGIN_MARKER = "# BEGIN DEEPSCIENTIST PROFILE COMPAT"
@@ -251,3 +257,114 @@ def provider_profile_metadata_from_home(
     if not config_path.exists():
         return _empty_provider_metadata()
     return provider_profile_metadata(config_path.read_text(encoding="utf-8"), profile=profile)
+
+
+def _remove_tree_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+        return
+    shutil.rmtree(path)
+
+
+def _overlay_file_sources(*roots: Path) -> dict[Path, Path]:
+    merged: dict[Path, Path] = {}
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for source_path in sorted(root.rglob("*")):
+            if not source_path.is_file():
+                continue
+            merged[source_path.relative_to(root)] = source_path
+    return merged
+
+
+def _sync_overlay_directory(target_dir: Path, *source_dirs: Path) -> None:
+    desired_files = _overlay_file_sources(*source_dirs)
+    if not desired_files:
+        _remove_tree_path(target_dir)
+        return
+
+    desired_dirs: set[Path] = {Path(".")}
+    for relative in desired_files:
+        parent = relative.parent
+        while True:
+            desired_dirs.add(parent)
+            if parent == Path("."):
+                break
+            parent = parent.parent
+
+    if target_dir.exists() or target_dir.is_symlink():
+        for existing_path in sorted(target_dir.rglob("*"), reverse=True):
+            relative = existing_path.relative_to(target_dir)
+            if existing_path.is_dir() and not existing_path.is_symlink():
+                if relative not in desired_dirs:
+                    shutil.rmtree(existing_path)
+                continue
+            if relative not in desired_files:
+                existing_path.unlink()
+
+    ensure_dir(target_dir)
+    for relative in sorted(desired_dirs, key=lambda item: (len(item.parts), item.as_posix())):
+        if relative == Path("."):
+            continue
+        current = target_dir / relative
+        if current.exists() and (current.is_symlink() or current.is_file()):
+            current.unlink()
+        ensure_dir(current)
+
+    for relative, source_path in desired_files.items():
+        target_path = target_dir / relative
+        if target_path.exists() and target_path.is_dir() and not target_path.is_symlink():
+            shutil.rmtree(target_path)
+        ensure_dir(target_path.parent)
+        try:
+            same_path = source_path.resolve() == target_path.resolve()
+        except FileNotFoundError:
+            same_path = False
+        if same_path:
+            continue
+        shutil.copy2(source_path, target_path)
+
+
+def materialize_codex_runtime_home(
+    *,
+    source_home: str | Path,
+    target_home: str | Path,
+    profile: str = "",
+    quest_codex_root: str | Path | None = None,
+) -> str | None:
+    source_root = Path(source_home).expanduser()
+    target_root = ensure_dir(Path(target_home))
+
+    for filename in _CODEX_HOME_SYNCED_FILES:
+        source_path = source_root / filename
+        target_path = target_root / filename
+        if not source_path.exists():
+            _remove_tree_path(target_path)
+            continue
+        if target_path.exists() and target_path.is_dir() and not target_path.is_symlink():
+            shutil.rmtree(target_path)
+        ensure_dir(target_path.parent)
+        try:
+            same_path = source_path.resolve() == target_path.resolve()
+        except FileNotFoundError:
+            same_path = False
+        if not same_path:
+            shutil.copy2(source_path, target_path)
+
+    overlay_root = Path(quest_codex_root) if quest_codex_root is not None else None
+    for dirname in _CODEX_HOME_SYNCED_DIRS:
+        overlay_dir = overlay_root / dirname if overlay_root is not None and dirname in _CODEX_HOME_QUEST_OVERLAY_DIRS else None
+        source_dirs: list[Path] = [source_root / dirname]
+        if overlay_dir is not None:
+            source_dirs.append(overlay_dir)
+        _sync_overlay_directory(target_root / dirname, *source_dirs)
+
+    warning: str | None = None
+    config_path = target_root / "config.toml"
+    if profile and config_path.exists():
+        adapted_text, warning = adapt_profile_only_provider_config(read_text(config_path), profile=profile)
+        write_text(config_path, adapted_text)
+    return warning

@@ -127,3 +127,49 @@ model_provider = "minimax"
         "wire_api": "chat",
         "requires_openai_auth": False,
     }
+
+
+def test_materialize_codex_runtime_home_syncs_source_and_quest_overlays(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    source_home = tmp_path / "source-codex-home"
+    source_home.mkdir()
+    (source_home / "config.toml").write_text("[profiles.m27]\n", encoding="utf-8")
+    (source_home / "auth.json").write_text('{"provider":"custom"}', encoding="utf-8")
+    (source_home / "skills" / "global").mkdir(parents=True)
+    (source_home / "skills" / "global" / "SKILL.md").write_text("GLOBAL SKILL\n", encoding="utf-8")
+    (source_home / "agents").mkdir()
+    (source_home / "agents" / "global-agent.md").write_text("GLOBAL AGENT\n", encoding="utf-8")
+    (source_home / "prompts").mkdir()
+    (source_home / "prompts" / "system.md").write_text("GLOBAL SYSTEM\n", encoding="utf-8")
+    (source_home / "prompts" / "extra.md").write_text("GLOBAL EXTRA\n", encoding="utf-8")
+
+    quest_codex = tmp_path / "quest" / ".codex"
+    (quest_codex / "skills" / "quest").mkdir(parents=True)
+    (quest_codex / "skills" / "quest" / "SKILL.md").write_text("QUEST SKILL\n", encoding="utf-8")
+    (quest_codex / "prompts").mkdir()
+    (quest_codex / "prompts" / "system.md").write_text("QUEST SYSTEM\n", encoding="utf-8")
+
+    target_home = tmp_path / "quest" / ".ds" / "codex_homes" / "run-001"
+    (target_home / "agents").mkdir(parents=True)
+    (target_home / "agents" / "stale-agent.md").write_text("STALE\n", encoding="utf-8")
+    (target_home / "skills" / "stale").mkdir(parents=True)
+    (target_home / "skills" / "stale" / "SKILL.md").write_text("STALE\n", encoding="utf-8")
+    (target_home / "prompts").mkdir(parents=True, exist_ok=True)
+    (target_home / "prompts" / "stale.md").write_text("STALE\n", encoding="utf-8")
+
+    warning = codex_cli_compat.materialize_codex_runtime_home(
+        source_home=source_home,
+        target_home=target_home,
+        quest_codex_root=quest_codex,
+    )
+
+    assert warning is None
+    assert (target_home / "config.toml").read_text(encoding="utf-8") == "[profiles.m27]\n"
+    assert (target_home / "auth.json").read_text(encoding="utf-8") == '{"provider":"custom"}'
+    assert (target_home / "skills" / "global" / "SKILL.md").read_text(encoding="utf-8") == "GLOBAL SKILL\n"
+    assert (target_home / "skills" / "quest" / "SKILL.md").read_text(encoding="utf-8") == "QUEST SKILL\n"
+    assert (target_home / "agents" / "global-agent.md").read_text(encoding="utf-8") == "GLOBAL AGENT\n"
+    assert (target_home / "prompts" / "system.md").read_text(encoding="utf-8") == "QUEST SYSTEM\n"
+    assert (target_home / "prompts" / "extra.md").read_text(encoding="utf-8") == "GLOBAL EXTRA\n"
+    assert not (target_home / "agents" / "stale-agent.md").exists()
+    assert not (target_home / "skills" / "stale").exists()
+    assert not (target_home / "prompts" / "stale.md").exists()

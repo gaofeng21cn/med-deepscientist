@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import shutil
 import subprocess
 import sys
 import threading
@@ -12,7 +11,7 @@ from typing import Any
 
 from ..artifact import ArtifactService
 from ..codex_cli_compat import (
-    adapt_profile_only_provider_config,
+    materialize_codex_runtime_home,
     normalize_codex_reasoning_effort,
     provider_profile_metadata_from_home,
 )
@@ -20,7 +19,7 @@ from ..config import ConfigManager
 from ..gitops import export_git_graph
 from ..prompts import PromptBuilder
 from ..runtime_logs import JsonlLogger
-from ..shared import append_jsonl, ensure_dir, generate_id, read_text, read_yaml, resolve_runner_binary, utc_now, write_json, write_text
+from ..shared import append_jsonl, ensure_dir, generate_id, read_yaml, resolve_runner_binary, utc_now, write_json, write_text
 from ..web_search import extract_web_search_payload
 from .base import RunRequest, RunResult
 
@@ -1062,38 +1061,16 @@ class CodexRunner:
         runner_config: dict[str, Any] | None = None,
     ) -> Path:
         target = quest_root / ".ds" / "codex_homes" / run_id
-        if target.exists():
-            shutil.rmtree(target)
         target = ensure_dir(target)
         resolved_runner_config = runner_config if isinstance(runner_config, dict) else self._load_runner_config()
         configured_home = str(resolved_runner_config.get("config_dir") or os.environ.get("CODEX_HOME") or str(Path.home() / ".codex"))
         profile = str(resolved_runner_config.get("profile") or "").strip()
-        source = Path(configured_home).expanduser()
-        for filename in ("config.toml", "auth.json"):
-            source_path = source / filename
-            target_path = target / filename
-            if not source_path.exists():
-                continue
-            if source_path.resolve() == target_path.resolve():
-                continue
-            shutil.copy2(source_path, target_path)
-        config_path = target / "config.toml"
-        if profile and config_path.exists():
-            adapted_text, _ = adapt_profile_only_provider_config(read_text(config_path), profile=profile)
-            write_text(config_path, adapted_text)
-        ensure_dir(target / "skills")
-        quest_skills_root = quest_root / ".codex" / "skills"
-        if quest_skills_root.exists():
-            for source_path in sorted(quest_skills_root.rglob("*")):
-                relative = source_path.relative_to(quest_skills_root)
-                target_path = target / "skills" / relative
-                if source_path.is_dir():
-                    ensure_dir(target_path)
-                    continue
-                if source_path.resolve() == target_path.resolve():
-                    continue
-                ensure_dir(target_path.parent)
-                shutil.copy2(source_path, target_path)
+        materialize_codex_runtime_home(
+            source_home=configured_home,
+            target_home=target,
+            profile=profile,
+            quest_codex_root=quest_root / ".codex",
+        )
         self._inject_built_in_mcp(
             target,
             quest_root=quest_root,
