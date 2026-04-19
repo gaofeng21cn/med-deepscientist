@@ -3148,6 +3148,17 @@ class DaemonApp:
         return gate_stage_skill(snapshot, candidate_skill)
 
     @staticmethod
+    def _direct_user_turn_skill(snapshot: dict) -> str:
+        active_anchor = str(snapshot.get("active_anchor") or "").strip()
+        if active_anchor in STANDARD_SKILLS and active_anchor != "decision":
+            return DaemonApp._turn_skill_stage_gate(snapshot, active_anchor)
+        continuation_skill = DaemonApp._continuation_anchor_for(snapshot)
+        if continuation_skill in CONTINUATION_SKILLS and continuation_skill != "decision":
+            return DaemonApp._turn_skill_stage_gate(snapshot, continuation_skill)
+        fallback = "baseline" if "baseline" in STANDARD_SKILLS else "scout"
+        return DaemonApp._turn_skill_stage_gate(snapshot, fallback)
+
+    @staticmethod
     def _turn_skill_for(
         snapshot: dict,
         latest_user_message: dict | None,
@@ -3181,16 +3192,17 @@ class DaemonApp:
                 ):
                     return "decision"
                 if str(item.get("reply_mode") or "") == "threaded":
+                    if turn_mode in {"answering", "command_execution"}:
+                        return DaemonApp._direct_user_turn_skill(snapshot)
                     return DaemonApp._turn_skill_stage_gate(
                         snapshot,
                         DaemonApp._continuation_anchor_for(snapshot),
                     )
         if turn_mode == "command_execution":
-            return DaemonApp._turn_skill_stage_gate(
-                snapshot,
-                DaemonApp._continuation_anchor_for(snapshot),
-            )
-        if turn_mode in {"answering", "recovering"}:
+            return DaemonApp._direct_user_turn_skill(snapshot)
+        if turn_mode == "answering":
+            return DaemonApp._direct_user_turn_skill(snapshot)
+        if turn_mode == "recovering":
             return "decision"
         if str(turn_reason or "").strip() == "auto_continue" or latest_user_message is None:
             return DaemonApp._turn_skill_stage_gate(

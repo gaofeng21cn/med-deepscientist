@@ -367,6 +367,89 @@ def test_turn_skill_for_command_execution_prefers_paper_followthrough_stage_over
     )
 
 
+def test_turn_skill_for_answering_prefers_paper_followthrough_stage_over_decision_anchor() -> None:
+    snapshot = {
+        "active_anchor": "decision",
+        "continuation_anchor": "decision",
+        "baseline_gate": "confirmed",
+        "paper_contract_health": {
+            "recommended_next_stage": "write",
+            "recommended_action": "return_to_publishability_gate",
+        },
+        "startup_contract": {
+            "need_research_paper": True,
+        },
+    }
+    latest_user_message = {
+        "content": "现在离 submission-ready 还差什么？",
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(
+            snapshot,
+            latest_user_message,
+            turn_reason="user_message",
+            turn_mode="answering",
+        )
+        == "write"
+    )
+
+
+@pytest.mark.parametrize("turn_mode", ["answering", "command_execution"])
+def test_turn_skill_for_fresh_direct_turn_prefers_active_stage_over_decision_anchor(turn_mode: str) -> None:
+    snapshot = {
+        "active_anchor": "baseline",
+        "continuation_anchor": "decision",
+        "baseline_gate": "pending",
+        "startup_contract": {},
+    }
+    latest_user_message = {
+        "content": "先看看现在的 baseline 状态。",
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(
+            snapshot,
+            latest_user_message,
+            turn_reason="user_message",
+            turn_mode=turn_mode,
+        )
+        == "baseline"
+    )
+
+
+@pytest.mark.parametrize("turn_mode", ["answering", "command_execution"])
+def test_turn_skill_for_threaded_reply_prefers_active_stage_over_decision_anchor(turn_mode: str) -> None:
+    snapshot = {
+        "active_anchor": "baseline",
+        "continuation_anchor": "decision",
+        "baseline_gate": "pending",
+        "startup_contract": {},
+        "recent_reply_threads": [
+            {
+                "interaction_id": "progress-001",
+                "artifact_id": "progress-001",
+                "reply_mode": "threaded",
+                "kind": "progress",
+            }
+        ],
+    }
+    latest_user_message = {
+        "content": "那你继续把 baseline 这段补完整。",
+        "reply_to_interaction_id": "progress-001",
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(
+            snapshot,
+            latest_user_message,
+            turn_reason="user_message",
+            turn_mode=turn_mode,
+        )
+        == "baseline"
+    )
+
+
 def test_turn_skill_for_keeps_decision_when_paper_followthrough_requires_user_decision() -> None:
     snapshot = {
         "active_anchor": "decision",
@@ -382,6 +465,38 @@ def test_turn_skill_for_keeps_decision_when_paper_followthrough_requires_user_de
     }
 
     assert DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution") == "decision"
+
+
+def test_turn_skill_for_blocking_reply_still_routes_to_decision() -> None:
+    snapshot = {
+        "active_anchor": "baseline",
+        "continuation_anchor": "baseline",
+        "baseline_gate": "pending",
+        "startup_contract": {},
+        "active_interactions": [
+            {
+                "interaction_id": "decision-001",
+                "artifact_id": "decision-001",
+                "status": "waiting",
+                "reply_mode": "blocking",
+                "kind": "decision_request",
+            }
+        ],
+    }
+    latest_user_message = {
+        "content": "选 A。",
+        "reply_to_interaction_id": "decision-001",
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(
+            snapshot,
+            latest_user_message,
+            turn_reason="user_message",
+            turn_mode="answering",
+        )
+        == "decision"
+    )
 
 
 def _wait_for_json(url: str, *, timeout: float = 10.0) -> dict | list:
