@@ -67,6 +67,20 @@ The deferred remainder is:
 - `summary_preview` split semantics
 - prompt / skill / docs coupling from the full feature
 
+### Candidate C: workspace mode / continuation policy bundle
+
+- source commits:
+  - `7c9c03f3dc9bcce433b4f16993735ff3505e6861`
+  - `d58a65584fc7e958f2363e9110c726823b64a4e2`
+  - `d9d4bd6b8b9654f4409eb7ff673c9ecadc301cbf`
+- title: `workspace mode switch and continuation-policy reconciliation`
+- decision: `defer_incompatible`
+- rationale:
+  - upstream uses `workspace_mode` for the runtime control surface `copilot | autonomous`
+  - current fork already uses `research_state.workspace_mode` as a research worktree state namespace with values such as `quest | idea | analysis | paper | run`
+  - absorbing the upstream bundle would overload one persisted field with two unrelated authorities and would corrupt the current artifact/worktree routing seam
+  - the continuation-policy logic in those commits depends on that upstream mode meaning, so the safe follow-up path is a future dedicated controller/runtime contract design instead of a direct intake
+
 ## Execution Result
 
 The backend-only follow-up was absorbed as:
