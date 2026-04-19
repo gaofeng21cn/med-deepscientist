@@ -10,7 +10,6 @@ import tarfile
 
 from deepscientist.runtime_storage import maintain_quest_runtime_storage
 
-
 def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tempfiles(tmp_path: Path) -> None:
     quest_root = tmp_path / "quest"
     bash_root = quest_root / ".ds" / "bash_exec" / "bash-001"
