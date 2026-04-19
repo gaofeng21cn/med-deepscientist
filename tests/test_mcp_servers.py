@@ -1716,6 +1716,55 @@ def test_bash_exec_exec_mode_uses_pipe_transport(temp_home: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_bash_exec_mcp_server_normalizes_list_wrapped_commands(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("mcp bash list command quest")
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-bash-list-command",
+            active_anchor="experiment",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_bash_exec_server(context)
+
+        singleton = _unwrap_tool_result(
+            await server.call_tool(
+                "bash_exec",
+                {
+                    "command": ["printf 'singleton-list-ok\n'"],
+                    "mode": "await",
+                    "timeout_seconds": 5,
+                },
+            )
+        )
+        assert singleton["status"] == "completed"
+        assert singleton["command"] == "printf 'singleton-list-ok\n'"
+
+        argv_style = _unwrap_tool_result(
+            await server.call_tool(
+                "bash_exec",
+                {
+                    "command": ["printf", "argv-style-ok\n"],
+                    "mode": "await",
+                    "timeout_seconds": 5,
+                },
+            )
+        )
+        assert argv_style["status"] == "completed"
+        assert "printf" in str(argv_style["command"] or "")
+
+    asyncio.run(scenario())
+
+
 def test_bash_exec_mcp_server_default_read_truncates_long_logs_with_hint(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)

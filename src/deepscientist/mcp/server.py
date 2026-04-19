@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from collections import deque
 from pathlib import Path
+import shlex
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -53,6 +54,19 @@ ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES = {
         "received an equivalent completion summary."
     ),
 }
+
+
+def _normalize_bash_exec_command_input(raw_command: Any) -> str:
+    if isinstance(raw_command, str):
+        return raw_command
+    if isinstance(raw_command, (list, tuple)):
+        items = [str(item).strip() for item in raw_command if str(item).strip()]
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        return shlex.join(items)
+    return str(raw_command or "")
 
 
 def _read_only_tool_annotations(*, title: str | None = None) -> ToolAnnotations:
@@ -1218,7 +1232,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
         ),
     )
     def bash_exec(
-        command: str = "",
+        command: Any = "",
         mode: str = "detach",
         id: str | None = None,
         reason: str | None = None,
@@ -1259,6 +1273,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
             normalized_mode = "await"
         if normalized_mode not in {"detach", "await", "read", "kill", "list", "history"}:
             raise ValueError("Mode must be one of `detach`, `await`, `create`, `read`, `kill`, `list`, or `history`.")
+        normalized_command = _normalize_bash_exec_command_input(command)
         if normalized_mode in {"list", "history"}:
             resolved_limit = 500 if normalized_mode == "history" and limit == 20 else max(1, min(limit, 500))
             items = service.list_sessions(
@@ -1366,7 +1381,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
             if wait:
                 session = service.wait_for_session(quest_root, bash_id, timeout_seconds=timeout_seconds)
             return finalize(service.build_tool_result(context, session=session, include_log=False))
-        if normalized_mode == "await" and not command:
+        if normalized_mode == "await" and not normalized_command:
             bash_id = service.resolve_session_id(quest_root, id)
             session = service.wait_for_session(quest_root, bash_id, timeout_seconds=timeout_seconds)
             return finalize(service.build_tool_result(
@@ -1376,11 +1391,11 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 export_log=export_log,
                 export_log_to=export_log_to,
             ))
-        if not (command or "").strip():
+        if not normalized_command.strip():
             raise ValueError("command is required for `detach` and `await`.")
         session = service.start_session(
             context,
-            command=command,
+            command=normalized_command,
             mode=normalized_mode,
             workdir=workdir,
             env=env,
