@@ -82,12 +82,59 @@ test('createPythonRuntimePlan falls back to uv-managed python when active conda 
 
 test('buildUvRuntimeEnv pins uv state inside the DeepScientist runtime tree', () => {
   const home = path.join(path.sep, 'tmp', 'DeepScientistHome');
-  const env = __internal.buildUvRuntimeEnv(home, { EXTRA_MARKER: '1' });
+  const env = __internal.buildUvRuntimeEnv(home, {
+    EXTRA_MARKER: '1',
+    PYTHONPATH: '/tmp/pythonpath',
+    PYTHONHOME: '/tmp/pythonhome',
+    VIRTUAL_ENV: '/tmp/venv',
+    __PYVENV_LAUNCHER__: '/tmp/launcher',
+    CONDA_PREFIX: '/opt/conda',
+    CONDA_DEFAULT_ENV: 'base',
+    CONDA_SHLVL: '1',
+    CONDA_PREFIX_1: '/opt/conda',
+    CONDA_PROMPT_MODIFIER: '(base) ',
+    CONDA_EXE: '/opt/conda/bin/conda',
+    CONDA_PYTHON_EXE: '/opt/conda/bin/python',
+    _CE_CONDA: '1',
+    _CE_M: '1',
+    MAMBA_EXE: '/opt/mamba/bin/mamba',
+    MAMBA_ROOT_PREFIX: '/opt/mamba',
+  });
 
   assert.equal(env.EXTRA_MARKER, '1');
   assert.equal(env.UV_PROJECT_ENVIRONMENT, path.join(home, 'runtime', 'python-env'));
   assert.equal(env.UV_CACHE_DIR, path.join(home, 'runtime', 'uv-cache'));
   assert.equal(env.UV_PYTHON_INSTALL_DIR, path.join(home, 'runtime', 'python'));
+  assert.equal(env.PYTHONPATH, undefined);
+  assert.equal(env.PYTHONHOME, undefined);
+  assert.equal(env.VIRTUAL_ENV, undefined);
+  assert.equal(env.__PYVENV_LAUNCHER__, undefined);
+  assert.equal(env.CONDA_PREFIX, undefined);
+  assert.equal(env.CONDA_DEFAULT_ENV, undefined);
+  assert.equal(env.CONDA_SHLVL, undefined);
+  assert.equal(env.CONDA_PREFIX_1, undefined);
+  assert.equal(env.CONDA_PROMPT_MODIFIER, undefined);
+  assert.equal(env.CONDA_EXE, undefined);
+  assert.equal(env.CONDA_PYTHON_EXE, undefined);
+  assert.equal(env._CE_CONDA, undefined);
+  assert.equal(env._CE_M, undefined);
+  assert.equal(env.MAMBA_EXE, undefined);
+  assert.equal(env.MAMBA_ROOT_PREFIX, undefined);
+});
+
+test('performSelfUpdate resolves npm before invoking npm install latest', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'bin', 'ds.js'), 'utf8');
+  const functionStart = source.indexOf('async function performSelfUpdate');
+  assert.ok(functionStart >= 0);
+  const functionEnd = source.indexOf('\nasync function migrateMain', functionStart);
+  assert.ok(functionEnd > functionStart);
+  const body = source.slice(functionStart, functionEnd);
+
+  const resolveIndex = body.indexOf('const npmBinary = resolveNpmBinary();');
+  const installIndex = body.indexOf('runNpmInstallLatest(home, npmBinary)');
+
+  assert.ok(resolveIndex >= 0);
+  assert.ok(installIndex > resolveIndex);
 });
 
 test('runtimePythonPath resolves to the managed uv environment interpreter', () => {
