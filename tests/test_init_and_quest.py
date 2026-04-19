@@ -198,8 +198,8 @@ def test_init_creates_required_files(temp_home: Path) -> None:
     assert config["connectors"]["system_enabled"]["whatsapp"] is True
     assert config["connectors"]["system_enabled"]["lingzhu"] is True
     assert runners["codex"]["profile"] == ""
-    assert runners["codex"]["model"] == "gpt-5.4"
-    assert runners["codex"]["model_reasoning_effort"] == "xhigh"
+    assert runners["codex"]["model"] == "inherit"
+    assert runners["codex"]["model_reasoning_effort"] == ""
     assert runners["codex"]["retry_initial_backoff_sec"] == 10.0
     assert runners["codex"]["retry_backoff_multiplier"] == 6.0
     assert runners["codex"]["retry_max_backoff_sec"] == 1800.0
@@ -497,7 +497,7 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     assert refreshed["idea_lines"][0]["paper_line_id"] == "paper-line-001"
     assert refreshed["paper_contract_health"]["contract_ok"] is True
     assert refreshed["paper_contract_health"]["writing_ready"] is True
-    assert refreshed["paper_contract_health"]["recommended_next_stage"] == "finalize"
+    assert refreshed["paper_contract_health"]["recommended_next_stage"] == "write"
     assert refreshed["paper_contract_health"]["recommendation_scope"] == "paper_line_local_only"
     assert refreshed["paper_contract_health"]["global_stage_authority"] == "publication_gate"
     assert refreshed["paper_contract_health"]["global_stage_rule"] == (

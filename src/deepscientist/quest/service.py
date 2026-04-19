@@ -3970,21 +3970,17 @@ class QuestService:
                 "proofing outputs are missing "
                 "(`paper/proofing/proofing_report.md`, `paper/proofing/language_issues.md`)"
             )
+        managed_publication_completion_blocker: str | None = None
         if not submission_checklist_ready:
             blocking_reasons.append(
                 "submission packaging checklist is missing "
                 "(`paper/review/submission_checklist.json`)"
             )
         elif submission_blocking_item_count > 0:
-            if submission_blocking_items:
-                blocking_reasons.extend(
-                    item for item in submission_blocking_items if item and item not in blocking_reasons
-                )
-            else:
-                blocking_reasons.append(
-                    "submission packaging checklist still has "
-                    f"{submission_blocking_item_count} blocking item(s)"
-                )
+            blocking_reasons.append(
+                "submission packaging checklist still has "
+                f"{submission_blocking_item_count} blocking item(s)"
+            )
         elif not submission_checklist_handoff_ready:
             status_bits = [item for item in (submission_checklist_status, submission_checklist_package_status) if item]
             if nonfinal_write_review_maintenance_only:
@@ -4022,12 +4018,12 @@ class QuestService:
                     f"({submission_minimal_materialized_table_count}/"
                     f"{submission_minimal_expected_table_count} tables materialized)"
                 )
-        if not managed_publication_gate_clear and not blocking_reasons:
+        if not managed_publication_gate_clear:
             gap_preview = ", ".join(
                 item for item in managed_publication_gate_gap_summaries[:4] if item
             )
             if managed_publication_gate_status == "missing":
-                blocking_reasons.append(
+                managed_publication_completion_blocker = (
                     "managed publication gate evaluation is missing"
                     + (
                         f" (`{managed_publication_gate.get('publication_eval_path')}`)"
@@ -4036,13 +4032,17 @@ class QuestService:
                     )
                 )
             elif managed_publication_gate_status == "invalid":
-                blocking_reasons.append(f"managed publication gate payload is invalid: {managed_publication_gate_summary}")
+                managed_publication_completion_blocker = (
+                    f"managed publication gate payload is invalid: {managed_publication_gate_summary}"
+                )
             else:
-                blocking_reasons.append(
+                managed_publication_completion_blocker = (
                     "managed publication gate blocks completion"
                     + (f": {managed_publication_gate_summary}" if managed_publication_gate_summary else "")
                     + (f" (gaps: {gap_preview})" if gap_preview else "")
                 )
+            if managed_publication_completion_blocker and not blocking_reasons:
+                blocking_reasons.append(managed_publication_completion_blocker)
 
         finalize_ready = (
             writing_ready
@@ -4058,6 +4058,11 @@ class QuestService:
             submission_minimal_ready=submission_minimal_ready,
         )
         completion_blocking_reasons = list(blocking_reasons)
+        if (
+            managed_publication_completion_blocker
+            and managed_publication_completion_blocker not in completion_blocking_reasons
+        ):
+            completion_blocking_reasons.append(managed_publication_completion_blocker)
         if not bool(closure_evidence.get("final_claim_ledger_ready")):
             completion_blocking_reasons.append("final claim ledger is missing (`paper/final_claim_ledger.md`)")
         if not bool(closure_evidence.get("finalize_resume_packet_ready")):

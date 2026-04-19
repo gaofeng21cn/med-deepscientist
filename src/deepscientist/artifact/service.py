@@ -6094,6 +6094,7 @@ class ArtifactService:
             active_paper_line_ref=active_paper_line_ref,
         )
         payload = dict(payload or {})
+        payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
         if normalized_detail == "summary":
             payload.pop("unresolved_required_items", None)
             payload.pop("unmapped_completed_items", None)
