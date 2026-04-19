@@ -50,6 +50,13 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     codex_tmp.write_text("abc\n", encoding="utf-8")
     os.utime(codex_tmp.parent, (old, old))
     os.utime(codex_tmp, (old, old))
+    codex_execve_tmp = quest_root / ".ds" / "codex_homes" / "run-001" / "tmp" / "arg0" / "codex-arg0abc123" / "apply_patch"
+    codex_execve_tmp.parent.mkdir(parents=True, exist_ok=True)
+    codex_execve_tmp.write_text("binary-placeholder\n", encoding="utf-8")
+    os.utime(codex_execve_tmp.parent.parent.parent, (old, old))
+    os.utime(codex_execve_tmp.parent.parent, (old, old))
+    os.utime(codex_execve_tmp.parent, (old, old))
+    os.utime(codex_execve_tmp, (old, old))
 
     result = maintain_quest_runtime_storage(
         quest_root,
@@ -76,6 +83,7 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     assert (bash_root / "terminal.full.log.gz").exists()
     assert not stale_tmp.exists()
     assert not codex_tmp.parent.exists()
+    assert not codex_execve_tmp.parent.parent.parent.exists()
     runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
     assert len(runtime_logs) == 2
     gitignore_text = (quest_root / ".gitignore").read_text(encoding="utf-8")

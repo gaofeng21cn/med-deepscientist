@@ -900,14 +900,13 @@ def prune_codex_home_tempdirs(root: Path, *, older_than_seconds: int = 6 * 3600)
     if not codex_homes_root.exists():
         return {"root": str(resolved_root), "removed_tempdirs": removed, "removed_count": 0}
     for run_home in sorted(path for path in codex_homes_root.iterdir() if path.is_dir()):
-        temp_root = run_home / ".tmp"
-        if not temp_root.exists():
-            continue
-        age = _age_seconds(temp_root, now=now)
-        if age is None or age < older_than_seconds:
-            continue
-        shutil.rmtree(temp_root, ignore_errors=True)
-        removed.append(str(temp_root.relative_to(resolved_root)))
+        for temp_root in (run_home / ".tmp", run_home / "tmp"):
+            if not temp_root.exists():
+                continue
+            if not _path_tree_is_cold(temp_root, now=now, older_than_seconds=older_than_seconds):
+                continue
+            shutil.rmtree(temp_root, ignore_errors=True)
+            removed.append(str(temp_root.relative_to(resolved_root)))
     return {
         "root": str(resolved_root),
         "removed_tempdirs": removed,
