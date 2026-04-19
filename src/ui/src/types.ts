@@ -939,6 +939,53 @@ export interface MetricsTimelinePayload {
   series: MetricTimelineSeries[]
 }
 
+export interface BaselineCompareEntry {
+  entry_key: string
+  baseline_id?: string | null
+  variant_id?: string | null
+  label: string
+  baseline_kind?: string | null
+  summary?: string | null
+  selected?: boolean
+  updated_at?: string | null
+  metric_count?: number
+}
+
+export interface BaselineCompareValue {
+  entry_key: string
+  label: string
+  baseline_id?: string | null
+  variant_id?: string | null
+  selected?: boolean
+  value?: number | null
+  raw_value?: string | number | null
+  baseline_kind?: string | null
+  summary?: string | null
+  updated_at?: string | null
+}
+
+export interface BaselineCompareSeries {
+  metric_id: string
+  label: string
+  direction?: string
+  unit?: string | null
+  decimals?: number | null
+  chart_group?: string | null
+  values: BaselineCompareValue[]
+}
+
+export interface BaselineComparePayload {
+  quest_id: string
+  primary_metric_id?: string | null
+  total_entries?: number
+  baseline_ref?: {
+    baseline_id?: string | null
+    variant_id?: string | null
+  } | null
+  entries: BaselineCompareEntry[]
+  series: BaselineCompareSeries[]
+}
+
 export interface GitCompareCommit {
   sha: string
   short_sha: string

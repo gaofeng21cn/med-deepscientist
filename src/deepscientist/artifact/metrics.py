@@ -670,6 +670,198 @@ def baseline_metric_lines(entry: dict[str, Any] | None, selected_variant_id: str
     return lines
 
 
+def build_baseline_compare_payload(
+    *,
+    quest_id: str,
+    baseline_entries: list[dict[str, Any]],
+    active_baseline_id: str | None = None,
+    active_variant_id: str | None = None,
+) -> dict[str, Any]:
+    series_map: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    baseline_meta_map: dict[str, dict[str, Any]] = {}
+    deduped_entries: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    ordered_baseline_entries: list[dict[str, Any]] = []
+    primary_metric_id: str | None = None
+    active_baseline_text = str(active_baseline_id or "").strip() or None
+    active_variant_text = str(active_variant_id or "").strip() or None
+
+    def entry_variant_groups(entry: dict[str, Any]) -> list[tuple[str | None, dict[str, Any] | None]]:
+        variants = entry.get("baseline_variants") if isinstance(entry.get("baseline_variants"), list) else []
+        if variants:
+            groups: list[tuple[str | None, dict[str, Any] | None]] = []
+            for variant in variants:
+                if not isinstance(variant, dict):
+                    continue
+                groups.append((str(variant.get("variant_id") or "").strip() or None, variant))
+            if groups:
+                return groups
+        return [(None, None)]
+
+    def entry_key(entry: dict[str, Any], *, variant_id: str | None) -> str:
+        baseline_id = str(entry.get("baseline_id") or entry.get("entry_id") or "").strip() or "baseline"
+        variant_text = str(variant_id or entry.get("default_variant_id") or "").strip() or "default"
+        return f"{baseline_id}::{variant_text}"
+
+    def is_selected(entry: dict[str, Any], *, variant_id: str | None) -> bool:
+        baseline_id = str(entry.get("baseline_id") or entry.get("entry_id") or "").strip() or None
+        if not baseline_id or baseline_id != active_baseline_text:
+            return False
+        resolved_variant_id = str(variant_id or entry.get("default_variant_id") or "").strip() or None
+        if active_variant_text:
+            return resolved_variant_id == active_variant_text
+        if resolved_variant_id:
+            default_variant_id = str(entry.get("default_variant_id") or "").strip() or None
+            return resolved_variant_id == (default_variant_id or resolved_variant_id)
+        return True
+
+    def ensure_series(metric_id: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
+        resolved_meta = meta or baseline_meta_map.get(metric_id) or _normalize_metric_entry({}, fallback_id=metric_id)
+        if metric_id not in series_map:
+            series_map[metric_id] = {
+                "metric_id": metric_id,
+                "label": resolved_meta.get("label") or metric_id,
+                "direction": normalize_metric_direction(resolved_meta.get("direction"), metric_id=metric_id),
+                "unit": resolved_meta.get("unit"),
+                "decimals": resolved_meta.get("decimals"),
+                "chart_group": resolved_meta.get("chart_group"),
+                "values": [],
+            }
+        else:
+            series_map[metric_id]["label"] = resolved_meta.get("label") or series_map[metric_id]["label"]
+            series_map[metric_id]["direction"] = normalize_metric_direction(
+                resolved_meta.get("direction") or series_map[metric_id]["direction"],
+                metric_id=metric_id,
+            )
+            series_map[metric_id]["unit"] = resolved_meta.get("unit") or series_map[metric_id]["unit"]
+            if resolved_meta.get("decimals") is not None:
+                series_map[metric_id]["decimals"] = resolved_meta.get("decimals")
+            series_map[metric_id]["chart_group"] = (
+                resolved_meta.get("chart_group") or series_map[metric_id]["chart_group"]
+            )
+        return series_map[metric_id]
+
+    for entry in baseline_entries:
+        if not isinstance(entry, dict):
+            continue
+        baseline_id = str(entry.get("baseline_id") or entry.get("entry_id") or "").strip() or None
+        if not baseline_id:
+            continue
+        for variant_id, _variant in entry_variant_groups(entry):
+            deduped_entries[entry_key(entry, variant_id=variant_id)] = {
+                **entry,
+                "_compare_variant_id": variant_id,
+            }
+
+    for normalized_entry in deduped_entries.values():
+        variant_id = str(normalized_entry.get("_compare_variant_id") or "").strip() or None
+        contract = normalize_metric_contract(
+            normalized_entry.get("metric_contract"),
+            baseline_id=str(normalized_entry.get("baseline_id") or normalized_entry.get("entry_id") or ""),
+            metrics_summary=selected_baseline_metrics(normalized_entry, variant_id),
+            primary_metric=normalized_entry.get("primary_metric"),
+            baseline_variants=normalized_entry.get("baseline_variants"),
+        )
+        if primary_metric_id is None:
+            candidate_primary = str(contract.get("primary_metric_id") or "").strip() or None
+            if candidate_primary:
+                primary_metric_id = candidate_primary
+        metric_meta = extract_metric_meta_map(
+            metric_contract=normalized_entry.get("metric_contract"),
+            metrics_summary=selected_baseline_metrics(normalized_entry, variant_id),
+        )
+        baseline_meta_map.update(metric_meta)
+        compare_key = entry_key(normalized_entry, variant_id=variant_id)
+        selected = is_selected(normalized_entry, variant_id=variant_id)
+        ordered_baseline_entries.append(
+            {
+                "entry_key": compare_key,
+                "baseline_id": str(normalized_entry.get("baseline_id") or normalized_entry.get("entry_id") or "").strip()
+                or None,
+                "variant_id": variant_id,
+                "label": next(
+                    (
+                        str(item.get("label") or item.get("variant_id") or "").strip()
+                        for item in (normalized_entry.get("baseline_variants") or [])
+                        if isinstance(item, dict) and str(item.get("variant_id") or "").strip() == str(variant_id or "").strip()
+                    ),
+                    None,
+                )
+                or (variant_id or str(normalized_entry.get("baseline_id") or "").strip() or "baseline"),
+                "baseline_kind": str(normalized_entry.get("baseline_kind") or "").strip() or None,
+                "summary": str(normalized_entry.get("summary") or "").strip() or None,
+                "selected": selected,
+                "updated_at": normalized_entry.get("updated_at") or normalized_entry.get("created_at"),
+                "metric_count": len(selected_baseline_metrics(normalized_entry, variant_id)),
+            }
+        )
+        for line in baseline_metric_lines(normalized_entry, variant_id):
+            metric_id = str(line.get("metric_id") or "").strip()
+            if not metric_id:
+                continue
+            line_variant_id = str(line.get("variant_id") or "").strip() or None
+            if line_variant_id != variant_id:
+                if not (line_variant_id is None and variant_id is None):
+                    continue
+            ensure_series(metric_id, metric_meta.get(metric_id))
+            series_map[metric_id]["values"].append(
+                {
+                    "entry_key": compare_key,
+                    "label": line.get("label"),
+                    "baseline_id": line.get("baseline_id"),
+                    "variant_id": line.get("variant_id"),
+                    "selected": selected,
+                    "value": line.get("value"),
+                    "raw_value": line.get("raw_value"),
+                    "baseline_kind": str(normalized_entry.get("baseline_kind") or "").strip() or None,
+                    "summary": str(normalized_entry.get("summary") or "").strip() or None,
+                    "updated_at": normalized_entry.get("updated_at") or normalized_entry.get("created_at"),
+                }
+            )
+
+    def sort_metric_values(series: dict[str, Any]) -> None:
+        direction = normalize_metric_direction(series.get("direction"), metric_id=str(series.get("metric_id") or ""))
+
+        def sort_key(item: dict[str, Any]) -> tuple[int, float, str]:
+            value = to_number(item.get("value"))
+            if value is None:
+                metric_rank = float("inf")
+            elif direction == "minimize":
+                metric_rank = value
+            else:
+                metric_rank = -value
+            return (0 if item.get("selected") else 1, metric_rank, str(item.get("label") or ""))
+
+        series["values"].sort(key=sort_key)
+
+    for series in series_map.values():
+        sort_metric_values(series)
+
+    ordered_baseline_entries.sort(
+        key=lambda item: (
+            0 if item.get("selected") else 1,
+            str(item.get("updated_at") or ""),
+            str(item.get("baseline_id") or ""),
+            str(item.get("variant_id") or ""),
+        )
+    )
+
+    return {
+        "quest_id": quest_id,
+        "primary_metric_id": primary_metric_id,
+        "total_entries": len(ordered_baseline_entries),
+        "baseline_ref": (
+            {
+                "baseline_id": active_baseline_text,
+                "variant_id": active_variant_text,
+            }
+            if active_baseline_text
+            else None
+        ),
+        "entries": ordered_baseline_entries,
+        "series": [item for item in series_map.values() if item["values"]],
+    }
+
+
 def normalize_metric_rows(
     metric_rows: object,
     *,

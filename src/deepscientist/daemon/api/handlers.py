@@ -911,6 +911,9 @@ npm --prefix src/ui run build</pre>
     def metrics_timeline(self, quest_id: str) -> dict:
         return self.app.quest_service.metrics_timeline(quest_id)
 
+    def baseline_compare(self, quest_id: str) -> dict:
+        return self.app.quest_service.baseline_compare(quest_id)
+
     def git_branches(self, quest_id: str) -> dict:
         quest_root = self._fresh_quest_service()._quest_root(quest_id)
         payload = self.app.quest_service.git_branch_canvas(quest_id)

@@ -3293,6 +3293,51 @@ def test_record_main_experiment_prefers_metric_rows_for_nested_metric_summaries(
     assert series_by_id["raw_false"]["points"][0]["value"] == pytest.approx(0.2063)
 
 
+def test_baseline_compare_handler_returns_all_confirmed_baselines(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("baseline compare handler quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    baseline_a = quest_root / "baselines" / "local" / "baseline-a"
+    baseline_b = quest_root / "baselines" / "local" / "baseline-b"
+    baseline_a.mkdir(parents=True, exist_ok=True)
+    baseline_b.mkdir(parents=True, exist_ok=True)
+    (baseline_a / "README.md").write_text("# Baseline A\n", encoding="utf-8")
+    (baseline_b / "README.md").write_text("# Baseline B\n", encoding="utf-8")
+
+    artifact.confirm_baseline(
+        quest_root,
+        baseline_path=str(baseline_a),
+        baseline_id="baseline-a",
+        summary="Baseline A confirmed.",
+        metrics_summary={"acc": 0.81},
+        primary_metric={"metric_id": "acc", "value": 0.81},
+        metric_contract={"primary_metric_id": "acc", "metrics": [{"metric_id": "acc", "direction": "higher"}]},
+    )
+    artifact.confirm_baseline(
+        quest_root,
+        baseline_path=str(baseline_b),
+        baseline_id="baseline-b",
+        summary="Baseline B confirmed.",
+        metrics_summary={"acc": 0.86},
+        primary_metric={"metric_id": "acc", "value": 0.86},
+        metric_contract={"primary_metric_id": "acc", "metrics": [{"metric_id": "acc", "direction": "higher"}]},
+    )
+
+    app = DaemonApp(temp_home)
+    payload = app.handlers.baseline_compare(quest["quest_id"])
+
+    assert payload["baseline_ref"] == {"baseline_id": "baseline-b", "variant_id": None}
+    assert payload["total_entries"] == 2
+    assert {item["baseline_id"] for item in payload["entries"]} == {"baseline-a", "baseline-b"}
+    series_by_id = {item["metric_id"]: item for item in payload["series"]}
+    assert set(series_by_id.keys()) == {"acc"}
+    assert [item["baseline_id"] for item in series_by_id["acc"]["values"]] == ["baseline-b", "baseline-a"]
+
+
 def test_submit_idea_supports_foundation_selection_and_branch_listing(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

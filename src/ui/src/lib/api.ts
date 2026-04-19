@@ -1,4 +1,5 @@
 import type {
+  BaselineComparePayload,
   BaselineRegistryEntry,
   ConfigFileEntry,
   ConfigTestPayload,
@@ -315,6 +316,8 @@ export const client = {
     }
     return api<MetricsTimelinePayload>(`/api/quests/${questId}/metrics/timeline`)
   },
+  baselineCompare: (questId: string) =>
+    api<BaselineComparePayload>(`/api/quests/${questId}/baselines/compare`),
   gitBranches: (questId: string) => {
     if (isDemoProjectId(questId)) {
       const payload = getDemoGitBranches(questId)

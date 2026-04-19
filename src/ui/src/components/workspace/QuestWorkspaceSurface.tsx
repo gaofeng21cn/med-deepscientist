@@ -50,6 +50,8 @@ import {
   splitBashLogLine,
 } from '@/lib/utils/bash-log'
 import type {
+  BaselineComparePayload,
+  BaselineCompareSeries,
   FeedItem,
   GitBranchesPayload,
   GuidanceVm,
@@ -791,6 +793,96 @@ const MetricTimelineCard = React.memo(function MetricTimelineCard({
         ) : (
           <span>No points yet</span>
         )}
+      </div>
+    </div>
+  )
+})
+
+const BaselineCompareCard = React.memo(function BaselineCompareCard({
+  series,
+  primaryMetricId,
+}: {
+  series: BaselineCompareSeries
+  primaryMetricId?: string | null
+}) {
+  const metricDirection = React.useMemo(() => normalizeTimelineDirection(series.direction), [series.direction])
+  const numericValues = React.useMemo(
+    () =>
+      (series.values || [])
+        .map((item) => item.value)
+        .filter((item): item is number => typeof item === 'number' && Number.isFinite(item)),
+    [series.values]
+  )
+  const minValue = numericValues.length ? Math.min(...numericValues) : null
+  const maxValue = numericValues.length ? Math.max(...numericValues) : null
+
+  const barWidth = React.useCallback(
+    (value?: number | null) => {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return 16
+      if (minValue == null || maxValue == null || Math.abs(maxValue - minValue) < 1e-9) return 68
+      const ratio =
+        metricDirection === 'minimize'
+          ? (maxValue - value) / Math.max(maxValue - minValue, 1e-9)
+          : (value - minValue) / Math.max(maxValue - minValue, 1e-9)
+      return Math.max(18, 28 + ratio * 72)
+    },
+    [maxValue, metricDirection, minValue]
+  )
+
+  return (
+    <div
+      className="overflow-hidden rounded-[26px] border border-black/[0.08] bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(242,236,228,0.96))] p-4 shadow-card dark:border-white/[0.10] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.03))]"
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '280px' }}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{series.label || series.metric_id}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {series.metric_id}
+            {series.direction ? ` · ${series.direction}` : ''}
+            {series.unit ? ` · ${series.unit}` : ''}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {primaryMetricId === series.metric_id ? <StatusPill>primary</StatusPill> : null}
+          <StatusPill>{series.values?.length || 0} baselines</StatusPill>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {(series.values || []).map((item) => (
+          <div
+            key={`${item.entry_key}:${series.metric_id}`}
+            className={cn(
+              'rounded-[20px] border px-3 py-3',
+              item.selected
+                ? 'border-amber-300/80 bg-amber-50/70 dark:border-amber-300/30 dark:bg-amber-200/10'
+                : 'border-black/[0.08] bg-white/70 dark:border-white/[0.10] dark:bg-white/[0.02]'
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-foreground">{item.label}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {[item.baseline_kind || null, item.selected ? 'active baseline' : null]
+                    .filter(Boolean)
+                    .join(' · ') || 'baseline'}
+                </div>
+              </div>
+              <div className="shrink-0 text-right">
+                <div className="text-sm font-semibold text-foreground">
+                  {formatMetricValue(item.value ?? item.raw_value, series.decimals)}
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 h-2 rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
+              <div
+                className={cn('h-2 rounded-full', item.selected ? 'bg-amber-500/90' : 'bg-slate-500/85')}
+                style={{ width: `${barWidth(item.value)}%` }}
+              />
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -2993,6 +3085,8 @@ function QuestDetails({
   const latestRunningBash = runningBashSessions[0] ?? null
   const [metricsTimeline, setMetricsTimeline] =
     React.useState<MetricsTimelinePayload | null>(null)
+  const [baselineCompare, setBaselineCompare] =
+    React.useState<BaselineComparePayload | null>(null)
   const latestRunningBashHint = React.useMemo(() => {
     if (!latestRunningBash) {
       return `${snapshot?.counts?.bash_session_count || 0} recorded sessions`
@@ -3472,8 +3566,19 @@ function QuestDetails({
     () => buildMetricsTimelineRunSignature(workflow?.entries),
     [workflow?.entries]
   )
+  const baselineCompareSignature = React.useMemo(
+    () =>
+      [
+        snapshot?.updated_at || '',
+        snapshot?.active_baseline_id || '',
+        snapshot?.active_baseline_variant_id || '',
+      ].join(':'),
+    [snapshot?.active_baseline_id, snapshot?.active_baseline_variant_id, snapshot?.updated_at]
+  )
   const metricsTimelineSeries = metricsTimeline?.series || []
+  const baselineCompareSeries = baselineCompare?.series || []
   const hasMetricsOverview = metricsTimelineSeries.length > 0
+  const hasBaselineCompare = baselineCompareSeries.length > 0
   const hasMainExperimentMetricPoints = metricsTimelineSeries.some(
     (series) => (series.points?.length || 0) > 0
   )
@@ -3502,6 +3607,25 @@ function QuestDetails({
       cancelled = true
     }
   }, [questId, metricsTimelineRunSignature])
+
+  React.useEffect(() => {
+    let cancelled = false
+    void client
+      .baselineCompare(questId)
+      .then((payload) => {
+        if (!cancelled) {
+          setBaselineCompare(payload)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBaselineCompare(null)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [baselineCompareSignature, questId])
 
   return (
     <div
@@ -3563,6 +3687,34 @@ function QuestDetails({
           ) : (
             <div className="rounded-[24px] border border-dashed border-black/[0.10] px-4 py-6 text-sm text-muted-foreground dark:border-white/[0.12]">
               Attach a baseline with recorded metrics to populate this section. Main-experiment traces will overlay after the first recorded result.
+            </div>
+          )}
+        </DetailSection>
+
+        <DetailSection
+          title="Baseline Compare"
+          hint="Lists every confirmed baseline or variant the quest can currently compare, separate from the active baseline timeline."
+          actions={<WorkspaceRefreshButton onRefresh={onRefresh} label="Refresh baselines" />}
+        >
+          {hasBaselineCompare ? (
+            <div className="space-y-4">
+              <div className="rounded-[22px] border border-dashed border-black/[0.10] bg-black/[0.02] px-4 py-3 text-sm text-muted-foreground dark:border-white/[0.12] dark:bg-white/[0.03]">
+                Showing {baselineCompare?.total_entries || baselineCompareSeries[0]?.values?.length || 0} baseline entries across{' '}
+                {baselineCompareSeries.length} metric{baselineCompareSeries.length === 1 ? '' : 's'}.
+              </div>
+              <div className="grid gap-5 xl:grid-cols-2">
+                {baselineCompareSeries.map((series) => (
+                  <BaselineCompareCard
+                    key={series.metric_id}
+                    series={series}
+                    primaryMetricId={baselineCompare?.primary_metric_id}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-[24px] border border-dashed border-black/[0.10] px-4 py-6 text-sm text-muted-foreground dark:border-white/[0.12]">
+              Confirm more than one baseline or variant to populate cross-baseline comparison here.
             </div>
           )}
         </DetailSection>
