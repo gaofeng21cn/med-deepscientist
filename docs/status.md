@@ -13,7 +13,8 @@
 - 稳定协议入口：`docs/policies/runtime_protocol.md`
 - 核心工作方式入口：根 `AGENTS.md`
 - 当前文档骨架：`project / architecture / invariants / decisions / status`
-- BenchStore 当前只开放只读 registry/catalog surface；`BenchStoreDialog`、`start_setup_patch` 与 setup 状态链继续留在 scope 外
+- BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线
+- DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research
 
 ## 当前执行链
 
@@ -35,6 +36,8 @@
 - proof runner 默认继承本机 `~/.hermes/config.yaml` 的 model / provider / api_mode / reasoning
 - 允许用 `DEEPSCIENTIST_HERMES_*` 环境变量显式 override
 - 只要没有工具事件、没有完成 full agent loop、或 final response 不是合法 object，就必须 fail-closed
+- checkpoint autonomy 的控制面继续走 `startup_contract.control_mode`
+- `continuation_policy` 继续由 runtime 持有并在 quest create、startup-context switch、resume/recovery 时做一致化收敛
 
 ## 当前优先事项
 
