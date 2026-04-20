@@ -156,6 +156,8 @@ connector 专属 prompt 片段只在需要时才会被加载。
 
 如果只有某个 connector 的行为需要调整，优先改它自己的 connector prompt，而不是把逻辑塞进全局 system prompt。
 
+runner/provider 规则继续放在 connector prompt 之外。
+
 ### 4.5 Runtime context 与 durable quest state
 
 builder 会注入很多运行时事实，例如：

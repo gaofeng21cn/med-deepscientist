@@ -299,6 +299,15 @@ Stable `executor_kind` semantics:
 - `hermes_native_proof` is opt-in only; it must not silently replace the default `codex_cli` lane
 - `hermes_native_proof` must fail closed unless a real full agent loop is proved through tool events plus a valid final object response
 
+Stable runner lane semantics:
+
+- default runner remains `codex`
+- `hermes_native_proof` stays an opt-in proof lane
+- `claude` and `opencode` stay reserved experimental runner ids
+- provider-backed profiles stay on the Codex runner contract
+- provider env sanitization for `requires_openai_auth = false` stays inside the Codex profile compatibility path
+- connector-specific prompt wording stays in connector prompt fragments while runner/provider guidance stays outside connector prompt fragments
+
 Stable `turn_reason` semantics:
 
 - `user_message`: user-originated turn

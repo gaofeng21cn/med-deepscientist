@@ -1237,6 +1237,44 @@ def test_codex_probe_failure_guidance_mentions_login_doctor_and_model(monkeypatc
     assert "codex --login" in error_text
 
 
+def test_default_runner_contract_keeps_codex_default_and_reserved_external_slots(temp_home: Path) -> None:
+    from deepscientist.config.models import default_config, default_runners
+    from deepscientist.runners.metadata import (
+        get_runner_metadata,
+        list_reserved_experimental_runner_names,
+    )
+
+    config_payload = default_config(temp_home)
+    runners_payload = default_runners()
+
+    assert config_payload["default_runner"] == "codex"
+
+    codex_metadata = get_runner_metadata("codex")
+    assert codex_metadata.contract_lane == "stable_default"
+    assert codex_metadata.runnable is True
+    assert codex_metadata.supports_provider_profile is True
+    assert runners_payload["codex"]["status"] == "stable_default"
+    assert runners_payload["codex"]["capabilities"]["provider_profile"] is True
+    assert runners_payload["codex"]["capabilities"]["env_sanitization"] is True
+
+    hermes_metadata = get_runner_metadata("hermes_native_proof")
+    assert hermes_metadata.contract_lane == "opt_in_proof"
+    assert hermes_metadata.runnable is True
+    assert runners_payload["hermes_native_proof"]["status"] == "experimental_proof"
+    assert runners_payload["hermes_native_proof"]["capabilities"]["full_agent_proof"] is True
+
+    assert list_reserved_experimental_runner_names() == ("claude", "opencode")
+    for runner_name in list_reserved_experimental_runner_names():
+        metadata = get_runner_metadata(runner_name)
+        runner_config = runners_payload[runner_name]
+        assert metadata.contract_lane == "reserved_experimental"
+        assert metadata.runnable is False
+        assert runner_config["enabled"] is False
+        assert runner_config["status"] == "reserved_experimental"
+        assert runner_config["capabilities"]["provider_profile"] is False
+        assert runner_config["capabilities"]["env_sanitization"] is False
+
+
 def test_codex_probe_falls_back_to_codex_default_model_when_configured_model_is_unavailable(
     monkeypatch,
     temp_home: Path,

@@ -32,6 +32,7 @@
 - `src/deepscientist/config/models.py::default_runners()` 默认写成 `model = "inherit"`、`model_reasoning_effort = ""`
 - `src/deepscientist/runners/codex.py::CodexRunner._build_command()` 会只在显式 override 时追加 `--model` 或 reasoning 参数
 - 因此 repo-tracked 默认语义是“继承本机 Codex 默认配置”，而不是仓内固定 `gpt-5.4 / xhigh`
+- `src/deepscientist/runners/metadata.py` 负责收敛 runner contract metadata：`codex` 是 stable default lane，`hermes_native_proof` 是 opt-in proof lane，`claude` / `opencode` 是 reserved experimental runner ids
 
 当前还挂了一条同 contract 的 opt-in proof lane：
 
@@ -79,6 +80,8 @@
 - 默认 `model = "inherit"` 与空的 `model_reasoning_effort` 表示跟随本机 `Codex` 默认配置；只有显式 override 才会改变这一点。
 - opt-in `Hermes-native` lane 也遵循相同原则：默认读取本机 `Hermes` 配置，不在 repo 内 pin model / reasoning。
 - `executor_kind` 是稳定的 executor-adapter 选择面；默认值仍是 `codex_cli`，`hermes_native_proof` 只能显式请求。
+- MiniMax / GLM / Ark / Bailian 这类 provider-backed 路径继续归属 Codex profile contract。
+- `docs/policies/runner_contract.md` 记录稳定 runner lane、provider profile、connector prompt boundary。
 
 ## 文档分工
 

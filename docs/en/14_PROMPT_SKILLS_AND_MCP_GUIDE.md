@@ -156,6 +156,8 @@ For example:
 
 If one connector needs behavior changes, change its connector prompt first before bloating the global system prompt.
 
+runner/provider guidance should stay outside connector prompt fragments.
+
 ### 4.5 Runtime context and durable quest state
 
 The builder injects runtime facts such as:

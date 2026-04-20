@@ -6,6 +6,7 @@
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
 - 当前执行真相：最底层 AI 执行继续通过 `CodexRunner -> codex exec autonomous agent loop` 落地；默认 `model / reasoning` 继承本机 `Codex` 默认配置，而不是 repo-local pin 固定型号
 - 当前 opt-in proof lane：显式 `executor_kind = hermes_native_proof` 时，可路由到 `HermesNativeProofRunner -> run_agent.AIAgent.run_conversation`；它只接受真实 full agent loop proof，不接受 chat-only relay
+- 当前 `claude` / `opencode` 只保留为 reserved experimental runner ids；当前 release 只维护 config / doc / test contract，不开放真实 runner 产品面
 - OMX 状态：已退场，仅允许历史残留
 
 ## 当前主线
@@ -27,6 +28,7 @@
   - `model = "inherit"`
   - `model_reasoning_effort = ""`
   - 只有显式 override 才会把 `--model` 或 reasoning effort 传给 CLI
+  - `claude` / `opencode` 保留 disabled metadata slot，用来承载 reserved experimental contract
 
 这意味着本仓当前并不是“自己直接打一发 chat completion”，而是把任务交给本机 `Codex` 的 autonomous agent loop 去执行。
 
@@ -39,6 +41,7 @@
 - 只要没有工具事件、没有完成 full agent loop、或 final response 不是合法 object，就必须 fail-closed
 - checkpoint autonomy 的控制面继续走 `startup_contract.control_mode`
 - `continuation_policy` 继续由 runtime 持有并在 quest create、startup-context switch、resume/recovery 时做一致化收敛
+- MiniMax / GLM / Ark / Bailian 继续走 Codex profile path；provider env sanitization 与 chat-wire tool guard 都属于 Codex compatibility lane
 
 ## 当前优先事项
 

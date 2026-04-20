@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..runners.metadata import get_runner_metadata, runner_capabilities
+
 CONFIG_NAMES = ("config", "runners", "connectors", "plugins", "mcp_servers")
 REQUIRED_CONFIG_NAMES = ("config", "runners", "connectors")
 OPTIONAL_CONFIG_NAMES = ("plugins", "mcp_servers")
@@ -101,11 +103,15 @@ def default_config(home: Path) -> dict:
 
 
 def default_runners() -> dict:
+    codex = get_runner_metadata("codex")
+    hermes_native_proof = get_runner_metadata("hermes_native_proof")
+    claude = get_runner_metadata("claude")
+    opencode = get_runner_metadata("opencode")
     return {
         "codex": {
-            "enabled": True,
-            "binary": "codex",
-            "config_dir": "~/.codex",
+            "enabled": codex.runnable,
+            "binary": codex.default_binary,
+            "config_dir": codex.default_config_dir,
             "profile": "",
             "model": "inherit",
             "model_reasoning_effort": "",
@@ -121,19 +127,35 @@ def default_runners() -> dict:
             # Mirrors DS_2027's `codex.mcp_tool_timeout_sec` default.
             "mcp_tool_timeout_sec": 180000,
             "env": {},
+            "status": codex.contract_lane,
+            "contract_note": "Primary stable runner contract. Provider-backed profiles and env sanitization stay on this lane.",
+            "capabilities": runner_capabilities("codex"),
         },
         "claude": {
             "enabled": False,
-            "binary": "claude",
-            "config_dir": "~/.claude",
+            "binary": claude.default_binary,
+            "config_dir": claude.default_config_dir,
             "model": "inherit",
             "model_reasoning_effort": "",
             "env": {},
-            "status": "reserved_todo",
+            "status": claude.contract_lane,
+            "contract_note": "Reserved experimental runner contract only. Keep disabled until a verified Claude runtime lane is owned here.",
+            "capabilities": runner_capabilities("claude"),
+        },
+        "opencode": {
+            "enabled": False,
+            "binary": opencode.default_binary,
+            "config_dir": opencode.default_config_dir,
+            "model": "inherit",
+            "model_reasoning_effort": "",
+            "env": {},
+            "status": opencode.contract_lane,
+            "contract_note": "Reserved experimental runner contract only. Keep disabled until a verified OpenCode runtime lane is owned here.",
+            "capabilities": runner_capabilities("opencode"),
         },
         "hermes_native_proof": {
-            "enabled": True,
-            "config_dir": "~/.hermes",
+            "enabled": hermes_native_proof.runnable,
+            "config_dir": hermes_native_proof.default_config_dir,
             "model": "inherit_local_hermes_default",
             "model_reasoning_effort": "inherit_local_hermes_default",
             "provider": "",
@@ -141,6 +163,8 @@ def default_runners() -> dict:
             "api_mode": "",
             "env": {},
             "status": "experimental_proof",
+            "contract_note": "Opt-in proof lane. Use only when a real full agent loop proof is explicitly requested.",
+            "capabilities": runner_capabilities("hermes_native_proof"),
         },
     }
 

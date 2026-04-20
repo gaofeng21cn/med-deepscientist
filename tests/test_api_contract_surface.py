@@ -442,6 +442,7 @@ def test_runner_settings_surface_exposes_reasoning_and_retry_controls() -> None:
     config_service_source = _read("src/deepscientist/config/service.py")
 
     assert "{ label: 'Claude', value: 'claude' }" not in settings_catalog_source
+    assert "{ label: 'OpenCode', value: 'opencode' }" not in settings_catalog_source
     assert "not runnable yet" in settings_catalog_source
     assert "key: 'model_reasoning_effort'" in settings_catalog_source
     assert "key: 'retry_on_failure'" in settings_catalog_source
@@ -458,6 +459,34 @@ def test_runner_settings_surface_exposes_reasoning_and_retry_controls() -> None:
     assert "at most `5` total attempts" in config_service_source
     assert "10s / 6x / 1800s max" in config_service_source
     assert "not runnable yet" in config_service_source
+
+
+def test_runner_contract_docs_keep_codex_default_provider_path_and_connector_boundary() -> None:
+    runtime_protocol_source = _read("docs/policies/runtime_protocol.md")
+    architecture_source = _read("docs/architecture.md")
+    status_source = _read("docs/status.md")
+    prompt_guide_en_source = _read("docs/en/14_PROMPT_SKILLS_AND_MCP_GUIDE.md")
+    prompt_guide_zh_source = _read("docs/zh/14_PROMPT_SKILLS_AND_MCP_GUIDE.md")
+    provider_guide_en_source = _read("docs/en/15_CODEX_PROVIDER_SETUP.md")
+    provider_guide_zh_source = _read("docs/zh/15_CODEX_PROVIDER_SETUP.md")
+
+    assert "default runner remains `codex`" in runtime_protocol_source
+    assert "`hermes_native_proof` stays an opt-in proof lane" in runtime_protocol_source
+    assert "`claude` and `opencode` stay reserved experimental runner ids" in runtime_protocol_source
+    assert "provider-backed profiles stay on the Codex runner contract" in runtime_protocol_source
+
+    assert "reserved experimental runner ids" in architecture_source
+    assert "reserved experimental runner ids" in status_source
+
+    assert "change its connector prompt first" in prompt_guide_en_source
+    assert "runner/provider guidance should stay outside connector prompt fragments" in prompt_guide_en_source
+    assert "优先改它自己的 connector prompt" in prompt_guide_zh_source
+    assert "runner/provider 规则继续放在 connector prompt 之外" in prompt_guide_zh_source
+
+    assert "MiniMax stays a Codex profile path" in provider_guide_en_source
+    assert "`claude` and `opencode` remain reserved experimental runner contracts" in provider_guide_en_source
+    assert "MiniMax 继续走 Codex profile 路径" in provider_guide_zh_source
+    assert "`claude` 和 `opencode` 继续保留为 reserved experimental runner contract" in provider_guide_zh_source
 
 
 def test_ui_font_loading_uses_single_stylesheet_entrypoint() -> None:

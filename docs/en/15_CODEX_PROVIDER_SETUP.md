@@ -11,6 +11,11 @@ The recommended order is always:
 3. run `ds doctor`
 4. run `ds` or `ds --codex-profile <name>`
 
+Stable contract reminders:
+
+- MiniMax stays a Codex profile path.
+- `claude` and `opencode` remain reserved experimental runner contracts in the current open-source release.
+
 ## Three supported patterns
 
 ### 1. Default OpenAI login path
