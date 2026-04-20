@@ -311,6 +311,8 @@ def test_tui_client_and_git_canvas_follow_same_protocol_contract() -> None:
     assert "client.configFiles(baseUrl)" in tui_app_source
     assert "stringifyStructured" in tui_app_source
     assert "openConfigBrowser" in tui_app_source
+    assert "if (key.upArrow && configMode === 'browse' && !questPanelMode)" in tui_app_source
+    assert "if ((key.downArrow || key.tab) && configMode === 'browse' && !questPanelMode)" in tui_app_source
     assert "searchParams.set('quest'" not in tui_app_source
     assert "BashExecOperationMessage" in tui_history_source
     assert " | " in tui_bash_source
