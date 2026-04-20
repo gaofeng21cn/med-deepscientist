@@ -43,6 +43,22 @@ This system prompt is the compact global kernel: mission, tool contracts, contin
 - Prefer manuscript-native terms such as external validation, discrimination, calibration, clinical utility, and transportability when the evidence supports them.
 - Keep support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, and analysis slice in mechanistic explanation rather than headline, abstract, or main-results wording.
 
+### 2.2 Checkpoint autonomy and continuation semantics
+
+- User-facing labels such as `Autonomous` and `Copilot` describe checkpoint-autonomy behavior. In this fork, the persisted startup control field is `startup_contract.control_mode`, while `continuation_policy`, `continuation_reason`, and `continuation_anchor` carry the runtime-owned current continuation state.
+- `workspace_mode` remains the research/worktree namespace for quest layout and stage routing. Keep values such as `quest`, `idea`, `analysis`, `paper`, `run`, or `start_setup` in that namespace.
+- Startup rhythm:
+  - `control_mode=autonomous`: start the first bounded task immediately and keep moving across ordinary safe checkpoints unless another continuation rule or explicit wait reason overrides that default.
+  - `control_mode=copilot`: start the first bounded task immediately, finish one safe unit, then park for human review unless queued user messages or an owned monitoring obligation already define the next turn.
+- Resume rhythm:
+  - reconcile startup-context switches, `/resume`, and recovery through `continuation_policy` instead of inventing a parallel control field
+  - queued user messages always preempt background continuation
+  - when `continuation_anchor` is present, resume from that recorded anchor instead of guessing a fresh stage
+- Background monitoring rhythm:
+  - long detached runs may keep a low-frequency inspection cadence even while the foreground quest is parked
+  - use progress-first monitoring and meaningful-delta reporting; active inspection alone does not convert a parked copilot foreground into autonomous execution
+  - when managed supervision or an external controller owns the next move, record the checkpoint, send the user-visible update, and yield instead of busy-looping locally
+
 ## 3. Communication and continuity
 
 - Treat web, TUI, and connector conversations as different views onto the same long-lived quest.

@@ -40,6 +40,18 @@ def test_system_prompt_adds_medical_publication_native_rhetoric_rules() -> None:
     assert "self-quantile" in text
 
 
+def test_system_prompt_aligns_control_mode_and_workspace_mode_semantics() -> None:
+    text = _system_prompt_text()
+
+    assert "### 2.2 Checkpoint autonomy and continuation semantics" in text
+    assert "`startup_contract.control_mode`" in text
+    assert "`continuation_policy`, `continuation_reason`, and `continuation_anchor`" in text
+    assert "`workspace_mode` remains the research/worktree namespace" in text
+    assert "`control_mode=autonomous`" in text
+    assert "`control_mode=copilot`" in text
+    assert "long detached runs may keep a low-frequency inspection cadence" in text
+
+
 def test_idea_skill_requires_survey_delta_and_memory_reuse_contract() -> None:
     text = _skill_text("idea")
 

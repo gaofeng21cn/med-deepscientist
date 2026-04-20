@@ -76,7 +76,21 @@ git worktree list --porcelain
 - decision: `defer_incompatible`
 - rationale:
   - 当前 fork 继续把 `workspace_mode` 用在 research/worktree 状态命名空间。
-  - upstream 这组提交把它当成 runtime control surface，语义依旧分叉，继续直接吸收会混淆持久化字段权责。
+  - upstream 这组提交把 `workspace_mode` 当成 `copilot | autonomous` 的 runtime control surface，继续直接吸收会把研究阶段命名空间和 checkpoint autonomy 控制面压进同一个持久化字段。
+  - 当前 fork 的 runtime 真相已经稳定落在 `startup_contract.control_mode + continuation_policy + continuation_reason (+ continuation_anchor)`；resume / recovery / external-progress reconcile 都围绕这组字段收敛。
+  - 这意味着 follow-up 的安全承接路径是语义对齐、文档对齐、prompt 对齐，而不是把 upstream 的 `workspace_mode` 直接搬进 runtime persistence。
+
+### Candidate D local semantic landing
+
+- upstream `Autonomous` 解释在当前 fork 映射到：
+  - `startup_contract.control_mode = autonomous`
+  - 普通安全 checkpoint 的默认续跑态为 `continuation_policy = auto`
+  - 后台长任务巡检继续走 progress-first cadence，只有真实阻塞、显式等待原因或外层控制权切换才会改变当前 continuation truth
+- upstream `Copilot` 解释在当前 fork 映射到：
+  - `startup_contract.control_mode = copilot`
+  - 普通安全 checkpoint 完成后默认转入 `continuation_policy = wait_for_user_or_resume`
+  - quest 可以在前台待命的同时保留低频巡检；巡检负责可见性和恢复判断，前台 checkpoint autonomy 继续由 `control_mode + continuation_policy` 表达
+- `workspace_mode` 继续保留为 `quest | idea | analysis | paper | run | start_setup` 这类 research/worktree 语义，不承接 runtime control authority
 
 ### Candidate E: DeepXiv settings and setup flow
 
@@ -135,3 +149,4 @@ git diff --check
 
 - 经过这轮 follow-up，当前窗口里继续值得吸收的 upstream 小 slice 已经落到 `main`。
 - 剩余未吸收候选继续集中在 `BenchStore / DeepXiv / workspace_mode` 这三组产品或 contract 扩面，后续应保持按需拆分、按兼容性门槛再审。
+- 其中 `workspace_mode` 这组后续工作已经收敛到一条清晰 lane：吸收 upstream 对 `Copilot / Autonomous`、启动节奏、续跑节奏、后台巡检节奏的成熟解释，同时继续让本地 runtime persistence 维持 `control_mode + continuation_policy` 合同。

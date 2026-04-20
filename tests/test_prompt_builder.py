@@ -945,6 +945,8 @@ def test_prompt_builder_mentions_control_mode_surface(temp_home: Path) -> None:
     assert "control_mode: copilot" in prompt
     assert "control_mode_rule: in copilot mode" in prompt
     assert "continuation_policy: wait_for_user_or_resume" in prompt
+    assert "`workspace_mode` remains the research/worktree namespace" in prompt
+    assert "long detached runs may keep a low-frequency inspection cadence" in prompt
 
 
 def test_prompt_builder_delegates_stage_specific_sop_to_skills(temp_home: Path) -> None:

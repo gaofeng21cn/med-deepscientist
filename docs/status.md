@@ -40,8 +40,10 @@
 - proof runner 默认继承本机 `~/.hermes/config.yaml` 的 model / provider / api_mode / reasoning
 - 允许用 `DEEPSCIENTIST_HERMES_*` 环境变量显式 override
 - 只要没有工具事件、没有完成 full agent loop、或 final response 不是合法 object，就必须 fail-closed
-- checkpoint autonomy 的控制面继续走 `startup_contract.control_mode`
-- `continuation_policy` 继续由 runtime 持有并在 quest create、startup-context switch、resume/recovery 时做一致化收敛
+- `Copilot / Autonomous` 这组用户侧命名继续映射到 `startup_contract.control_mode`：`autonomous` 表示普通安全 checkpoint 默认继续推进，`copilot` 表示完成当前安全工作单元后转入人工审阅待命
+- `continuation_policy` 与 `continuation_reason` 继续由 runtime 持有，并在 quest create、startup-context switch、resume/recovery、external-progress reconcile 时做一致化收敛
+- `workspace_mode` 继续保留为 research/worktree 命名空间，承载 `quest | idea | analysis | paper | run | start_setup` 这类阶段或布局语义，不承担 checkpoint autonomy 控制权
+- 后台长任务继续使用 progress-first 巡检节奏 `60s -> 120s -> 300s -> 600s -> 1800s ...`；`copilot` 允许前台待命同时低频巡检，`autonomous` 允许在无显式阻塞时基于巡检结果继续下一步
 - MiniMax / GLM / Ark / Bailian 继续走 Codex profile path；provider env sanitization 与 chat-wire tool guard 都属于 Codex compatibility lane
 
 ## 当前优先事项
@@ -61,5 +63,6 @@
 ## 补充材料
 
 - 上游 intake 说明：`docs/upstream_intake.md`
+- workspace-mode / continuation 语义说明：`docs/zh/20_WORKSPACE_MODES_GUIDE.md`、`docs/en/20_WORKSPACE_MODES_GUIDE.md`
 - baseline / 审计说明：`docs/medical_fork_baseline.md`
 - 公开用户文档：`docs/en/`、`docs/zh/`
