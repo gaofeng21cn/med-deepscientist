@@ -54,6 +54,7 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - Matplotlib is acceptable for a first draft or data-faithful paper figure, but captions must remain manuscript-native: do not append tool names, service recommendations, URLs, or generation provenance unless the user explicitly requested manuscript-surface disclosure.
 - Prefer vector-first export for paper figures: `pdf` or `svg`, plus one `png` preview when helpful.
 - When practical, size figures so they can survive later single-column or double-column placement without unreadable text.
+- When the figure is a standard bar, line, scatter, or radar chart built from structured results, prefer `paper-plot` before inventing a fresh plotting stack.
 - For any figure that will enter the draft, appendix, or paper bundle, open `figure-polish/SKILL.md` and complete its render-inspect-revise pass before treating the figure as final.
 - If you generate figure code in Python, start from the system prompt Morandi plotting template and only adjust figure size, labels, and series colors as needed.
 - If the runtime starts an auto-continue turn with no new user message, keep drafting or verifying from the durable state and active requirements instead of replaying the previous user turn.

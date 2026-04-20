@@ -16,8 +16,9 @@ We especially thank the following projects for their ideas, research direction, 
 - Overleaf / overleaf/overleaf
 - Monaco Editor / microsoft/monaco-editor
 - Novel / steven-tey/novel
+- paper-plot-skills / Trae1ounG/paper-plot-skills
 
-These projects have been important references for thinking about automated research, open-ended exploration, evolutionary search, experiment organization, long-horizon research agents, collaborative LaTeX editing workflows, browser-based code editing experiences, and rich notebook-style writing interactions.
+These projects have been important references for thinking about automated research, open-ended exploration, evolutionary search, experiment organization, long-horizon research agents, collaborative LaTeX editing workflows, browser-based code editing experiences, rich notebook-style writing interactions, and paper-figure generation workflows.
 
 ## Personal acknowledgements
 
