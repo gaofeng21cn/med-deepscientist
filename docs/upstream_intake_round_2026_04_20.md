@@ -10,8 +10,8 @@
 - merge_base: `a7853fda3432d37f6dee91fa6e66330f564bd8be`
 - comparison_window_before_round: `main@c2074db` vs `upstream/main@bfc8675`
 - rev_list_before_round: `ahead=127, behind=132`
-- execution_status: `absorbed_on_main_with_local_branch_followup`
-- main_head_after_round: `afb01eb`
+- execution_status: `absorbed_on_main_with_followup_round`
+- main_head_after_round: `1a8139c`
 
 ## 证据
 

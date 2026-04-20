@@ -147,6 +147,24 @@ Remote semantics are explicit:
   - `uv run pytest -q tests/test_memory_and_artifact.py -k idea_interaction_message`
   - `scripts/verify.sh`
 
+### Round 3 UI and TUI micro-intake
+
+- local_commit: `945206f`
+- upstream_commit: `3037b537c5ff7ebff10fc89d315aa95614513798`
+- kind: `ui_bugfix`
+- reason: workspace stage details, lab text summaries, and persisted custom tabs now normalize circular objects through a dedicated front-end helper instead of relying on raw `JSON.stringify(...)`.
+- verification:
+  - `cd src/ui && npm run build`
+  - `uv run pytest -q tests/test_ui_source_contracts.py`
+
+- local_commit: `1a8139c`
+- upstream_commit: `52472325aeeda8e17ff23b7155073aa9724ba246`
+- kind: `tui_bugfix`
+- reason: the TUI quest browser now lets `QuestScreen` own arrow navigation while `AppContainer` limits its global browse shortcuts to config browse mode, so one keypress advances one item.
+- verification:
+  - `npm --prefix src/tui run build`
+  - `uv run pytest -q tests/test_api_contract_surface.py -k tui_client_and_git_canvas_follow_same_protocol_contract`
+
 ## Lock Policy
 
 - mode: `regenerate_in_fork`

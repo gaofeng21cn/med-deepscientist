@@ -89,6 +89,16 @@
       "commit": "223f08615899c74e51d6195a96ff8085ad10f190",
       "kind": "runtime_bugfix",
       "summary": "Refine baseline labels and idea interaction text"
+    },
+    {
+      "commit": "945206f40edb801ff0d1a9c6fd8d15d91b25843a",
+      "kind": "ui_bugfix",
+      "summary": "Harden circular-safe serialization across workspace surfaces"
+    },
+    {
+      "commit": "1a8139c17a2b84d4090838c18bcd9bf4cfca3356",
+      "kind": "tui_bugfix",
+      "summary": "Avoid double arrow handling in the TUI quest browser"
     }
   ],
   "lock_policy": {

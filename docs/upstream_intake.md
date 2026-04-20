@@ -13,6 +13,8 @@ This workflow exists to filter occasional upstream changes. It is not the primar
 - [`docs/upstream_intake_round_2026_04_01.md`](./upstream_intake_round_2026_04_01.md): first audited upstream intake split for the current `behind_count=7` gap against `upstream/main`
 - [`docs/upstream_intake_round_2026_04_19.md`](./upstream_intake_round_2026_04_19.md): targeted runtime and launcher hardening intake for stalled-turn recovery, Codex provider compatibility, and launcher management diagnostics
 - [`docs/upstream_intake_round_2026_04_19_followup.md`](./upstream_intake_round_2026_04_19_followup.md): follow-up classification for publishability-gate policy drift and partial backend-only absorption from the baseline-compare preview bundle
+- [`docs/upstream_intake_round_2026_04_20.md`](./upstream_intake_round_2026_04_20.md): UI build alignment, quest lazy-load intake, zombie-turn reconciliation, and branch cleanup on `main`
+- [`docs/upstream_intake_round_2026_04_20_followup.md`](./upstream_intake_round_2026_04_20_followup.md): follow-up classification confirming the remaining valuable slices as frontend circular-safe serialization and TUI quest-browser key handling
 
 ## Remote Convention
 
