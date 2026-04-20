@@ -518,7 +518,8 @@ class BashExecService:
             return self._session_payload(quest_root, meta)
         stop_reason = _normalize_string(meta.get("stop_reason"))
         meta["status"] = "terminated" if stop_reason else "failed"
-        meta.setdefault("finished_at", utc_now())
+        if not _normalize_string(meta.get("finished_at")):
+            meta["finished_at"] = utc_now()
         meta["updated_at"] = utc_now()
         self._write_meta(quest_root, bash_id, meta)
         return self._session_payload(quest_root, meta)

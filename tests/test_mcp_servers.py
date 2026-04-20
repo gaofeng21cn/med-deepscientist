@@ -1684,6 +1684,44 @@ def test_bash_exec_request_stop_uses_live_monitor_for_exec_sessions(temp_home: P
     asyncio.run(scenario())
 
 
+def test_bash_exec_reconcile_stale_terminated_session_sets_finished_at(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create("stale bash reconcile quest")
+    quest_root = Path(quest["quest_root"])
+    service = BashExecService(temp_home)
+    bash_id = "bash-stale-terminated"
+    session_dir = service.session_dir(quest_root, bash_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        service.meta_path(quest_root, bash_id),
+        {
+            "id": bash_id,
+            "bash_id": bash_id,
+            "quest_id": quest["quest_id"],
+            "status": "terminating",
+            "kind": "exec",
+            "command": "printf 'fixture\\n'",
+            "workdir": "",
+            "started_at": "2026-03-20T00:00:00+00:00",
+            "finished_at": None,
+            "updated_at": "2026-03-20T00:00:01+00:00",
+            "stop_reason": "pytest-stop",
+            "monitor_pid": 999999,
+            "process_pid": 999998,
+            "process_group_id": 999998,
+        },
+    )
+    service.terminal_log_path(quest_root, bash_id).write_text("", encoding="utf-8")
+    service.log_path(quest_root, bash_id).write_text("", encoding="utf-8")
+
+    reconciled = service.get_session(quest_root, bash_id)
+
+    assert reconciled["status"] == "terminated"
+    assert isinstance(reconciled.get("finished_at"), str)
+    assert reconciled["finished_at"]
+
+
 def test_bash_exec_sleep_protocol_supports_sleep_and_existing_session_waits(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)
