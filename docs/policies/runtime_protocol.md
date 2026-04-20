@@ -217,6 +217,7 @@ Stable guarantees:
 - it is persisted and returned in snapshot payloads
 - runtime turn policy may read these keys:
   - `need_research_paper`
+  - `control_mode`
   - `launch_mode`
   - `standard_profile`
   - `custom_profile`
@@ -229,12 +230,18 @@ Stable guarantees:
   - `user_language`
   - `need_research_paper`
   - `decision_policy`
+  - `control_mode`
   - `launch_mode`
   - `standard_profile`
   - `custom_profile`
   - `baseline_execution_policy`
   - `review_followup_policy`
   - `manuscript_edit_mode`
+
+`startup_contract.control_mode` is the runtime control surface for checkpoint autonomy:
+
+- `autonomous`: ordinary safe checkpoints continue automatically unless another continuation rule or explicit wait reason takes precedence
+- `copilot`: default runtime continuation is reconciled to `wait_for_user_or_resume` so the quest parks for human review between checkpoints
 
 Controller-owned extensions are still allowed at the same flat level and must be durably persisted plus echoed back in snapshots. The authoritative stable extension set currently includes:
 

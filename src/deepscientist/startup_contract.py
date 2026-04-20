@@ -9,6 +9,7 @@ RUNTIME_OWNED_STARTUP_CONTRACT_KEYS: tuple[str, ...] = (
     "need_research_paper",
     "publishability_gate_mode",
     "decision_policy",
+    "control_mode",
     "launch_mode",
     "standard_profile",
     "custom_profile",
@@ -47,6 +48,7 @@ CONTROLLER_OWNED_STARTUP_CONTRACT_EXTENSION_KEYS: tuple[str, ...] = (
 _OPTIONAL_STRING_RUNTIME_KEYS = {
     "user_language",
     "decision_policy",
+    "control_mode",
     "launch_mode",
     "standard_profile",
     "custom_profile",
@@ -56,6 +58,10 @@ _OPTIONAL_STRING_RUNTIME_KEYS = {
 }
 
 _PUBLISHABILITY_GATE_MODES = {"off", "warn", "enforce"}
+_CONTROL_MODES = {"autonomous", "copilot"}
+
+CONTROL_MODE_COPILOT_CONTINUATION_REASON = "control_mode_copilot"
+CONTROL_MODE_AUTONOMOUS_CONTINUATION_REASON = "control_mode_autonomous"
 
 
 def _normalize_runtime_owned_value(*, key: str, value: object) -> Any:
@@ -75,6 +81,15 @@ def _normalize_runtime_owned_value(*, key: str, value: object) -> Any:
         normalized = value.strip().lower()
         if normalized not in _PUBLISHABILITY_GATE_MODES:
             raise TypeError("startup_contract.publishability_gate_mode must be one of off, warn, enforce, or null")
+        return normalized
+    if key == "control_mode":
+        if value is None:
+            return None
+        if not isinstance(value, str) or not value.strip():
+            raise TypeError("startup_contract.control_mode must be one of autonomous, copilot, or null")
+        normalized = value.strip().lower()
+        if normalized not in _CONTROL_MODES:
+            raise TypeError("startup_contract.control_mode must be one of autonomous, copilot, or null")
         return normalized
     if key in _OPTIONAL_STRING_RUNTIME_KEYS:
         if value is None:
@@ -138,3 +153,42 @@ def startup_contract_extensions(
         for key, value in normalized.items()
         if key not in RUNTIME_OWNED_STARTUP_CONTRACT_KEYS
     }
+
+
+def startup_contract_control_mode(
+    startup_contract: dict[str, Any] | None,
+    *,
+    default: str = "autonomous",
+) -> str:
+    if not isinstance(startup_contract, dict):
+        return default
+    value = str(startup_contract.get("control_mode") or "").strip().lower()
+    if value in _CONTROL_MODES:
+        return value
+    return default
+
+
+def reconcile_continuation_policy_for_control_mode(
+    *,
+    startup_contract: dict[str, Any] | None,
+    continuation_policy: object,
+    continuation_reason: object = None,
+) -> dict[str, str] | None:
+    control_mode = startup_contract_control_mode(startup_contract)
+    normalized_policy = str(continuation_policy or "").strip().lower() or "auto"
+    normalized_reason = str(continuation_reason or "").strip().lower() or None
+    if control_mode == "copilot" and normalized_policy == "auto":
+        return {
+            "continuation_policy": "wait_for_user_or_resume",
+            "continuation_reason": CONTROL_MODE_COPILOT_CONTINUATION_REASON,
+        }
+    if (
+        control_mode == "autonomous"
+        and normalized_policy == "wait_for_user_or_resume"
+        and normalized_reason == CONTROL_MODE_COPILOT_CONTINUATION_REASON
+    ):
+        return {
+            "continuation_policy": "auto",
+            "continuation_reason": CONTROL_MODE_AUTONOMOUS_CONTINUATION_REASON,
+        }
+    return None

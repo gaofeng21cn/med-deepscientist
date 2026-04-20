@@ -3926,6 +3926,119 @@ def test_quest_startup_context_decision_policy_switch_preserves_completion_appro
     assert runtime_state["continuation_reason"] == "external_progress:run-002"
 
 
+def test_quest_create_control_mode_copilot_initializes_waiting_continuation_policy(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+
+    payload = app.handlers.quest_create(
+        {
+            "goal": "Create quest in copilot control mode.",
+            "quest_id": "quest-control-mode-copilot",
+            "startup_contract": {
+                "control_mode": "copilot",
+            },
+        }
+    )
+
+    assert payload["snapshot"]["startup_contract"]["control_mode"] == "copilot"
+    assert payload["snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert payload["snapshot"]["continuation_reason"] == "control_mode_copilot"
+
+
+def test_quest_startup_context_control_mode_switch_to_autonomous_reconciles_policy_and_schedules_turn(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "Switch control mode from copilot to autonomous.",
+        quest_id="quest-control-mode-live-switch",
+        startup_contract={"control_mode": "copilot"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="active",
+        continuation_policy="wait_for_user_or_resume",
+        continuation_reason="control_mode_copilot",
+    )
+
+    scheduled: list[tuple[str, str, float]] = []
+
+    def _fake_schedule_turn_later(target_quest_id: str, *, reason: str, delay_seconds: float) -> None:
+        scheduled.append((target_quest_id, reason, delay_seconds))
+
+    monkeypatch.setattr(app, "_schedule_turn_later", _fake_schedule_turn_later)
+
+    payload = app.handlers.quest_startup_context(
+        quest_id,
+        {
+            "startup_contract": {
+                "control_mode": "autonomous",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["startup_contract"]["control_mode"] == "autonomous"
+    assert payload["snapshot"]["continuation_policy"] == "auto"
+    assert payload["snapshot"]["continuation_reason"] == "control_mode_autonomous"
+    assert scheduled == [(quest_id, "auto_continue", 0.2)]
+
+
+def test_quest_startup_context_control_mode_switch_preserves_explicit_wait_reasons(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "Switch control mode while explicit wait is active.",
+        quest_id="quest-control-mode-explicit-wait",
+        startup_contract={"control_mode": "copilot"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="waiting_for_user",
+        active_interaction_id="decision-001",
+        continuation_policy="wait_for_user_or_resume",
+        continuation_reason="non_retryable_runner_error",
+    )
+
+    scheduled: list[tuple[str, str, float]] = []
+
+    def _fake_schedule_turn_later(target_quest_id: str, *, reason: str, delay_seconds: float) -> None:
+        scheduled.append((target_quest_id, reason, delay_seconds))
+
+    monkeypatch.setattr(app, "_schedule_turn_later", _fake_schedule_turn_later)
+
+    payload = app.handlers.quest_startup_context(
+        quest_id,
+        {
+            "startup_contract": {
+                "control_mode": "autonomous",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["startup_contract"]["control_mode"] == "autonomous"
+    assert payload["snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert payload["snapshot"]["continuation_reason"] == "non_retryable_runner_error"
+    assert scheduled == []
+
+
 def test_quest_startup_context_handler_treats_requested_baseline_ref_as_metadata_only(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

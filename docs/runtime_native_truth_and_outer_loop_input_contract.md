@@ -67,6 +67,7 @@
   - `live`
   - `stale`
   - `none`
+- `continuation_policy` 继续是 runtime-owned 调度字段；默认值可由 `startup_contract.control_mode` 推导，但一旦进入显式 wait / external-progress / none 等状态，仍以 runtime 当前值为准。
 - `interaction_requires_user_input=true` 时，outer loop 不得继续把 quest 叙述成“稳定托管自动推进中”。
 
 ## 3. Event emission rules

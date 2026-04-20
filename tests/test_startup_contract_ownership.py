@@ -18,6 +18,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "need_research_paper": True,
         "publishability_gate_mode": " warn ",
         "decision_policy": "autonomous",
+        "control_mode": " copilot ",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
         "baseline_execution_policy": "reuse_existing_only",
@@ -37,6 +38,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "need_research_paper": True,
         "publishability_gate_mode": "warn",
         "decision_policy": "autonomous",
+        "control_mode": "copilot",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
         "baseline_execution_policy": "reuse_existing_only",
@@ -53,6 +55,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "need_research_paper": True,
         "publishability_gate_mode": "warn",
         "decision_policy": "autonomous",
+        "control_mode": "copilot",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
         "baseline_execution_policy": "reuse_existing_only",
@@ -82,6 +85,7 @@ def test_quest_create_persists_normalized_runtime_owned_subset_and_extensions(te
                 "need_research_paper": False,
                 "publishability_gate_mode": "enforce",
                 "decision_policy": "autonomous",
+                "control_mode": "copilot",
                 "launch_mode": "custom",
                 "custom_profile": "continue_existing_state",
                 "scope": "full_research",
@@ -97,6 +101,7 @@ def test_quest_create_persists_normalized_runtime_owned_subset_and_extensions(te
     assert startup_contract["need_research_paper"] is False
     assert startup_contract["publishability_gate_mode"] == "enforce"
     assert startup_contract["decision_policy"] == "autonomous"
+    assert startup_contract["control_mode"] == "copilot"
     assert startup_contract["launch_mode"] == "custom"
     assert startup_contract["custom_profile"] == "continue_existing_state"
     assert startup_contract["scope"] == "full_research"
@@ -147,6 +152,13 @@ def test_normalize_startup_contract_rejects_invalid_publishability_gate_mode() -
 
     with pytest.raises(TypeError, match="startup_contract.publishability_gate_mode"):
         module.normalize_startup_contract({"publishability_gate_mode": "maybe"})
+
+
+def test_normalize_startup_contract_rejects_invalid_control_mode() -> None:
+    module = importlib.import_module("deepscientist.startup_contract")
+
+    with pytest.raises(TypeError, match="startup_contract.control_mode"):
+        module.normalize_startup_contract({"control_mode": "hands_off"})
 
 
 def test_quest_create_rejects_invalid_runtime_owned_startup_contract_type(temp_home: Path) -> None:

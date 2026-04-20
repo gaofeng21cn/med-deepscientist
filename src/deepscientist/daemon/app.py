@@ -78,6 +78,7 @@ from ..runtime_logs import JsonlLogger
 from ..runtime_storage import maintain_quest_runtime_storage
 from ..shared import append_jsonl, ensure_dir, generate_id, iter_jsonl, read_json, read_jsonl, read_jsonl_tail, read_text, resolve_within, run_command, slugify, utc_now, which, write_json
 from ..skills import SkillInstaller
+from ..startup_contract import reconcile_continuation_policy_for_control_mode, startup_contract_control_mode
 from ..team import SingleTeamService
 from ..connector.weixin_support import (
     DEFAULT_WEIXIN_BOT_TYPE,
@@ -1618,6 +1619,7 @@ class DaemonApp:
             else {}
         )
         previous_decision_policy = str(previous_startup_contract.get("decision_policy") or "").strip().lower() or "user_gated"
+        previous_control_mode = startup_contract_control_mode(previous_startup_contract)
         kwargs: dict[str, object] = {}
         if requested_baseline_ref_present:
             kwargs["requested_baseline_ref"] = requested_baseline_ref
@@ -1631,6 +1633,23 @@ class DaemonApp:
             else {}
         )
         current_decision_policy = str(startup_contract_snapshot.get("decision_policy") or "").strip().lower() or "user_gated"
+        current_control_mode = startup_contract_control_mode(startup_contract_snapshot)
+        continuation_updates = reconcile_continuation_policy_for_control_mode(
+            startup_contract=startup_contract_snapshot,
+            continuation_policy=snapshot.get("continuation_policy"),
+            continuation_reason=snapshot.get("continuation_reason"),
+        )
+        if continuation_updates:
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                continuation_policy=continuation_updates["continuation_policy"],
+                continuation_reason=continuation_updates["continuation_reason"],
+                continuation_updated_at=utc_now(),
+                event_source="quest_startup_context",
+                event_kind="runtime_continuation_changed",
+                event_summary=f"Quest {quest_id} continuation policy reconciled for control mode `{current_control_mode}`.",
+            )
+            snapshot = self.quest_service.snapshot(quest_id)
         if previous_decision_policy != "autonomous" and current_decision_policy == "autonomous":
             reconciliation = self.artifact_service.reconcile_waiting_requests_for_decision_policy(
                 quest_root,
@@ -1640,6 +1659,23 @@ class DaemonApp:
             if reconciliation.get("auto_continue_ready"):
                 self._schedule_turn_later(quest_id, reason="auto_continue", delay_seconds=0.2)
             snapshot = self.quest_service.snapshot(quest_id)
+        switched_to_autonomous_control_mode = (
+            previous_control_mode != "autonomous"
+            and current_control_mode == "autonomous"
+        )
+        if (
+            switched_to_autonomous_control_mode
+            and continuation_updates
+            and continuation_updates.get("continuation_policy") == "auto"
+            and not str(snapshot.get("active_run_id") or "").strip()
+        ):
+            status = str(snapshot.get("status") or snapshot.get("runtime_status") or "").strip().lower()
+            if status not in {"completed", "paused", "stopped", "error"}:
+                if int(snapshot.get("pending_user_message_count") or 0) > 0:
+                    self.schedule_turn(quest_id, reason="queued_user_messages")
+                    snapshot = self.quest_service.snapshot(quest_id)
+                elif not snapshot.get("waiting_interaction_id"):
+                    self._schedule_turn_later(quest_id, reason="auto_continue", delay_seconds=0.2)
         return snapshot
 
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:

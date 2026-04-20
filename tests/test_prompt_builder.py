@@ -923,6 +923,31 @@ def test_prompt_builder_mentions_autonomous_decision_mode(temp_home: Path) -> No
     assert "explicit quest-completion approval is still allowed" in prompt
 
 
+def test_prompt_builder_mentions_control_mode_surface(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create(
+        "pause after checkpoints for human review",
+        startup_contract={
+            "control_mode": "copilot",
+            "need_research_paper": False,
+        },
+    )
+    builder = PromptBuilder(repo_root(), temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="decision",
+        user_message="Continue with checkpoint-aware supervision.",
+        model="gpt-5.4",
+    )
+
+    assert "control_mode: copilot" in prompt
+    assert "control_mode_rule: in copilot mode" in prompt
+    assert "continuation_policy: wait_for_user_or_resume" in prompt
+
+
 def test_prompt_builder_delegates_stage_specific_sop_to_skills(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
 

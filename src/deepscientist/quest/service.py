@@ -35,7 +35,7 @@ from ..home import repo_root
 from ..registries import BaselineRegistry
 from ..shared import append_jsonl, ensure_dir, generate_id, iter_jsonl, read_json, read_jsonl, read_jsonl_tail, read_text, read_yaml, resolve_within, run_command, run_command_bytes, sha256_text, slugify, utc_now, write_json, write_text, write_yaml
 from ..skills import SkillInstaller
-from ..startup_contract import normalize_startup_contract
+from ..startup_contract import normalize_startup_contract, reconcile_continuation_policy_for_control_mode
 from ..web_search import extract_web_search_payload
 from .layout import (
     QUEST_DIRECTORIES,
@@ -5791,12 +5791,18 @@ class QuestService:
                 active_run_id=active_run_id or None,
                 last_transition_at=last_transition_at,
             )
+            continuation_updates = reconcile_continuation_policy_for_control_mode(
+                startup_contract=quest_data.get("startup_contract") if isinstance(quest_data.get("startup_contract"), dict) else None,
+                continuation_policy=runtime_state.get("continuation_policy"),
+                continuation_reason=runtime_state.get("continuation_reason"),
+            ) or {}
             self.update_runtime_state(
                 quest_root=quest_root,
                 status="stopped",
                 active_run_id=None,
                 worker_running=False,
                 stop_reason="crash_recovered",
+                **continuation_updates,
                 event_source="quest_runtime_recovery",
                 event_kind="runtime_reconciled",
                 event_summary=(
@@ -6728,6 +6734,11 @@ class QuestService:
         pending_count = len((queue_payload or {}).get("pending") or [])
         timestamp = quest_yaml.get("updated_at") or quest_yaml.get("created_at") or utc_now()
         status = str(quest_yaml.get("status") or "idle")
+        continuation_defaults = reconcile_continuation_policy_for_control_mode(
+            startup_contract=quest_yaml.get("startup_contract") if isinstance(quest_yaml.get("startup_contract"), dict) else None,
+            continuation_policy="auto",
+            continuation_reason=None,
+        ) or {}
         return {
             "quest_id": str(quest_yaml.get("quest_id") or quest_root.name),
             "status": status,
@@ -6741,9 +6752,9 @@ class QuestService:
             "last_tool_activity_at": None,
             "last_tool_activity_name": None,
             "tool_calls_since_last_artifact_interact": 0,
-            "continuation_policy": "auto",
+            "continuation_policy": continuation_defaults.get("continuation_policy") or "auto",
             "continuation_anchor": None,
-            "continuation_reason": None,
+            "continuation_reason": continuation_defaults.get("continuation_reason"),
             "continuation_updated_at": None,
             "last_resume_source": None,
             "last_resume_at": None,

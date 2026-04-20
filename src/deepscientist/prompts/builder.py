@@ -11,7 +11,7 @@ from ..memory import MemoryService
 from ..memory.frontmatter import load_markdown_document
 from ..quest import QuestService
 from ..registries import BaselineRegistry
-from ..startup_contract import runtime_owned_startup_contract, startup_contract_extensions
+from ..startup_contract import runtime_owned_startup_contract, startup_contract_control_mode, startup_contract_extensions
 from ..shared import read_json, read_text, read_yaml
 
 STANDARD_SKILLS = (
@@ -868,6 +868,12 @@ class PromptBuilder:
         return "user_gated"
 
     @staticmethod
+    def _control_mode(snapshot: dict) -> str:
+        return startup_contract_control_mode(
+            snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
+        )
+
+    @staticmethod
     def _launch_mode(snapshot: dict) -> str:
         startup_contract = runtime_owned_startup_contract(
             snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
@@ -1189,6 +1195,7 @@ class PromptBuilder:
         bound_conversations = snapshot.get("bound_conversations") or []
         need_research_paper = self._need_research_paper(snapshot)
         decision_policy = self._decision_policy(snapshot)
+        control_mode = self._control_mode(snapshot)
         launch_mode = self._launch_mode(snapshot)
         standard_profile = self._standard_profile(snapshot)
         custom_profile = self._custom_profile(snapshot)
@@ -1198,6 +1205,7 @@ class PromptBuilder:
             f"- current_turn_language_bias: {'zh' if chinese_turn else 'en'}",
             f"- bound_conversation_count: {len(bound_conversations)}",
             f"- decision_policy: {decision_policy}",
+            f"- control_mode: {control_mode}",
             f"- publishability_gate_mode: {publishability_gate_mode if need_research_paper else 'n/a'}",
             f"- launch_mode: {launch_mode}",
             f"- standard_profile: {standard_profile if launch_mode == 'standard' else 'n/a'}",
@@ -1238,6 +1246,14 @@ class PromptBuilder:
             "- workspace_discipline: read and modify code inside current_workspace_root; treat quest_root as the canonical repo identity and durable runtime root",
             "- binary_safety: do not open or rewrite large binary assets unless truly necessary; prefer summaries, metadata, and targeted inspection first",
         ]
+        if control_mode == "copilot":
+            lines.append(
+                "- control_mode_rule: in copilot mode, finish the current safe unit of work, then park for human review unless queued user messages or external-progress monitoring already define the next turn."
+            )
+        else:
+            lines.append(
+                "- control_mode_rule: in autonomous mode, continue across ordinary safe checkpoints without waiting for a human checkpoint unless a real blocker or explicit approval boundary appears."
+            )
         if decision_policy == "autonomous":
             lines.extend(
                 [
@@ -1315,6 +1331,7 @@ class PromptBuilder:
             f"- current_workspace_branch: {snapshot.get('current_workspace_branch') or 'none'}",
             f"- current_workspace_root: {snapshot.get('current_workspace_root') or 'none'}",
             f"- workspace_mode: {snapshot.get('workspace_mode') or 'quest'}",
+            f"- control_mode: {self._control_mode(snapshot)}",
             f"- runtime_status: {snapshot.get('runtime_status') or snapshot.get('status') or 'unknown'}",
             f"- waiting_interaction_id: {snapshot.get('waiting_interaction_id') or 'none'}",
             f"- pending_user_message_count: {snapshot.get('pending_user_message_count') or 0}",
