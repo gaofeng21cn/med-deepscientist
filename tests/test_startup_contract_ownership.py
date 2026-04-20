@@ -16,6 +16,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "schema_version": 4,
         "user_language": " zh ",
         "need_research_paper": True,
+        "publishability_gate_mode": " warn ",
         "decision_policy": "autonomous",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
@@ -34,6 +35,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "schema_version": 4,
         "user_language": "zh",
         "need_research_paper": True,
+        "publishability_gate_mode": "warn",
         "decision_policy": "autonomous",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
@@ -49,6 +51,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "schema_version": 4,
         "user_language": "zh",
         "need_research_paper": True,
+        "publishability_gate_mode": "warn",
         "decision_policy": "autonomous",
         "launch_mode": "custom",
         "custom_profile": "continue_existing_state",
@@ -77,6 +80,7 @@ def test_quest_create_persists_normalized_runtime_owned_subset_and_extensions(te
                 "schema_version": 4,
                 "user_language": " zh ",
                 "need_research_paper": False,
+                "publishability_gate_mode": "enforce",
                 "decision_policy": "autonomous",
                 "launch_mode": "custom",
                 "custom_profile": "continue_existing_state",
@@ -91,6 +95,7 @@ def test_quest_create_persists_normalized_runtime_owned_subset_and_extensions(te
     assert startup_contract["schema_version"] == 4
     assert startup_contract["user_language"] == "zh"
     assert startup_contract["need_research_paper"] is False
+    assert startup_contract["publishability_gate_mode"] == "enforce"
     assert startup_contract["decision_policy"] == "autonomous"
     assert startup_contract["launch_mode"] == "custom"
     assert startup_contract["custom_profile"] == "continue_existing_state"
@@ -114,6 +119,7 @@ def test_quest_startup_context_patch_roundtrips_controller_owned_extensions(temp
         {
             "startup_contract": {
                 "launch_mode": "custom",
+                "publishability_gate_mode": "off",
                 "custom_profile": "continue_existing_state",
                 "review_summary": "Need one stronger baseline comparison.",
                 "submission_targets": [{"journal_name": "BMC Medicine"}],
@@ -123,6 +129,7 @@ def test_quest_startup_context_patch_roundtrips_controller_owned_extensions(temp
 
     startup_contract = payload["snapshot"]["startup_contract"]
     assert startup_contract["launch_mode"] == "custom"
+    assert startup_contract["publishability_gate_mode"] == "off"
     assert startup_contract["custom_profile"] == "continue_existing_state"
     assert startup_contract["review_summary"] == "Need one stronger baseline comparison."
     assert startup_contract["submission_targets"] == [{"journal_name": "BMC Medicine"}]
@@ -133,6 +140,13 @@ def test_normalize_startup_contract_rejects_invalid_runtime_owned_type() -> None
 
     with pytest.raises(TypeError, match="startup_contract.need_research_paper"):
         module.normalize_startup_contract({"need_research_paper": "yes"})
+
+
+def test_normalize_startup_contract_rejects_invalid_publishability_gate_mode() -> None:
+    module = importlib.import_module("deepscientist.startup_contract")
+
+    with pytest.raises(TypeError, match="startup_contract.publishability_gate_mode"):
+        module.normalize_startup_contract({"publishability_gate_mode": "maybe"})
 
 
 def test_quest_create_rejects_invalid_runtime_owned_startup_contract_type(temp_home: Path) -> None:

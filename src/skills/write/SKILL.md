@@ -138,6 +138,8 @@ Before writing seriously, confirm:
 - the claims you intend to write are backed by durable artifacts
 - the code/diff path is available for method fidelity checks
 - the evaluation contract is explicit
+- if `startup_contract.publishability_gate_mode = enforce`, the current line still passes an explicit publishability gate
+- if `startup_contract.publishability_gate_mode = warn`, the current line has already been judged for publishability and any remaining weakness is being handled consciously rather than ignored
 - the active paper line is known
 - the selected outline is present and reflects the current evidence line
 - `paper/outline/manifest.json` and any relevant section files are present when the outline folder flow is enabled
@@ -146,6 +148,7 @@ Before writing seriously, confirm:
 - completed relevant analysis results under `experiments/analysis-results/` are mapped into the selected outline or matrix rather than floating only as standalone reports
 
 If major claims lack evidence, surface the gap first.
+If `startup_contract.publishability_gate_mode = off`, do not invent a gate requirement that the quest did not ask for.
 If the selected outline, outline folder, evidence ledger, or matrix feels underspecified, read `references/outline-evidence-contract-example.md` before drafting further.
 For paper-facing work, use this hard order instead of drifting between surfaces:
 

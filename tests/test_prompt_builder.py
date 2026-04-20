@@ -641,7 +641,8 @@ def test_prompt_builder_mentions_long_horizon_no_early_stop_rule(temp_home: Path
         model="gpt-5.4",
     )
 
-    assert "keep advancing until a paper-like deliverable exists" in prompt
+    assert "keep advancing until either a credible paper-like deliverable exists" in prompt
+    assert "publishability-gate decision concludes that the current line should stop or branch" in prompt
     assert "do not self-stop after one stage or one launched detached run" in prompt
     assert "any new message or `/resume` will continue from the same quest" in prompt
     assert "standby_prefix_rule:" in prompt
@@ -698,6 +699,58 @@ def test_prompt_builder_mentions_algorithm_first_mode_when_paper_disabled(temp_h
     assert "the strongest justified algorithmic result" in prompt
     assert "do not default into `artifact.submit_paper_outline(...)`" in prompt
     assert "do not self-route into paper work by default" in prompt
+
+
+def test_prompt_builder_can_disable_publishability_gate_rules(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create(
+        "paper quest without explicit publishability-gate enforcement",
+        startup_contract={
+            "need_research_paper": True,
+            "publishability_gate_mode": "off",
+        },
+    )
+    builder = PromptBuilder(repo_root(), temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="write",
+        user_message="Continue drafting the paper.",
+        model="gpt-5.4",
+    )
+
+    assert "publishability_gate_mode: off" in prompt
+    assert "publishability_gate_rule:" not in prompt
+    assert "paper_branch_admission_rule:" not in prompt
+    assert "keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope" in prompt
+
+
+def test_prompt_builder_warn_mode_keeps_gate_advisory(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create(
+        "paper quest with advisory publishability gate",
+        startup_contract={
+            "need_research_paper": True,
+            "publishability_gate_mode": "warn",
+        },
+    )
+    builder = PromptBuilder(repo_root(), temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="decision",
+        user_message="Decide the next step for this paper quest.",
+        model="gpt-5.4",
+    )
+
+    assert "publishability_gate_mode: warn" in prompt
+    assert "publishability_gate_rule:" in prompt
+    assert "paper_branch_admission_rule:" not in prompt
+    assert "publishability_gate_advisory_rule:" in prompt
 
 
 def test_prompt_builder_strengthens_standard_optimization_entry_guidance(temp_home: Path) -> None:
