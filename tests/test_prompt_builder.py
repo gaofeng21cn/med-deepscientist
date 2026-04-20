@@ -754,6 +754,26 @@ def test_prompt_builder_warn_mode_keeps_gate_advisory(temp_home: Path) -> None:
     assert "publishability_gate_advisory_rule:" in prompt
 
 
+def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+
+    prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="decision",
+        user_message="Decide whether this research line is ready for paper-facing work.",
+        model="gpt-5.4",
+    )
+
+    assert "publishability_gate_mode: enforce" in prompt
+    assert "paper_branch_admission_rule:" in prompt
+
+    english_guide = (repo_root() / "docs" / "en" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
+    chinese_guide = (repo_root() / "docs" / "zh" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
+
+    assert "Prompt building later reads `launch_mode`, `custom_profile`, `publishability_gate_mode`" in english_guide
+    assert "后续 prompt builder 还会继续读取 `launch_mode`、`custom_profile`、`publishability_gate_mode`" in chinese_guide
+
+
 def test_prompt_builder_strengthens_standard_optimization_entry_guidance(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

@@ -579,7 +579,7 @@ Custom launch behavior is explicit:
 ## Operational implications
 
 - The startup contract is durable project state, not only UI state.
-- Prompt building later reads `launch_mode`, `custom_profile`, `review_followup_policy`, `baseline_execution_policy`, `manuscript_edit_mode`, `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` again.
+- Prompt building later reads `launch_mode`, `custom_profile`, `publishability_gate_mode`, `review_followup_policy`, `baseline_execution_policy`, `manuscript_edit_mode`, `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` again.
 - This means `Start Research` shapes not just the first turn, but later routing decisions too.
 
 ## Validation checklist

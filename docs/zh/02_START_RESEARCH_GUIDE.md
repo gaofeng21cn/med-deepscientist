@@ -590,7 +590,7 @@ type StartResearchContractFields = {
 ## 运行时意义
 
 - `startup_contract` 是项目的持久状态，不只是 UI 临时字段。
-- 后续 prompt builder 还会继续读取 `launch_mode`、`custom_profile`、`review_followup_policy`、`baseline_execution_policy`、`manuscript_edit_mode`、`entry_state_summary`、`review_summary`、`review_materials`、`custom_brief`。
+- 后续 prompt builder 还会继续读取 `launch_mode`、`custom_profile`、`publishability_gate_mode`、`review_followup_policy`、`baseline_execution_policy`、`manuscript_edit_mode`、`entry_state_summary`、`review_summary`、`review_materials`、`custom_brief`。
 - 所以 `Start Research` 不只影响第一轮，还会影响后续路由判断。
 
 ## 修改检查清单
