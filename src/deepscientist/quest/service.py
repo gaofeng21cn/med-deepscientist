@@ -2272,6 +2272,22 @@ class QuestService:
             for item in recommended_actions
             if str(item.get("action_type") or "").strip()
         ]
+        nonblocking_gap_severities = {"optional", "advisory", "watch", "info", "informational"}
+        blocking_gap_summaries = []
+        for item in gaps:
+            gap_summary = str(item.get("summary") or "").strip()
+            if not gap_summary:
+                continue
+            gap_severity = str(item.get("severity") or "").strip().lower()
+            if gap_severity and gap_severity in nonblocking_gap_severities:
+                continue
+            blocking_gap_summaries.append(gap_summary)
+        clear_action_types = {"continue_same_line", "prepare_promotion_review"}
+        clear_from_publication_eval = (
+            bool(gaps)
+            and not blocking_gap_summaries
+            and any(action_type in clear_action_types for action_type in recommended_action_types)
+        )
         if not overall_verdict or not summary:
             return {
                 "status": "invalid",
@@ -2284,7 +2300,13 @@ class QuestService:
                 "recommended_action_types": recommended_action_types,
             }
 
-        status = "clear" if overall_verdict in {"clear", "ready", "pass", "approved"} else overall_verdict
+        status = (
+            "clear"
+            if overall_verdict in {"clear", "ready", "pass", "approved"} or clear_from_publication_eval
+            else overall_verdict
+        )
+        if clear_from_publication_eval and summary in gap_summaries:
+            summary = "managed publication gate has no blocking gaps"
         return {
             "status": status,
             "clear": status == "clear",

@@ -7942,6 +7942,146 @@ def test_get_paper_contract_health_keeps_nonfinal_write_review_route_when_public
     assert "只差客观信息" not in summary_text
 
 
+def test_get_paper_contract_health_treats_optional_publication_eval_gap_as_clear_for_finalize_readiness(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact optional publication eval gap clear quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Optional Publication Eval Gap Clear Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-optional-publication-eval-gap-clear",
+            "paper_branch": "paper/artifact-optional-publication-eval-gap-clear",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Optional Publication Eval Gap Clear Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-optional-publication-eval-gap-clear",
+            "selected_outline_ref": "outline-001",
+            "status": "submission_minimal_materialized_handoff_ready",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+            "study_root": "managed-study",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "schema_version": 1,
+            "overall_status": "submission_minimal_materialized_handoff_ready",
+            "package_status": "submission_minimal_ready",
+            "handoff_ready": True,
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text(
+        "# Proofing Report\n\nLayout is clean.\n", encoding="utf-8"
+    )
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    _materialize_submission_minimal_projection(
+        paper_root,
+        include_display_exports=True,
+        display_exports_in_package_files=False,
+    )
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+
+    publication_eval_root = quest_root / "managed-study" / "artifacts" / "publication_eval"
+    publication_eval_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        publication_eval_root / "latest.json",
+        {
+            "verdict": {
+                "overall_verdict": "promising",
+                "summary": "bundle suggestions are downstream-only until the publication gate allows write",
+            },
+            "gaps": [
+                {
+                    "summary": "bundle suggestions are downstream-only until the publication gate allows write",
+                    "severity": "optional",
+                    "gap_type": "reporting",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_same_line",
+                }
+            ],
+        },
+    )
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["managed_publication_gate_status"] == "clear"
+    assert health["managed_publication_gate_clear"] is True
+    assert health["submission_minimal_ready"] is True
+    assert health["finalize_ready"] is True
+    assert health["recommended_next_stage"] == "finalize"
+    assert health["recommended_action"] == "finalize_paper_line"
+    assert not any("managed publication gate blocks completion" in item for item in health["blocking_reasons"])
+
+
 def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_surface_is_missing(
     temp_home: Path,
 ) -> None:
