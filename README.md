@@ -159,6 +159,7 @@ See:
 - [Invariants](docs/invariants.md)
 - [Decisions](docs/decisions.md)
 - [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
+- [Windows WSL2 setup skill for AI agents](src/skills/windows-wsl2-setup/SKILL.md)
 - [English docs index](docs/en/README.md)
 - [Chinese docs index](docs/zh/README.md)
 - [External controller guide](docs/en/19_EXTERNAL_CONTROLLER_GUIDE.md)
