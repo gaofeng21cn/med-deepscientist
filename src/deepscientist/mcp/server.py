@@ -354,6 +354,82 @@ def _build_bash_log_window_from_path(path: Path, *, start: int | None = None, ta
     }
 
 
+def _seq_range(start: int, end: int) -> dict[str, int] | None:
+    if start > end:
+        return None
+    return {"start": start, "end": end}
+
+
+def _build_bash_log_truncation_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "log_is_partial": False,
+        "log_truncation_notice": None,
+    }
+
+    if bool(payload.get("log_truncated")):
+        total = int(payload.get("log_line_count") or 0)
+        omitted = int(payload.get("log_preview_omitted_lines") or 0)
+        metadata["log_is_partial"] = True
+        metadata["log_truncation_notice"] = (
+            f"Showing an inline preview; omitted {omitted} lines from the middle "
+            f"of {total} total rendered lines. {LONG_BASH_LOG_HINT}"
+        )
+        return metadata
+
+    if bool(payload.get("log_windowed")):
+        total = int(payload.get("log_line_count") or 0)
+        line_start = int(payload.get("line_start") or 0)
+        line_end = int(payload.get("line_end") or 0)
+        has_more_before = bool(payload.get("has_more_before"))
+        has_more_after = bool(payload.get("has_more_after"))
+        is_partial = has_more_before or has_more_after
+        metadata["log_is_partial"] = is_partial
+        if is_partial:
+            metadata["log_truncation_notice"] = (
+                f"Showing lines {line_start}-{line_end} of {total}. {LONG_BASH_LOG_HINT}"
+            )
+        return metadata
+
+    if "tail" in payload:
+        entries = [item for item in (payload.get("tail") or []) if isinstance(item, dict)]
+        first_seq = int(entries[0].get("seq") or 0) if entries else 0
+        last_seq = int(entries[-1].get("seq") or 0) if entries else 0
+        latest_seq = int(payload.get("latest_seq") or 0)
+        after_seq = int(payload.get("after_seq") or 0) if payload.get("after_seq") is not None else None
+        before_seq = int(payload.get("before_seq") or 0) if payload.get("before_seq") is not None else None
+
+        before_start = (after_seq + 1) if after_seq is not None else 1
+        before_end = first_seq - 1 if first_seq else 0
+        after_start = last_seq + 1 if last_seq else 0
+        after_end = (before_seq - 1) if before_seq is not None else latest_seq
+
+        remaining_before = _seq_range(before_start, before_end)
+        remaining_after = _seq_range(after_start, after_end)
+        has_more_before = remaining_before is not None
+        has_more_after = remaining_after is not None
+
+        metadata["seq_has_more_before"] = has_more_before
+        metadata["seq_remaining_before_range"] = remaining_before
+        metadata["seq_has_more_after"] = has_more_after
+        metadata["seq_remaining_after_range"] = remaining_after
+        metadata["log_is_partial"] = has_more_before or has_more_after
+
+        if entries and metadata["log_is_partial"]:
+            range_bits = [f"Showing seq {first_seq}-{last_seq}."]
+            if remaining_before is not None:
+                range_bits.append(
+                    f"Remaining earlier seq {remaining_before['start']}-{remaining_before['end']}."
+                )
+            if remaining_after is not None:
+                range_bits.append(
+                    f"Remaining later seq {remaining_after['start']}-{remaining_after['end']}."
+                )
+            metadata["log_truncation_notice"] = " ".join(range_bits)
+        return metadata
+
+    return metadata
+
+
 def build_memory_server(context: McpContext) -> FastMCP:
     service = MemoryService(context.home)
     server = FastMCP(
@@ -1332,6 +1408,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                         tail=tail if tail is not None else tail_limit,
                     )
                 )
+                payload.update(_build_bash_log_truncation_metadata(payload))
                 return finalize(payload)
             use_tail = tail_limit is not None or before_seq is not None or after_seq is not None or normalized_order != "asc"
             if use_tail:
@@ -1359,6 +1436,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 payload["after_seq"] = tail_meta.get("after_seq")
                 payload["before_seq"] = tail_meta.get("before_seq")
                 payload["order"] = normalized_order
+                payload.update(_build_bash_log_truncation_metadata(payload))
                 return finalize(payload)
             payload = service.build_tool_result(
                 context,
@@ -1368,6 +1446,7 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
                 export_log_to=export_log_to,
             )
             payload.update(_build_default_bash_log_payload_from_path(service.terminal_log_path(quest_root, bash_id)))
+            payload.update(_build_bash_log_truncation_metadata(payload))
             return finalize(payload)
         if normalized_mode == "kill":
             bash_id = service.resolve_session_id(quest_root, id)

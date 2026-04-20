@@ -1805,10 +1805,13 @@ def test_bash_exec_mcp_server_default_read_truncates_long_logs_with_hint(temp_ho
 
         assert result["bash_id"] == "bash-long-preview"
         assert result["log_truncated"] is True
+        assert result["log_is_partial"] is True
         assert result["log_line_count"] == 2300
         assert result["log_preview_head_lines"] == 500
         assert result["log_preview_tail_lines"] == 1500
         assert result["log_preview_omitted_lines"] == 300
+        assert "omitted 300 lines" in str(result["log_truncation_notice"] or "")
+        assert "2300 total rendered lines" in str(result["log_truncation_notice"] or "")
         assert "line-1" in result["log"]
         assert "line-500" in result["log"]
         assert "line-501" not in result["log"]
@@ -1862,6 +1865,7 @@ def test_bash_exec_mcp_server_read_supports_start_and_tail_windows(temp_home: Pa
 
         assert result["bash_id"] == "bash-window-preview"
         assert result["log_windowed"] is True
+        assert result["log_is_partial"] is True
         assert result["log_line_count"] == 40
         assert result["line_start"] == 11
         assert result["line_end"] == 15
@@ -1869,6 +1873,7 @@ def test_bash_exec_mcp_server_read_supports_start_and_tail_windows(temp_home: Pa
         assert result["returned_line_count"] == 5
         assert result["has_more_before"] is True
         assert result["has_more_after"] is True
+        assert "lines 11-15 of 40" in str(result["log_truncation_notice"] or "")
         assert result["log"] == "\n".join([f"line-{index}" for index in range(11, 16)])
 
         latest = _unwrap_tool_result(
@@ -1881,9 +1886,79 @@ def test_bash_exec_mcp_server_read_supports_start_and_tail_windows(temp_home: Pa
                 },
             )
         )
+        assert latest["log_is_partial"] is True
         assert latest["line_start"] == 38
         assert latest["line_end"] == 40
+        assert "lines 38-40 of 40" in str(latest["log_truncation_notice"] or "")
         assert latest["log"] == "line-38\nline-39\nline-40"
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_mcp_server_seq_tail_reports_remaining_seq_ranges(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp bash seq window quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-bash-seq-window",
+            active_anchor="experiment",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        _write_fake_bash_session(
+            temp_home,
+            quest_root,
+            "bash-seq-preview",
+            log_lines=["visible-1", "visible-2", "visible-3", "visible-4", "visible-5", "system-tail"],
+        )
+        service = BashExecService(temp_home)
+        log_entries = [
+            {"seq": 1, "stream": "stdout", "line": "visible-1", "timestamp": "2026-03-20T00:00:00+00:00"},
+            {"seq": 2, "stream": "stdout", "line": "visible-2", "timestamp": "2026-03-20T00:00:01+00:00"},
+            {"seq": 3, "stream": "stdout", "line": "visible-3", "timestamp": "2026-03-20T00:00:02+00:00"},
+            {"seq": 4, "stream": "stdout", "line": "visible-4", "timestamp": "2026-03-20T00:00:03+00:00"},
+            {"seq": 5, "stream": "stdout", "line": "visible-5", "timestamp": "2026-03-20T00:00:04+00:00"},
+            {"seq": 6, "stream": "system", "line": "system-tail", "timestamp": "2026-03-20T00:00:05+00:00"},
+        ]
+        service.log_path(quest_root, "bash-seq-preview").write_text(
+            "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in log_entries),
+            encoding="utf-8",
+        )
+        server = build_bash_exec_server(context)
+
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "bash_exec",
+                {
+                    "mode": "read",
+                    "id": "bash-seq-preview",
+                    "after_seq": 1,
+                    "tail_limit": 2,
+                    "order": "asc",
+                },
+            )
+        )
+
+        assert [item["seq"] for item in result["tail"]] == [4, 5]
+        assert result["tail_limit"] == 2
+        assert result["after_seq"] == 1
+        assert result["latest_seq"] == 6
+        assert result["seq_has_more_before"] is True
+        assert result["seq_remaining_before_range"] == {"start": 2, "end": 3}
+        assert result["seq_has_more_after"] is True
+        assert result["seq_remaining_after_range"] == {"start": 6, "end": 6}
+        assert result["log_is_partial"] is True
+        assert "seq 4-5" in str(result["log_truncation_notice"] or "")
 
     asyncio.run(scenario())
 
