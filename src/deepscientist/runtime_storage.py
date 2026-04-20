@@ -54,6 +54,7 @@ _BASH_SESSION_LOG_SPECS = (
     ("terminal.log", "text"),
     ("monitor.log", "text"),
 )
+_COMPACT_TEXT_WINDOW_MAX_BYTES = 512 * 1024
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -296,6 +297,10 @@ def _collect_line_windows(path: Path, *, head_lines: int, tail_lines: int) -> tu
     return head, list(tail), total
 
 
+def _line_window_bytes(*segments: str) -> int:
+    return sum(len(segment.encode("utf-8")) + 1 for segment in segments)
+
+
 def _collect_byte_windows(path: Path, *, head_bytes: int, tail_bytes: int) -> tuple[str, str, int]:
     try:
         original_bytes = path.stat().st_size
@@ -482,7 +487,7 @@ def _compact_text_file(
 ) -> dict[str, Any] | None:
     output_path = destination_path or path
     head, tail, total_lines = _collect_line_windows(path, head_lines=head_lines, tail_lines=tail_lines)
-    if total_lines > head_lines + tail_lines:
+    if total_lines > head_lines + tail_lines and _line_window_bytes(*head, *tail) <= _COMPACT_TEXT_WINDOW_MAX_BYTES:
         omitted_lines = max(0, total_lines - len(head) - len(tail))
         marker = (
             f"[compacted completed runtime log: omitted {omitted_lines} lines; "

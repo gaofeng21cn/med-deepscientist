@@ -143,6 +143,40 @@ def test_runtime_storage_maintenance_compacts_large_single_line_terminal_logs(tm
     assert len(runtime_logs) == 1
 
 
+def test_runtime_storage_maintenance_falls_back_to_byte_windows_for_multiline_huge_terminal_logs(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    bash_root = quest_root / ".ds" / "bash_exec" / "bash-002b"
+    bash_root.mkdir(parents=True, exist_ok=True)
+    (quest_root / ".gitignore").write_text("tmp/\n", encoding="utf-8")
+    meta = {
+        "bash_id": "bash-002b",
+        "status": "terminated",
+        "finished_at": "2026-04-10T00:00:00+00:00",
+        "updated_at": "2026-04-10T00:00:00+00:00",
+    }
+    (bash_root / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    huge_line = "terminal:" + ("x" * 1_500_000)
+    lines = [huge_line, "line-1", "line-2", "line-3", "tail-0", "tail-1", "tail-2", "tail-3"]
+    (bash_root / "terminal.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=False,
+        older_than_seconds=3600,
+        jsonl_max_mb=1,
+        text_max_mb=1,
+        head_lines=2,
+        tail_lines=2,
+    )
+
+    compacted_terminal = (bash_root / "terminal.compact.log").read_text(encoding="utf-8")
+    assert "compacted completed runtime log" in compacted_terminal
+    assert (bash_root / "terminal.compact.log").stat().st_size < 1_000_000
+    runtime_logs = result["roots"][0]["runtime_logs"]["compacted_files"]
+    assert len(runtime_logs) == 1
+    assert runtime_logs[0]["mode"] == "text_head_tail_bytes"
+
+
 def test_runtime_storage_maintenance_compacts_large_single_line_jsonl_logs(tmp_path: Path) -> None:
     quest_root = tmp_path / "quest"
     bash_root = quest_root / ".ds" / "bash_exec" / "bash-003"
