@@ -161,6 +161,7 @@ See:
 - [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
 - [English docs index](docs/en/README.md)
 - [Chinese docs index](docs/zh/README.md)
+- [External controller guide](docs/en/19_EXTERNAL_CONTROLLER_GUIDE.md)
 - [Upstream intake workflow](docs/upstream_intake.md)
 - [Fork baseline and audit log](docs/medical_fork_baseline.md)
 - [Maintainer architecture reference](docs/en/90_ARCHITECTURE.md)

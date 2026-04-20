@@ -49,6 +49,11 @@ These documents still describe the underlying runtime behavior that this fork cu
 - [13 Core Architecture Guide](./13_CORE_ARCHITECTURE_GUIDE.md)
 - [14 Prompt, Skills, and MCP Guide](./14_PROMPT_SKILLS_AND_MCP_GUIDE.md)
 
+## External Control Patterns
+
+- [19 External Controller Guide](./19_EXTERNAL_CONTROLLER_GUIDE.md)
+  How to build optional outer-orchestration guards on top of durable quest state, mailbox, and `quest_control`.
+
 ## Connector Runtime Guides
 
 - [03 QQ Connector Guide](./03_QQ_CONNECTOR_GUIDE.md)
