@@ -12699,6 +12699,107 @@ class ArtifactService:
             )
         return cleared_interaction_ids
 
+    def reconcile_waiting_requests_for_decision_policy(
+        self,
+        quest_root: Path,
+        *,
+        decision_policy: str,
+        closing_artifact_id: str,
+    ) -> dict[str, Any]:
+        normalized_policy = str(decision_policy or "").strip().lower()
+        if normalized_policy != "autonomous":
+            return {
+                "cleared_interaction_ids": [],
+                "waiting_interaction_id": self.quest_service.snapshot(self._quest_id(quest_root)).get("waiting_interaction_id"),
+                "auto_continue_ready": False,
+            }
+
+        state = self._read_interaction_state(quest_root)
+        open_requests = [dict(item) for item in (state.get("open_requests") or [])]
+        recent_threads = [dict(item) for item in (state.get("recent_threads") or [])]
+        now = utc_now()
+        cleared_interaction_ids: list[str] = []
+        preserved_decision_types = {QUEST_COMPLETION_DECISION_TYPE, EXTERNAL_INPUT_DECISION_TYPE}
+
+        for index, item in enumerate(open_requests):
+            if str(item.get("status") or "").strip().lower() != "waiting":
+                continue
+            if str(item.get("kind") or "").strip().lower() != "decision_request":
+                continue
+            if self._interaction_decision_type(item) in preserved_decision_types:
+                continue
+            updated = dict(item)
+            updated["status"] = "closed"
+            updated["closed_at"] = now
+            updated["closed_by_artifact_id"] = closing_artifact_id
+            open_requests[index] = updated
+            interaction_id = str(item.get("interaction_id") or item.get("artifact_id") or "").strip()
+            if interaction_id:
+                cleared_interaction_ids.append(interaction_id)
+
+        if not cleared_interaction_ids:
+            waiting_interaction_id = self.quest_service.snapshot(self._quest_id(quest_root)).get("waiting_interaction_id")
+            return {
+                "cleared_interaction_ids": [],
+                "waiting_interaction_id": waiting_interaction_id,
+                "auto_continue_ready": False,
+            }
+
+        cleared_interaction_id_set = set(cleared_interaction_ids)
+        for index, item in enumerate(recent_threads):
+            candidate_ids = {
+                str(item.get("interaction_id") or "").strip(),
+                str(item.get("artifact_id") or "").strip(),
+            }
+            if not (candidate_ids & cleared_interaction_id_set):
+                continue
+            updated = dict(item)
+            updated["status"] = "closed"
+            updated["closed_at"] = now
+            updated["closed_by_artifact_id"] = closing_artifact_id
+            updated["updated_at"] = now
+            recent_threads[index] = updated
+
+        state["open_requests"] = open_requests[-20:]
+        state["recent_threads"] = recent_threads[-30:]
+        default_reply_interaction_id = self._default_reply_interaction_id(
+            open_requests=state["open_requests"],
+            recent_threads=state["recent_threads"],
+        )
+        state["default_reply_interaction_id"] = default_reply_interaction_id
+        latest_thread_interaction_id = str(state.get("latest_thread_interaction_id") or "").strip()
+        if latest_thread_interaction_id in cleared_interaction_id_set:
+            state["latest_thread_interaction_id"] = default_reply_interaction_id
+        last_outbound_interaction_id = str(state.get("last_outbound_interaction_id") or "").strip()
+        if last_outbound_interaction_id in cleared_interaction_id_set:
+            state["last_outbound_interaction_id"] = default_reply_interaction_id
+        self._write_interaction_state(quest_root, state)
+
+        runtime_state = self.quest_service._read_runtime_state(quest_root)
+        waiting_requests_remaining = [
+            item
+            for item in state["open_requests"]
+            if str(item.get("status") or "").strip().lower() == "waiting"
+        ]
+        auto_continue_ready = not waiting_requests_remaining
+        if auto_continue_ready and str(runtime_state.get("status") or "") == "waiting_for_user":
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                status="running" if runtime_state.get("active_run_id") else "active",
+                stop_reason=None,
+                active_interaction_id=default_reply_interaction_id,
+            )
+        else:
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                active_interaction_id=default_reply_interaction_id,
+            )
+        return {
+            "cleared_interaction_ids": cleared_interaction_ids,
+            "waiting_interaction_id": default_reply_interaction_id,
+            "auto_continue_ready": auto_continue_ready,
+        }
+
     def _latest_completion_request(self, quest_root: Path) -> dict[str, Any] | None:
         state = self._read_interaction_state(quest_root)
         candidates: list[dict[str, Any]] = []

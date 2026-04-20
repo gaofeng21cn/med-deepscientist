@@ -3781,6 +3781,151 @@ def test_quest_startup_context_handler_updates_existing_snapshot(temp_home: Path
     }
 
 
+def test_quest_startup_context_decision_policy_switch_clears_obsolete_waiting_decision_and_auto_continues(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "Switch decision policy live for an existing waiting quest.",
+        quest_id="quest-decision-policy-live-switch",
+        startup_contract={"decision_policy": "user_gated"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    request = app.artifact_service.interact(
+        quest_root,
+        kind="decision_request",
+        message="Should I branch to the alternate route?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "route_choice"},
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_reason="external_progress:run-001",
+    )
+
+    snapshot_waiting = app.quest_service.snapshot(quest_id)
+    assert snapshot_waiting["status"] == "waiting_for_user"
+    assert snapshot_waiting["waiting_interaction_id"] == request["interaction_id"]
+    assert snapshot_waiting["continuation_policy"] == "auto"
+    assert snapshot_waiting["continuation_reason"] == "external_progress:run-001"
+
+    scheduled: list[tuple[str, str, float]] = []
+
+    def _fake_schedule_turn_later(target_quest_id: str, *, reason: str, delay_seconds: float) -> None:
+        scheduled.append((target_quest_id, reason, delay_seconds))
+
+    monkeypatch.setattr(app, "_schedule_turn_later", _fake_schedule_turn_later)
+
+    payload = app.handlers.quest_startup_context(
+        quest_id,
+        {
+            "startup_contract": {
+                "decision_policy": "autonomous",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["startup_contract"] == {"decision_policy": "autonomous"}
+    assert payload["snapshot"]["status"] == "active"
+    assert payload["snapshot"]["waiting_interaction_id"] is None
+    assert payload["snapshot"]["pending_decisions"] == []
+    assert payload["snapshot"]["continuation_policy"] == "auto"
+    assert payload["snapshot"]["continuation_reason"] == "external_progress:run-001"
+    assert scheduled == [(quest_id, "auto_continue", 0.2)]
+
+    interaction_state = read_json(quest_root / ".ds" / "interaction_state.json", {})
+    open_requests = interaction_state.get("open_requests") or []
+    recent_threads = interaction_state.get("recent_threads") or []
+    assert not any(str(item.get("status") or "") == "waiting" for item in open_requests)
+    assert not any(str(item.get("status") or "") == "waiting" for item in recent_threads)
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "active"
+    assert runtime_state["active_interaction_id"] is None
+    assert runtime_state["continuation_policy"] == "auto"
+    assert runtime_state["continuation_reason"] == "external_progress:run-001"
+
+
+def test_quest_startup_context_decision_policy_switch_preserves_completion_approval_wait(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "Switch decision policy while completion approval is waiting.",
+        quest_id="quest-decision-policy-completion-wait",
+        startup_contract={"decision_policy": "user_gated"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    request = app.artifact_service.interact(
+        quest_root,
+        kind="decision_request",
+        message="The quest is complete. May I finish it now?",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+        reply_schema={"decision_type": "quest_completion_approval"},
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_reason="external_progress:run-002",
+    )
+
+    scheduled: list[tuple[str, str, float]] = []
+
+    def _fake_schedule_turn_later(target_quest_id: str, *, reason: str, delay_seconds: float) -> None:
+        scheduled.append((target_quest_id, reason, delay_seconds))
+
+    monkeypatch.setattr(app, "_schedule_turn_later", _fake_schedule_turn_later)
+
+    payload = app.handlers.quest_startup_context(
+        quest_id,
+        {
+            "startup_contract": {
+                "decision_policy": "autonomous",
+            }
+        },
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["ok"] is True
+    assert payload["snapshot"]["startup_contract"] == {"decision_policy": "autonomous"}
+    assert payload["snapshot"]["status"] == "waiting_for_user"
+    assert payload["snapshot"]["waiting_interaction_id"] == request["interaction_id"]
+    assert payload["snapshot"]["continuation_reason"] == "external_progress:run-002"
+    assert scheduled == []
+
+    interaction_state = read_json(quest_root / ".ds" / "interaction_state.json", {})
+    waiting_requests = [
+        item
+        for item in (interaction_state.get("open_requests") or [])
+        if str(item.get("status") or "") == "waiting"
+    ]
+    assert len(waiting_requests) == 1
+    assert waiting_requests[0]["interaction_id"] == request["interaction_id"]
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "waiting_for_user"
+    assert runtime_state["active_interaction_id"] == request["interaction_id"]
+    assert runtime_state["continuation_policy"] == "auto"
+    assert runtime_state["continuation_reason"] == "external_progress:run-002"
+
+
 def test_quest_startup_context_handler_treats_requested_baseline_ref_as_metadata_only(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

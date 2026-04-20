@@ -1611,13 +1611,36 @@ class DaemonApp:
         if not requested_baseline_ref_present and not startup_contract_present:
             raise ValueError("At least one startup-context field is required.")
         quest_root = self.home / "quests" / quest_id
+        previous_snapshot = self.quest_service.snapshot(quest_id)
+        previous_startup_contract = (
+            previous_snapshot.get("startup_contract")
+            if isinstance(previous_snapshot.get("startup_contract"), dict)
+            else {}
+        )
+        previous_decision_policy = str(previous_startup_contract.get("decision_policy") or "").strip().lower() or "user_gated"
         kwargs: dict[str, object] = {}
         if requested_baseline_ref_present:
             kwargs["requested_baseline_ref"] = requested_baseline_ref
         if startup_contract_present:
             kwargs["startup_contract"] = startup_contract
         self.quest_service.update_startup_context(quest_root, **kwargs)
-        return self.quest_service.snapshot(quest_id)
+        snapshot = self.quest_service.snapshot(quest_id)
+        startup_contract_snapshot = (
+            snapshot.get("startup_contract")
+            if isinstance(snapshot.get("startup_contract"), dict)
+            else {}
+        )
+        current_decision_policy = str(startup_contract_snapshot.get("decision_policy") or "").strip().lower() or "user_gated"
+        if previous_decision_policy != "autonomous" and current_decision_policy == "autonomous":
+            reconciliation = self.artifact_service.reconcile_waiting_requests_for_decision_policy(
+                quest_root,
+                decision_policy=current_decision_policy,
+                closing_artifact_id="system:decision_policy:autonomous",
+            )
+            if reconciliation.get("auto_continue_ready"):
+                self._schedule_turn_later(quest_id, reason="auto_continue", delay_seconds=0.2)
+            snapshot = self.quest_service.snapshot(quest_id)
+        return snapshot
 
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:
         snapshot = self.quest_service.snapshot(quest_id)
