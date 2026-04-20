@@ -4880,6 +4880,106 @@ def test_resume_quest_clears_invalid_blocking_progress_waiting_state_and_auto_co
     assert runtime_state["active_interaction_id"] is None
 
 
+def test_resume_quest_auto_recovery_respects_copilot_control_mode_and_stays_parked(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "resume quest control-mode copilot alignment",
+        startup_contract={"control_mode": "copilot"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.set_status(quest_id, "paused")
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_reason="external_progress:run-003",
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.resume_quest(quest_id, source="auto:daemon-recovery")
+
+    assert payload["scheduled"] is False
+    assert payload["started"] is False
+    assert payload["queued"] is False
+    assert payload["snapshot"]["status"] == "active"
+    assert payload["snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert payload["snapshot"]["continuation_reason"] == "control_mode_copilot"
+    assert scheduled == []
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "active"
+    assert runtime_state["continuation_policy"] == "wait_for_user_or_resume"
+    assert runtime_state["continuation_reason"] == "control_mode_copilot"
+
+
+def test_resume_quest_control_mode_autonomous_reconciles_legacy_wait_and_auto_continues(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "resume quest control-mode autonomous alignment",
+        startup_contract={"control_mode": "autonomous"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.set_status(quest_id, "paused")
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_reason="control_mode_copilot",
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.resume_quest(quest_id, source="local")
+
+    assert payload["scheduled"] is True
+    assert payload["started"] is True
+    assert payload["queued"] is False
+    assert payload["snapshot"]["status"] == "active"
+    assert payload["snapshot"]["continuation_policy"] == "auto"
+    assert payload["snapshot"]["continuation_reason"] == "control_mode_autonomous"
+    assert scheduled == [(quest_id, "auto_continue")]
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["status"] == "active"
+    assert runtime_state["continuation_policy"] == "auto"
+    assert runtime_state["continuation_reason"] == "control_mode_autonomous"
+
+
 def test_quest_control_pause_marks_quest_paused_and_interrupts_runner(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

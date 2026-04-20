@@ -2380,6 +2380,17 @@ class DaemonApp:
             closing_artifact_id=generate_id("runtime"),
         )
         snapshot = self.quest_service.snapshot(quest_id)
+        startup_contract_snapshot = (
+            snapshot.get("startup_contract")
+            if isinstance(snapshot.get("startup_contract"), dict)
+            else {}
+        )
+        control_mode = startup_contract_control_mode(startup_contract_snapshot)
+        continuation_updates = reconcile_continuation_policy_for_control_mode(
+            startup_contract=startup_contract_snapshot,
+            continuation_policy=snapshot.get("continuation_policy"),
+            continuation_reason=snapshot.get("continuation_reason"),
+        )
         current_status = str(snapshot.get("status") or "").strip()
         pending_user_message_count = int(snapshot.get("pending_user_message_count") or 0)
         preserve_waiting_state = (
@@ -2410,13 +2421,29 @@ class DaemonApp:
                 recovery_abandoned_run_id = str(item.get("abandoned_run_id") or "").strip() or None
                 recovery_summary = str(item.get("summary") or "").strip() or None
                 break
+        runtime_state_updates: dict[str, object] = {
+            "last_resume_source": source,
+            "last_resume_at": utc_now(),
+            "last_recovery_abandoned_run_id": recovery_abandoned_run_id,
+            "last_recovery_summary": recovery_summary,
+        }
+        if continuation_updates:
+            runtime_state_updates.update(
+                continuation_policy=continuation_updates["continuation_policy"],
+                continuation_reason=continuation_updates["continuation_reason"],
+                continuation_updated_at=utc_now(),
+                event_source="quest_resume",
+                event_kind="runtime_continuation_changed",
+                event_summary=(
+                    f"Quest {quest_id} continuation policy reconciled for control mode `{control_mode}` during resume."
+                ),
+            )
         self.quest_service.update_runtime_state(
             quest_root=self.quest_service._quest_root(quest_id),
-            last_resume_source=source,
-            last_resume_at=utc_now(),
-            last_recovery_abandoned_run_id=recovery_abandoned_run_id,
-            last_recovery_summary=recovery_summary,
+            **runtime_state_updates,
         )
+        if continuation_updates:
+            snapshot = self.quest_service.snapshot(quest_id)
         summary = f"Quest {quest_id} resumed."
         event = self._append_control_event(
             quest_id,
@@ -2443,7 +2470,20 @@ class DaemonApp:
             if int(snapshot.get("pending_user_message_count") or 0) > 0
             else "auto_continue"
         )
+        auto_recovery_waits_for_manual_resume = (
+            source.startswith("auto:")
+            and turn_reason == "auto_continue"
+            and control_mode == "copilot"
+            and str(snapshot.get("continuation_policy") or "").strip().lower() == "wait_for_user_or_resume"
+        )
         if preserve_waiting_state:
+            scheduled = {
+                "scheduled": False,
+                "started": False,
+                "queued": False,
+                "reason": turn_reason,
+            }
+        elif auto_recovery_waits_for_manual_resume:
             scheduled = {
                 "scheduled": False,
                 "started": False,

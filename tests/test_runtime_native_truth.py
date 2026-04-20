@@ -47,6 +47,39 @@ def test_pause_control_writes_native_runtime_event_and_session_exposes_ref(temp_
     )
 
 
+def test_resume_control_mode_reconciliation_writes_native_runtime_event(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "native truth resume control-mode quest",
+        startup_contract={"control_mode": "copilot"},
+    )
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.set_status(quest_id, "paused")
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_reason="external_progress:run-004",
+    )
+
+    payload = app.resume_quest(quest_id, source="auto:daemon-recovery")
+
+    event = _latest_runtime_event(quest_root)
+    session = app.handlers.quest_session(quest_id)
+
+    assert payload["snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert event["event_source"] == "quest_resume"
+    assert event["event_kind"] == "runtime_continuation_changed"
+    assert event["status_snapshot"]["quest_status"] == "active"
+    assert event["status_snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert event["status_snapshot"]["continuation_reason"] == "control_mode_copilot"
+    assert session["runtime_event_ref"]["event_id"] == event["event_id"]
+    assert session["runtime_event"]["event_id"] == event["event_id"]
+
+
 def test_waiting_for_user_transition_writes_native_runtime_event(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
