@@ -9763,6 +9763,231 @@ def test_paper_line_state_sync_matches_public_contract_health_for_completed_main
     )
 
 
+def test_get_paper_contract_health_accepts_supported_status_variants_for_required_items(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper contract status vocabulary quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Status Vocabulary Outline",
+            "sections": [
+                {
+                    "section_id": "results-main",
+                    "title": "Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["RUN-001"],
+                    "optional_items": [],
+                }
+            ],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-status-vocabulary",
+            "paper_branch": "paper/status-vocabulary",
+            "selected_outline_ref": "outline-001",
+            "title": "Status Vocabulary Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/status-vocabulary",
+            "selected_outline_ref": "outline-001",
+            "status": "bundle_ready",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(
+        paper_root / "claim_evidence_map.json",
+        {
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim_text": "Supported status variants should satisfy required items.",
+                    "status": "supported",
+                }
+            ]
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    for status_value in [
+        "supported_main_text",
+        "supported_negative_main_text",
+        "supported_secondary_main_text",
+        "supported_appendix",
+    ]:
+        write_json(
+            paper_root / "evidence_ledger.json",
+            {
+                "selected_outline_ref": "outline-001",
+                "items": [
+                    {
+                        "item_id": "RUN-001",
+                        "title": "Status vocabulary support",
+                        "kind": "main_experiment",
+                        "paper_role": "main_text",
+                        "status": status_value,
+                        "section_id": "results-main",
+                        "claim_links": ["C1"],
+                        "source_paths": ["experiments/main/run-001/RESULT.json"],
+                    }
+                ],
+            },
+        )
+
+        health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+        assert health_result["ok"] is True
+        health = health_result["paper_contract_health"]
+        assert health["contract_ok"] is True
+        assert health["unresolved_required_count"] == 0
+        assert health["unresolved_required_items"] == []
+        assert health["ready_section_count"] == 1
+
+
+def test_get_paper_contract_health_uses_selected_outline_result_table_when_ledger_is_thin(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper contract outline result table quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Outline Result Table Contract",
+            "sections": [
+                {
+                    "section_id": "results-main",
+                    "title": "Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["EXP-001", "A1"],
+                    "optional_items": [],
+                    "result_table": [
+                        {
+                            "item_id": "EXP-001",
+                            "title": "Primary analysis",
+                            "kind": "main_experiment",
+                            "paper_role": "main_text",
+                            "status": "completed",
+                            "section_id": "results-main",
+                            "claim_links": ["C1"],
+                        },
+                        {
+                            "item_id": "A1",
+                            "title": "Clinical model boundary",
+                            "kind": "analysis_slice",
+                            "paper_role": "main_text",
+                            "status": "supported",
+                            "section_id": "results-main",
+                            "claim_links": ["C1"],
+                        },
+                    ],
+                }
+            ],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-outline-result-table",
+            "paper_branch": "paper/outline-result-table",
+            "selected_outline_ref": "outline-001",
+            "title": "Outline Result Table Contract",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/outline-result-table",
+            "selected_outline_ref": "outline-001",
+            "status": "bundle_ready",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(
+        paper_root / "claim_evidence_map.json",
+        {
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "claim_text": "Selected outline result tables satisfy required contract items.",
+                    "status": "supported",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "selected_outline_ref": "outline-001",
+            "items": [
+                {
+                    "item_id": "gate-repair-note",
+                    "title": "Gate repair note",
+                    "kind": "analysis_slice",
+                    "paper_role": "reference_only",
+                    "status": "completed",
+                    "section_id": "publication_gate",
+                }
+            ],
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["contract_ok"] is True
+    assert health["unresolved_required_count"] == 0
+    assert health["unresolved_required_items"] == []
+    assert health["ready_section_count"] == 1
+
+
 def test_get_paper_contract_health_resynchronizes_stale_paper_line_mirrors(
     temp_home: Path,
 ) -> None:

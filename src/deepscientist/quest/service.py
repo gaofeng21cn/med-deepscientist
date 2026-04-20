@@ -3737,6 +3737,21 @@ class QuestService:
             for item in evidence_items
             if str(item.get("item_id") or "").strip()
         }
+        outline_result_table_by_item: dict[str, dict[str, Any]] = {}
+        for section in paper_contract.get("sections") or []:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("section_id") or "").strip()
+            for row in section.get("result_table") or []:
+                if not isinstance(row, dict):
+                    continue
+                item_id = str(row.get("item_id") or "").strip()
+                if not item_id:
+                    continue
+                normalized_row = dict(row)
+                if section_id and not str(normalized_row.get("section_id") or "").strip():
+                    normalized_row["section_id"] = section_id
+                outline_result_table_by_item[item_id] = normalized_row
         unresolved_required_items: list[dict[str, Any]] = []
         ready_section_count = 0
         for section in paper_contract.get("sections") or []:
@@ -3745,9 +3760,10 @@ class QuestService:
             required_items = [str(item).strip() for item in (section.get("required_items") or []) if str(item).strip()]
             section_ready = True
             for item_id in required_items:
-                ledger_item = ledger_by_item.get(item_id)
+                ledger_item = ledger_by_item.get(item_id) or outline_result_table_by_item.get(item_id)
                 status = str((ledger_item or {}).get("status") or "").strip().lower()
-                if status not in {"ready", "completed", "analyzed", "written", "recorded", "supported"}:
+                status_counts_as_supported = status == "supported" or status.startswith("supported_")
+                if status not in {"ready", "completed", "analyzed", "written", "recorded"} and not status_counts_as_supported:
                     unresolved_required_items.append(
                         {
                             "section_id": str(section.get("section_id") or "").strip() or None,
