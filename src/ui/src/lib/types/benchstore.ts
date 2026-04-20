@@ -1,3 +1,16 @@
+export type BenchLocale = 'en' | 'zh'
+
+export type BenchCatalogQuery = {
+  locale?: BenchLocale | string | null
+  search?: string | null
+  capabilityTags?: string[]
+  costBands?: string[]
+  timeBands?: string[]
+  requiresPaper?: boolean | null
+  requiresExecution?: boolean | null
+  maxTimeHours?: number | null
+}
+
 export type BenchEntry = {
   id: string
   name: string
