@@ -34,6 +34,24 @@ def test_deepxiv_setup_dialog_uses_live_draft_for_test_and_save() -> None:
     assert "structured: nextStructuredDraft" in dialog_source
     assert "setDocument((current) =>" in dialog_source
     assert "structured_config: nextStructuredDraft" in dialog_source
+    assert "base_url: draft.base_url.trim() || DEFAULT_DRAFT.base_url" in dialog_source
+    assert "token_env: draft.token_env.trim() || null" in dialog_source
+    assert "draft.token.trim() || draft.token_env.trim()" in dialog_source
+
+
+def test_deepxiv_settings_surface_exposes_base_url_and_env_only_authoring() -> None:
+    dialog_source = _read("src/ui/src/components/settings/DeepXivSetupDialog.tsx")
+    panel_source = _read("src/ui/src/components/settings/DeepXivSettingsPanel.tsx")
+    settings_page_source = _read("src/ui/src/components/settings/SettingsPage.tsx")
+
+    assert "baseUrlLabel" in dialog_source
+    assert "tokenEnvLabel" in dialog_source
+    assert "tokenOrEnvRequired" in dialog_source
+    assert "Use a direct token or provide an env var name for env-only auth." in dialog_source
+    assert "可以直接填写 token，也可以只填写环境变量名走 env-only 鉴权。" in dialog_source
+    assert "base URL, direct token, env-only token lookup" in panel_source
+    assert "selectedName === 'config'" in settings_page_source
+    assert "<DeepXivSettingsPanel locale={locale} onSaved={handleDeepXivConfigSaved} />" in settings_page_source
 
 
 def test_create_project_dialog_keeps_deepxiv_out_of_start_research_mount_tree() -> None:

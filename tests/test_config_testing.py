@@ -421,6 +421,60 @@ def test_config_manager_deepxiv_test_returns_preview(monkeypatch, temp_home: Pat
     assert '"title": "Transformers"' in result["preview"]
 
 
+def test_config_manager_deepxiv_test_supports_env_only_token(monkeypatch, temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    monkeypatch.setenv("DEEPXIV_ENV_ONLY_TOKEN", "env-deepxiv-token")
+
+    class _FakeResponse:
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "results": [
+                        {"title": "Transformers", "abstract": "Attention is all you need."},
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):  # noqa: ANN001
+        assert request.headers["Authorization"] == "Bearer env-deepxiv-token"
+        assert request.full_url.startswith("https://data.rag.ac.cn/custom/arxiv/?")
+        assert "query=transformers" in request.full_url
+        assert "size=2" in request.full_url
+        assert timeout == 7
+        return _FakeResponse()
+
+    monkeypatch.setattr("deepscientist.config.service.urlopen", fake_urlopen)
+
+    result = manager.test_deepxiv_payload(
+        {
+            "literature": {
+                "deepxiv": {
+                    "enabled": True,
+                    "base_url": " https://data.rag.ac.cn/custom ",
+                    "token_env": "DEEPXIV_ENV_ONLY_TOKEN",
+                    "default_result_size": 2,
+                    "preview_characters": 240,
+                    "request_timeout_seconds": 7,
+                }
+            }
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["details"]["token_source"] == "env"
+    assert result["details"]["token_env"] == "DEEPXIV_ENV_ONLY_TOKEN"
+    assert result["details"]["base_url"] == "https://data.rag.ac.cn/custom"
+    assert result["results"][0]["title"] == "Transformers"
+
+
 def test_connectors_config_test_supports_lingzhu_probe(monkeypatch, temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)

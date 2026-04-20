@@ -12,14 +12,15 @@ const copy = {
     title: 'DeepXiv',
     eyebrow: 'Literature provider',
     summary:
-      'Use the guided setup to register, paste the token, confirm the defaults, and run one live `transformers` probe before saving.',
-    start: 'Start setup',
+      'Use Settings authoring for the DeepXiv base URL, direct token, env-only token lookup, retrieval defaults, and one live `transformers` probe before saving.',
+    start: 'Open settings',
   },
   zh: {
     title: 'DeepXiv',
     eyebrow: '文献能力提供方',
-    summary: '通过分步向导完成 DeepXiv 配置：注册、填写 Token、确认默认参数，并在保存前跑一次 `transformers` 实时探测。',
-    start: '开始配置',
+    summary:
+      '通过 Settings authoring 显式编辑 DeepXiv 的 base_url、直接 token、env-only token lookup（token_env）和检索默认值，并在保存前跑一次 `transformers` 实时探测。',
+    start: '打开设置',
   },
 } satisfies Record<Locale, Record<string, string>>
 

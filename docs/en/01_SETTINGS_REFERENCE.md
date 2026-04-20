@@ -37,7 +37,7 @@ Connector-specific setup guides:
 
 ### Summary
 
-`config.yaml` is the main runtime configuration file. It controls the DeepScientist home directory, default locale, daemon policy, Web/TUI binding, logging, Git behavior, skill mirroring, and optional cloud / ACP compatibility settings.
+`config.yaml` is the main runtime configuration file. It controls the DeepScientist home directory, default locale, daemon policy, Web/TUI binding, logging, Git behavior, skill mirroring, DeepXiv literature access, and optional cloud / ACP compatibility settings.
 
 ### Schema
 
@@ -67,6 +67,15 @@ skills:
   sync_global_on_init: true
   sync_quest_on_create: true
   sync_quest_on_open: true
+literature:
+  deepxiv:
+    enabled: false
+    base_url: https://data.rag.ac.cn
+    token: null
+    token_env: DEEPXIV_TOKEN
+    default_result_size: 20
+    preview_characters: 5000
+    request_timeout_seconds: 90
 bootstrap:
   codex_ready: false
   codex_last_checked_at: null
@@ -270,6 +279,76 @@ Palette selection is no longer exposed in `Settings` or `config.yaml`.
 - Default: `true`
 - UI label: `Sync project skills on open`
 - Meaning: refresh project-local skill mirrors when an existing project is opened.
+
+### Literature / DeepXiv
+
+These fields are surfaced by the dedicated DeepXiv card on `Settings -> Runtime`.
+
+- `Settings` is the DeepXiv authoring surface.
+- The flow edits `config.literature.deepxiv` directly.
+- The DeepXiv setup dialog stays inside `Settings`; project creation stays focused on Start Research inputs.
+- The built-in test runs one live `transformers` retrieval against the configured endpoint.
+
+**`literature.deepxiv.enabled`**
+
+- Type: `boolean`
+- Default: `false`
+- Meaning: enable DeepXiv as the literature provider in the runtime config.
+- Notes: saving the DeepXiv setup dialog turns this flag on.
+
+**`literature.deepxiv.base_url`**
+
+- Type: `string`
+- Default: `https://data.rag.ac.cn`
+- UI label: `Base URL`
+- Meaning: DeepXiv API origin used for live retrieval and preview tests.
+- Notes: the Settings dialog now lets you edit this explicitly.
+
+**`literature.deepxiv.token`**
+
+- Type: `string | null`
+- Default: `null`
+- UI label: `Direct token`
+- Meaning: direct bearer token value stored in the config file.
+- Notes: this is the fastest path when you want DeepXiv fully self-contained inside `config.yaml`.
+
+**`literature.deepxiv.token_env`**
+
+- Type: `string | null`
+- Default: `DEEPXIV_TOKEN`
+- UI label: `Token env var`
+- Meaning: environment variable name that DeepScientist reads to resolve the DeepXiv token.
+- Notes: env-only setup uses this field directly. Keep `token` empty and export the named environment variable in the daemon environment.
+
+**`literature.deepxiv.default_result_size`**
+
+- Type: `number`
+- Default: `20`
+- UI label: `Retrieve size`
+- Meaning: default `size` passed into the DeepXiv retrieval request.
+- Notes: the DeepXiv test uses this value for the live `transformers` probe.
+
+**`literature.deepxiv.preview_characters`**
+
+- Type: `number`
+- Default: `5000`
+- UI label: `Preview characters`
+- Meaning: maximum preview length shown in the DeepXiv result panel.
+- Allowed values: normalized to at least `200`.
+
+**`literature.deepxiv.request_timeout_seconds`**
+
+- Type: `number`
+- Default: `90`
+- UI label: `Timeout (s)`
+- Meaning: request timeout budget for the DeepXiv probe.
+- Allowed values: normalized to at least `3`.
+
+**Credential resolution**
+
+- DeepScientist resolves `literature.deepxiv.token` first and then `literature.deepxiv.token_env`.
+- Settings authoring supports both direct-token and env-only workflows.
+- The live test result reports which credential path was used.
 
 ### Connector policy
 

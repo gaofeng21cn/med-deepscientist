@@ -12,7 +12,9 @@ import type { Locale, OpenDocumentPayload } from '@/types'
 const REGISTER_URL = 'https://data.rag.ac.cn/register'
 
 type DeepXivDraft = {
+  base_url: string
   token: string
+  token_env: string
   default_result_size: string
   preview_characters: string
   request_timeout_seconds: string
@@ -29,7 +31,9 @@ type DeepXivTestResult = {
 }
 
 const DEFAULT_DRAFT: DeepXivDraft = {
+  base_url: 'https://data.rag.ac.cn',
   token: '',
+  token_env: 'DEEPXIV_TOKEN',
   default_result_size: '20',
   preview_characters: '5000',
   request_timeout_seconds: '90',
@@ -38,17 +42,24 @@ const DEFAULT_DRAFT: DeepXivDraft = {
 const copy = {
   en: {
     title: 'DeepXiv setup',
-    description: 'Register, paste the token, confirm the defaults, then preview a live `transformers` retrieval.',
+    description:
+      'Register, set the DeepXiv base URL, direct token, or env-only token lookup, then preview a live `transformers` retrieval.',
     eyebrow: 'Literature provider',
     stepLabel: 'Step',
-    step1Title: 'Register and fill the token',
-    step1Body: 'Open the official register page, obtain the DeepXiv token, then paste it here.',
+    step1Title: 'Configure access',
+    step1Body: 'Open the official register page, then configure the DeepXiv base URL and credential path.',
     step2Title: 'Confirm the defaults',
     step2Body: 'Saving this form will automatically enable DeepXiv. No extra toggle is required.',
     step3Title: 'Test and preview',
-    step3Body: 'Run a live DeepXiv search for `transformers`. The preview panel on the right shows the returned content before you save.',
-    tokenLabel: 'Token',
+    step3Body:
+      'Run a live DeepXiv search for `transformers`. The preview panel on the right shows the returned content from the configured base URL and credential path before you save.',
+    baseUrlLabel: 'Base URL',
+    baseUrlPlaceholder: 'https://data.rag.ac.cn',
+    tokenLabel: 'Direct token',
     tokenPlaceholder: 'Paste the DeepXiv token',
+    tokenEnvLabel: 'Token env var',
+    tokenEnvPlaceholder: 'DEEPXIV_TOKEN',
+    credentialHint: 'Use a direct token or provide an env var name for env-only auth.',
     openRegister: 'Open register page',
     next: 'Next',
     back: 'Back',
@@ -63,25 +74,30 @@ const copy = {
     timeout: 'Timeout (s)',
     previewTitle: 'Preview',
     previewEmpty: 'The preview panel will show the DeepXiv response after you run the Step 3 test.',
-    tokenRequired: 'Fill in the DeepXiv token before continuing.',
+    tokenOrEnvRequired: 'Fill in a DeepXiv token or token environment variable before continuing.',
     searchKeyword: 'Search keyword',
     searchKeywordValue: 'transformers',
-    saveHint: 'The setup flow writes directly into `config.literature.deepxiv`.',
+    saveHint: 'The setup flow writes directly into `config.literature.deepxiv`. Direct token and `token_env` are both supported.',
     loading: 'Loading DeepXiv config...',
   },
   zh: {
     title: 'DeepXiv 配置',
-    description: '完成注册、填写 Token、确认默认值，然后预览一次 `transformers` 的实时检索结果。',
+    description: '完成注册后，可以显式设置 base_url、直接 token 或 env-only token lookup，然后预览一次 `transformers` 的实时检索结果。',
     eyebrow: '文献能力提供方',
     stepLabel: 'Step',
-    step1Title: '注册并填写 Token',
-    step1Body: '先打开官方注册页获取 DeepXiv token，然后粘贴到这里。',
+    step1Title: '配置访问方式',
+    step1Body: '先打开官方注册页，然后在这里设置 DeepXiv 的 base_url 和凭据来源。',
     step2Title: '确认默认值',
     step2Body: '保存后会自动启用 DeepXiv，这里只确认默认参数。',
     step3Title: '测试与预览',
-    step3Body: '这里会用 `transformers` 做一次真实 DeepXiv 检索，右侧预览框会显示返回内容，然后再决定是否保存。',
-    tokenLabel: 'Token',
+    step3Body: '这里会用 `transformers` 做一次真实 DeepXiv 检索，右侧预览框会显示当前 base_url 和凭据路径返回的内容，然后再决定是否保存。',
+    baseUrlLabel: 'Base URL',
+    baseUrlPlaceholder: 'https://data.rag.ac.cn',
+    tokenLabel: '直接 Token',
     tokenPlaceholder: '填写 DeepXiv token',
+    tokenEnvLabel: 'Token 环境变量',
+    tokenEnvPlaceholder: 'DEEPXIV_TOKEN',
+    credentialHint: '可以直接填写 token，也可以只填写环境变量名走 env-only 鉴权。',
     openRegister: '打开注册页',
     next: '下一步',
     back: '上一步',
@@ -96,10 +112,10 @@ const copy = {
     timeout: '超时（秒）',
     previewTitle: '预览',
     previewEmpty: '执行第三步测试后，这里会显示 DeepXiv 返回的内容。',
-    tokenRequired: '请先填写 DeepXiv token。',
+    tokenOrEnvRequired: '请填写 DeepXiv token 或 token_env 环境变量名。',
     searchKeyword: '检索关键词',
     searchKeywordValue: 'transformers',
-    saveHint: '这个向导会直接写入 `config.literature.deepxiv`。',
+    saveHint: '这个向导会直接写入 `config.literature.deepxiv`，同时支持直接 token 和 `token_env`。',
     loading: '正在加载 DeepXiv 配置...',
   },
 } satisfies Record<Locale, Record<string, string>>
@@ -121,7 +137,13 @@ function buildDraft(document: OpenDocumentPayload | null): DeepXivDraft {
   const literature = asObject(structured.literature)
   const deepxiv = asObject(literature.deepxiv)
   return {
+    base_url: typeof deepxiv.base_url === 'string' && deepxiv.base_url.trim() ? deepxiv.base_url : DEFAULT_DRAFT.base_url,
     token: typeof deepxiv.token === 'string' ? deepxiv.token : DEFAULT_DRAFT.token,
+    token_env: Object.prototype.hasOwnProperty.call(deepxiv, 'token_env')
+      ? typeof deepxiv.token_env === 'string'
+        ? deepxiv.token_env
+        : ''
+      : DEFAULT_DRAFT.token_env,
     default_result_size: String(deepxiv.default_result_size ?? DEFAULT_DRAFT.default_result_size),
     preview_characters: String(deepxiv.preview_characters ?? DEFAULT_DRAFT.preview_characters),
     request_timeout_seconds: String(deepxiv.request_timeout_seconds ?? DEFAULT_DRAFT.request_timeout_seconds),
@@ -136,11 +158,11 @@ function mergeDraft(document: OpenDocumentPayload | null, draft: DeepXivDraft) {
   const literature = { ...asObject(structured.literature) }
   const previous = asObject(literature.deepxiv)
   literature.deepxiv = {
+    ...previous,
     enabled: true,
-    base_url:
-      typeof previous.base_url === 'string' && previous.base_url.trim() ? previous.base_url.trim() : 'https://data.rag.ac.cn',
-    token: draft.token.trim(),
-    token_env: typeof previous.token_env === 'string' && previous.token_env.trim() ? previous.token_env.trim() : null,
+    base_url: draft.base_url.trim() || DEFAULT_DRAFT.base_url,
+    token: draft.token.trim() || null,
+    token_env: draft.token_env.trim() || null,
     default_result_size: normalizePositiveInteger(draft.default_result_size, 20),
     preview_characters: normalizePositiveInteger(draft.preview_characters, 5000),
     request_timeout_seconds: normalizePositiveInteger(draft.request_timeout_seconds, 90),
@@ -241,16 +263,16 @@ export function DeepXivSetupDialog({
     setError('')
   }
 
-  const requireToken = () => {
-    if (draft.token.trim()) {
+  const requireCredential = () => {
+    if (draft.token.trim() || draft.token_env.trim()) {
       return true
     }
-    setError(t.tokenRequired)
+    setError(t.tokenOrEnvRequired)
     return false
   }
 
   const handleNext = () => {
-    if (step === 0 && !requireToken()) {
+    if (step === 0 && !requireCredential()) {
       return
     }
     setError('')
@@ -258,7 +280,7 @@ export function DeepXivSetupDialog({
   }
 
   const handleTest = async () => {
-    if (!requireToken()) {
+    if (!requireCredential()) {
       return
     }
     const nextStructuredDraft = mergeDraft(document, draft)
@@ -279,7 +301,7 @@ export function DeepXivSetupDialog({
   }
 
   const handleSave = async () => {
-    if (!document || !requireToken()) {
+    if (!document || !requireCredential()) {
       return
     }
     const nextStructuredDraft = mergeDraft(document, draft)
@@ -367,15 +389,38 @@ export function DeepXivSetupDialog({
                     {t.openRegister}
                     <ArrowUpRight className="h-4 w-4" />
                   </Button>
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium text-[#2f2b27]">{t.tokenLabel}</div>
-                    <Input
-                      type="password"
-                      value={draft.token}
-                      onChange={(event) => handleField('token', event.target.value)}
-                      placeholder={t.tokenPlaceholder}
-                      className="rounded-[14px] border-black/[0.08] bg-white/80"
-                    />
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2 sm:col-span-2">
+                      <div className="text-sm font-medium text-[#2f2b27]">{t.baseUrlLabel}</div>
+                      <Input
+                        value={draft.base_url}
+                        onChange={(event) => handleField('base_url', event.target.value)}
+                        placeholder={t.baseUrlPlaceholder}
+                        className="rounded-[14px] border-black/[0.08] bg-white/80"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-[#2f2b27]">{t.tokenLabel}</div>
+                      <Input
+                        type="password"
+                        value={draft.token}
+                        onChange={(event) => handleField('token', event.target.value)}
+                        placeholder={t.tokenPlaceholder}
+                        className="rounded-[14px] border-black/[0.08] bg-white/80"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="text-sm font-medium text-[#2f2b27]">{t.tokenEnvLabel}</div>
+                      <Input
+                        value={draft.token_env}
+                        onChange={(event) => handleField('token_env', event.target.value)}
+                        placeholder={t.tokenEnvPlaceholder}
+                        className="rounded-[14px] border-black/[0.08] bg-white/80"
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-[16px] border border-black/[0.08] bg-white/78 px-4 py-3 text-sm leading-7 text-[#5d5953]">
+                    {t.credentialHint}
                   </div>
                 </div>
               ) : null}
