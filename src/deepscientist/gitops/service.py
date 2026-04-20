@@ -17,6 +17,7 @@ CHECKPOINT_EXCLUDE_PATHS = (
 def init_repo(repo: Path) -> None:
     run_command(["git", "init"], cwd=repo)
     run_command(["git", "branch", "-M", "main"], cwd=repo, check=False)
+    run_command(["git", "config", "worktree.useRelativePaths", "true"], cwd=repo, check=False)
 
 
 def current_branch(repo: Path) -> str:
@@ -68,6 +69,7 @@ def create_worktree(
     start_point: str | None = None,
 ) -> dict:
     ensure_dir(worktree_root.parent)
+    run_command(["git", "config", "worktree.useRelativePaths", "true"], cwd=repo, check=False)
     if worktree_root.exists() and any(worktree_root.iterdir()):
         return {
             "ok": True,
@@ -78,11 +80,15 @@ def create_worktree(
         }
 
     if branch_exists(repo, branch):
-        result = run_command(["git", "worktree", "add", str(worktree_root), branch], cwd=repo, check=False)
+        result = run_command(
+            ["git", "worktree", "add", "--relative-paths", str(worktree_root), branch],
+            cwd=repo,
+            check=False,
+        )
     else:
         start = start_point or current_branch(repo)
         result = run_command(
-            ["git", "worktree", "add", "-b", branch, str(worktree_root), start],
+            ["git", "worktree", "add", "--relative-paths", "-b", branch, str(worktree_root), start],
             cwd=repo,
             check=False,
         )
