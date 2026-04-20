@@ -129,6 +129,7 @@ Usage:
 
 Launcher flags:
   --host <host>         Bind host for the local web daemon
+  --ip <host>           Deprecated alias for --host; accepted with a migration warning
   --port <port>         Bind port for the local web daemon
   --tui                 Start the terminal workspace only
   --both                Start web + terminal workspace together
@@ -144,6 +145,7 @@ Launcher flags:
   --codex-profile <id>  Run DeepScientist with a specific Codex profile, for example \`m27\`
   --codex <path>        Run DeepScientist with a specific Codex executable path for this launch
   --quest-id <id>       Open the TUI on one quest directly
+  Legacy note:          \`--ip <host>\` still maps to \`--host <host>\` and prints a deprecation warning
 
 Update:
   ds update             Check the npm package version and offer update actions
@@ -190,6 +192,47 @@ function expandUserPath(rawPath) {
 function normalizeProxyUrl(rawValue) {
   const value = String(rawValue || '').trim();
   return value || null;
+}
+
+function normalizeLegacyHostFlagArgs(argv) {
+  const args = [];
+  let warned = false;
+  let legacyValue = null;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--ip') {
+      warned = true;
+      legacyValue = argv[index + 1] || legacyValue;
+      args.push('--host');
+      if (argv[index + 1]) {
+        args.push(argv[index + 1]);
+        index += 1;
+      }
+      continue;
+    }
+    if (typeof arg === 'string' && arg.startsWith('--ip=')) {
+      warned = true;
+      legacyValue = arg.slice('--ip='.length) || legacyValue;
+      args.push('--host', arg.slice('--ip='.length));
+      continue;
+    }
+    args.push(arg);
+  }
+
+  if (!warned) {
+    return { args, warnings: [] };
+  }
+
+  const normalizedValue = String(legacyValue || '').trim();
+  const bindHint =
+    normalizedValue && ['0.0.0.0', '::', '[::]'].includes(normalizedValue)
+      ? ' Note: bind-all addresses such as 0.0.0.0 are valid for `--host`, but local browser access still uses 127.0.0.1.'
+      : '';
+  return {
+    args,
+    warnings: [`Launcher note: \`--ip\` is deprecated. Use \`--host\` instead.${bindHint}`],
+  };
 }
 
 function applyLauncherProxy(proxyUrl) {
@@ -619,6 +662,48 @@ function parseBooleanSetting(rawValue, fallback = false) {
     return false;
   }
   return fallback;
+}
+
+function readRequiredOptionValue(args, index, optionName) {
+  const value = args[index + 1];
+  if (!value || String(value).startsWith('--')) {
+    return {
+      ok: false,
+      error: `Missing value for ${optionName}.`,
+    };
+  }
+  return {
+    ok: true,
+    value,
+  };
+}
+
+function parseStrictPortOption(rawValue, optionName) {
+  const port = Number(rawValue);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    return {
+      ok: false,
+      error: `Invalid value for ${optionName}: ${rawValue}. Expected an integer between 1 and 65535.`,
+    };
+  }
+  return {
+    ok: true,
+    value: port,
+  };
+}
+
+function parseStrictModeOption(rawValue, optionName) {
+  const normalized = String(rawValue || '').trim().toLowerCase();
+  if (!['web', 'tui', 'both'].includes(normalized)) {
+    return {
+      ok: false,
+      error: `Invalid value for ${optionName}: ${rawValue}. Expected one of: web, tui, both.`,
+    };
+  }
+  return {
+    ok: true,
+    value: normalized,
+  };
 }
 
 function supportsAnsi() {
@@ -1073,26 +1158,65 @@ function parseLauncherArgs(argv) {
     else if (arg === '--open-browser') openBrowser = true;
     else if (arg === '--daemon-only') daemonOnly = true;
     else if (arg === '--skip-update-check') skipUpdateCheck = true;
+    else if (arg === '--here') continue;
     else {
       const parsedYolo = parseYoloArg(args, index, yolo);
       if (parsedYolo.matched) {
         yolo = parsedYolo.value;
         index += Math.max(0, parsedYolo.consumed - 1);
-      } else if (arg === '--codex-profile' && args[index + 1]) codexProfile = args[++index];
-      else if (arg === '--codex' && args[index + 1]) codexBinary = args[++index];
-      else if (arg === '--host' && args[index + 1]) host = args[++index];
-      else if (arg === '--port' && args[index + 1]) port = Number(args[++index]);
-      else if (arg === '--home' && args[index + 1]) home = path.resolve(args[++index]);
-      else if (arg === '--proxy' && args[index + 1]) proxy = args[++index];
-      else if (arg === '--quest-id' && args[index + 1]) questId = args[++index];
-      else if (arg === '--mode' && args[index + 1]) mode = normalizeMode(args[++index]);
-      else if (arg === '--help' || arg === '-h') return { help: true };
-      else if (!arg.startsWith('--')) return null;
+      } else if (arg === '--codex-profile') {
+        const next = readRequiredOptionValue(args, index, '--codex-profile');
+        if (!next.ok) return { help: false, error: next.error };
+        codexProfile = next.value;
+        index += 1;
+      } else if (arg === '--codex') {
+        const next = readRequiredOptionValue(args, index, '--codex');
+        if (!next.ok) return { help: false, error: next.error };
+        codexBinary = next.value;
+        index += 1;
+      } else if (arg === '--host') {
+        const next = readRequiredOptionValue(args, index, '--host');
+        if (!next.ok) return { help: false, error: next.error };
+        host = next.value;
+        index += 1;
+      } else if (arg === '--port') {
+        const next = readRequiredOptionValue(args, index, '--port');
+        if (!next.ok) return { help: false, error: next.error };
+        const parsed = parseStrictPortOption(next.value, '--port');
+        if (!parsed.ok) return { help: false, error: parsed.error };
+        port = parsed.value;
+        index += 1;
+      } else if (arg === '--home') {
+        const next = readRequiredOptionValue(args, index, '--home');
+        if (!next.ok) return { help: false, error: next.error };
+        home = path.resolve(next.value);
+        index += 1;
+      } else if (arg === '--proxy') {
+        const next = readRequiredOptionValue(args, index, '--proxy');
+        if (!next.ok) return { help: false, error: next.error };
+        proxy = next.value;
+        index += 1;
+      } else if (arg === '--quest-id') {
+        const next = readRequiredOptionValue(args, index, '--quest-id');
+        if (!next.ok) return { help: false, error: next.error };
+        questId = next.value;
+        index += 1;
+      } else if (arg === '--mode') {
+        const next = readRequiredOptionValue(args, index, '--mode');
+        if (!next.ok) return { help: false, error: next.error };
+        const parsed = parseStrictModeOption(next.value, '--mode');
+        if (!parsed.ok) return { help: false, error: parsed.error };
+        mode = parsed.value;
+        index += 1;
+      } else if (arg === '--help' || arg === '-h') return { help: true, error: null };
+      else if (arg.startsWith('--')) return { help: false, error: `Unknown launcher flag: ${arg}` };
+      else return { help: false, error: `Unexpected launcher argument: ${arg}` };
     }
   }
 
   return {
     help: false,
+    error: null,
     mode,
     host,
     port,
@@ -2225,6 +2349,43 @@ function ensureUvLockPresent() {
   process.exit(1);
 }
 
+function buildUvSyncFailureGuidance({ installMode = detectInstallMode(repoRoot), env = process.env } = {}) {
+  const guidance = [];
+  if (installMode === 'source-checkout') {
+    guidance.push('If you changed Python dependencies in a source checkout, run `uv lock` and try again.');
+  } else {
+    guidance.push('This npm install already includes a locked `uv.lock`, so this is usually a local Python or network environment issue rather than a missing lockfile.');
+    guidance.push('Re-run `ds` in a clean shell first. If you have an active conda or virtualenv, try deactivating it before starting DeepScientist.');
+  }
+
+  const hasPythonEnv =
+    Boolean(String(env.VIRTUAL_ENV || '').trim())
+    || Boolean(String(env.CONDA_PREFIX || '').trim())
+    || Boolean(String(env.PYTHONPATH || '').trim())
+    || Boolean(String(env.PYTHONHOME || '').trim());
+  if (hasPythonEnv) {
+    guidance.push('An active Python environment was detected. `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, or `PYTHONHOME` can interfere with uv runtime bootstrap.');
+  }
+
+  const hasCustomIndex =
+    Object.keys(env).some((key) => /^PIP_/i.test(key))
+    || Boolean(String(env.UV_INDEX_URL || '').trim())
+    || Boolean(String(env.UV_EXTRA_INDEX_URL || '').trim());
+  if (hasCustomIndex) {
+    guidance.push('Custom package index settings were detected. Check `PIP_*`, `UV_INDEX_URL`, or `UV_EXTRA_INDEX_URL` if uv could not download packages.');
+  }
+
+  const hasProxyOrCert =
+    ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'SSL_CERT_FILE', 'REQUESTS_CA_BUNDLE']
+      .some((key) => Boolean(String(env[key] || '').trim()));
+  if (hasProxyOrCert) {
+    guidance.push('Proxy or certificate overrides were detected. If uv reported TLS, certificate, or download errors above, verify those settings and try again.');
+  }
+
+  guidance.push('Look at the uv error printed above this message. That original uv output is the real failure reason.');
+  return guidance;
+}
+
 function resolveUvVersion(uvBinary) {
   const result = runSync(uvBinary, ['--version'], { capture: true, allowFailure: true });
   if (result.status !== 0) {
@@ -2304,7 +2465,12 @@ function syncUvProjectEnvironment(home, uvBinary, pythonTarget, editable) {
     return;
   }
   console.error('DeepScientist could not sync the locked Python environment with uv.');
-  console.error('If you are working from a source checkout, run `uv lock` after dependency changes and try again.');
+  for (const line of buildUvSyncFailureGuidance({
+    installMode: detectInstallMode(repoRoot),
+    env: process.env,
+  })) {
+    console.error(line);
+  }
   process.exit(result.status ?? 1);
 }
 
@@ -4132,14 +4298,22 @@ async function migrateMain(rawArgs) {
   process.exit(0);
 }
 
-async function launcherMain(rawArgs) {
+async function launcherMain(rawArgs, warnings = []) {
   const options = parseLauncherArgs(rawArgs);
   if (!options) {
     return false;
   }
+  for (const warning of warnings) {
+    console.warn(warning);
+  }
   if (options.help) {
     printLauncherHelp();
     process.exit(0);
+  }
+  if (options.error) {
+    console.error(options.error);
+    console.error('Run `ds --help` for supported launcher options.');
+    process.exit(1);
   }
 
   const home = (options.stop || options.status || options.restart)
@@ -4238,7 +4412,8 @@ async function launcherMain(rawArgs) {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
+  const normalizedArgState = normalizeLegacyHostFlagArgs(process.argv.slice(2));
+  const args = normalizedArgState.args;
   if (args[0] === '--daemon-supervisor') {
     await daemonSupervisorMain(args.slice(1));
     return;
@@ -4253,7 +4428,7 @@ async function main() {
     return;
   }
   if (args.length === 0 || args[0] === 'ui' || (!positional && args[0]?.startsWith('--'))) {
-    await launcherMain(args);
+    await launcherMain(args, normalizedArgState.warnings);
     return;
   }
   if (args[0] === '--help' || args[0] === '-h') {
@@ -4293,7 +4468,7 @@ async function main() {
     process.exit(result.status ?? 0);
     return;
   }
-  await launcherMain(args);
+  await launcherMain(args, normalizedArgState.warnings);
 }
 
 module.exports = {
@@ -4316,6 +4491,8 @@ module.exports = {
     useEditableProjectInstall,
     compareVersions,
     detectInstallMode,
+    buildUvSyncFailureGuidance,
+    syncUvProjectEnvironment,
     updateManualCommand,
     buildUpdateStatus,
     buildDaemonStatusPayload,
@@ -4323,6 +4500,7 @@ module.exports = {
     normalizeLauncherRelaunchArgs,
     officialRepositoryLine,
     stripAnsi,
+    normalizeLegacyHostFlagArgs,
   },
 };
 

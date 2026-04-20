@@ -34,6 +34,10 @@ Compatibility names currently remain:
   High-level system contracts and repository structure.
 - [91 Development](./91_DEVELOPMENT.md)
   Maintainer-facing workflow and implementation notes.
+- [22 Windows WSL2 Deployment Guide](./22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+  The Windows operator path that matches this fork and points AI agents at the current setup skill.
+- [Windows WSL2 setup skill](../../src/skills/windows-wsl2-setup/SKILL.md)
+  The executable install and repair workflow for AI coding agents working from this repo.
 - [09 Doctor](./09_DOCTOR.md)
   Startup diagnostics and runtime repair.
 - [01 Settings Reference](./01_SETTINGS_REFERENCE.md)

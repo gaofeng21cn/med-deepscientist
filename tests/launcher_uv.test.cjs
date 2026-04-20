@@ -122,6 +122,87 @@ test('buildUvRuntimeEnv pins uv state inside the DeepScientist runtime tree', ()
   assert.equal(env.MAMBA_ROOT_PREFIX, undefined);
 });
 
+test('buildUvSyncFailureGuidance points npm installs away from uv lock by default', () => {
+  const guidance = __internal.buildUvSyncFailureGuidance({
+    installMode: 'npm-package',
+    env: {},
+  });
+
+  assert.match(guidance.join('\n'), /already includes a locked `uv\.lock`/);
+  assert.doesNotMatch(guidance.join('\n'), /run `uv lock`/);
+});
+
+test('buildUvSyncFailureGuidance suggests uv lock for source checkouts', () => {
+  const guidance = __internal.buildUvSyncFailureGuidance({
+    installMode: 'source-checkout',
+    env: {},
+  });
+
+  assert.match(guidance.join('\n'), /run `uv lock`/);
+});
+
+test('buildUvSyncFailureGuidance surfaces Python and package-index env pollution', () => {
+  const guidance = __internal.buildUvSyncFailureGuidance({
+    installMode: 'npm-package',
+    env: {
+      CONDA_PREFIX: '/opt/conda',
+      PYTHONPATH: '/tmp/pythonpath',
+      PIP_INDEX_URL: 'https://mirror.example/simple',
+      HTTPS_PROXY: 'http://127.0.0.1:8080',
+    },
+  });
+
+  const text = guidance.join('\n');
+  assert.match(text, /active Python environment was detected/i);
+  assert.match(text, /Custom package index settings were detected/i);
+  assert.match(text, /Proxy or certificate overrides were detected/i);
+});
+
+test('syncUvProjectEnvironment prints the original uv failure and follow-up guidance', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-sync-guidance-'));
+  const fakeUv = path.join(tempDir, process.platform === 'win32' ? 'uv.cmd' : 'uv');
+  fs.writeFileSync(
+    fakeUv,
+    process.platform === 'win32'
+      ? '@echo off\r\necho uv simulated failure 1>&2\r\nexit /b 23\r\n'
+      : '#!/usr/bin/env bash\necho "uv simulated failure" >&2\nexit 23\n',
+    { encoding: 'utf8', mode: 0o755 }
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      [
+        "const { __internal } = require(process.argv[1]);",
+        '__internal.syncUvProjectEnvironment(process.argv[2], process.argv[3], "python3.11", false);',
+      ].join('\n'),
+      path.join(process.cwd(), 'bin', 'ds.js'),
+      tempDir,
+      fakeUv,
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        CONDA_PREFIX: '/opt/conda',
+        HTTPS_PROXY: 'http://127.0.0.1:8080',
+      },
+      encoding: 'utf8',
+    }
+  );
+
+  const output = [result.stdout || '', result.stderr || ''].join('\n');
+  assert.equal(result.status, 23);
+  assert.match(output, /uv simulated failure/);
+  assert.match(output, /could not sync the locked Python environment/i);
+  assert.match(output, /run `uv lock`/);
+  assert.match(output, /active Python environment was detected/i);
+  assert.match(output, /Proxy or certificate overrides were detected/i);
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 test('performSelfUpdate resolves npm before invoking npm install latest', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'bin', 'ds.js'), 'utf8');
   const functionStart = source.indexOf('async function performSelfUpdate');
@@ -320,6 +401,61 @@ test('parseLauncherArgs accepts --proxy without treating its URL as a positional
 
   assert.equal(parsed.port, 8890);
   assert.equal(parsed.proxy, 'http://127.0.0.1:58887');
+});
+
+test('normalizeLegacyHostFlagArgs rewrites --ip to --host and emits a warning', () => {
+  const normalized = __internal.normalizeLegacyHostFlagArgs([
+    '--ip',
+    '0.0.0.0',
+    '--port',
+    '8890',
+  ]);
+
+  assert.deepEqual(normalized.args, ['--host', '0.0.0.0', '--port', '8890']);
+  assert.equal(normalized.warnings.length, 1);
+  assert.match(normalized.warnings[0], /--host/);
+  assert.match(normalized.warnings[0], /127\.0\.0\.1/);
+});
+
+test('normalizeLegacyHostFlagArgs rewrites --ip=<value> and keeps a deprecation warning', () => {
+  const normalized = __internal.normalizeLegacyHostFlagArgs([
+    '--ip=127.0.0.1',
+    '--mode',
+    'web',
+  ]);
+
+  assert.deepEqual(normalized.args, ['--host', '127.0.0.1', '--mode', 'web']);
+  assert.equal(normalized.warnings.length, 1);
+  assert.match(normalized.warnings[0], /deprecated/);
+});
+
+test('parseLauncherArgs rejects unknown launcher flags instead of falling through silently', () => {
+  const parsed = __internal.parseLauncherArgs(['--bogus']);
+
+  assert.equal(parsed.help, false);
+  assert.equal(parsed.error, 'Unknown launcher flag: --bogus');
+});
+
+test('parseLauncherArgs rejects missing launcher option values clearly', () => {
+  assert.equal(
+    __internal.parseLauncherArgs(['--host']).error,
+    'Missing value for --host.'
+  );
+  assert.equal(
+    __internal.parseLauncherArgs(['--codex-profile']).error,
+    'Missing value for --codex-profile.'
+  );
+});
+
+test('parseLauncherArgs rejects invalid launcher option values clearly', () => {
+  assert.equal(
+    __internal.parseLauncherArgs(['--port', 'abc']).error,
+    'Invalid value for --port: abc. Expected an integer between 1 and 65535.'
+  );
+  assert.equal(
+    __internal.parseLauncherArgs(['--mode', 'desktop']).error,
+    'Invalid value for --mode: desktop. Expected one of: web, tui, both.'
+  );
 });
 
 test('parseLauncherArgs accepts --codex-profile for provider-backed Codex setups', () => {

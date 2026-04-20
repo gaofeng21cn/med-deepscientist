@@ -21,10 +21,11 @@ Copy this to an AI coding agent when you want it to do the install:
 Use these in order before changing anything:
 
 1. `README.md`
-2. `docs/en/00_QUICK_START.md`
-3. `docs/en/15_CODEX_PROVIDER_SETUP.md`
-4. `docs/en/09_DOCTOR.md`
-5. [`references/windows-wsl2-setup-notes.md`](references/windows-wsl2-setup-notes.md)
+2. `docs/en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md`
+3. `docs/en/00_QUICK_START.md`
+4. `docs/en/15_CODEX_PROVIDER_SETUP.md`
+5. `docs/en/09_DOCTOR.md`
+6. [`references/windows-wsl2-setup-notes.md`](references/windows-wsl2-setup-notes.md)
 
 Treat the repo docs as the command truth.
 Treat the reference note as Windows-specific operating guidance, auth options, proxy or NAT repair flow, and failure triage.
