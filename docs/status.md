@@ -14,6 +14,7 @@
 - 核心工作方式入口：根 `AGENTS.md`
 - 当前文档骨架：`project / architecture / invariants / decisions / status`
 - BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线
+- BenchStore maintainer docs 已补齐 YAML authoring 与 GitHub Releases packaging contract，文档口径继续停在当前 fork 的 read-only catalog + setup packet 边界
 - DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research
 
 ## 当前执行链

@@ -38,6 +38,10 @@ Compatibility names currently remain:
   Startup diagnostics and runtime repair.
 - [01 Settings Reference](./01_SETTINGS_REFERENCE.md)
   Runtime configuration and environment settings.
+- [22 BenchStore YAML Authoring Guide](./22_BENCHSTORE_YAML_REFERENCE.md)
+  Maintainer-facing catalog authoring contract for the current BenchStore surface.
+- [23 BenchStore GitHub Releases Spec](./23_BENCHSTORE_GITHUB_RELEASES_SPEC.md)
+  Recommended source-bundle release contract for BenchStore benchmark assets.
 
 ## Inherited Runtime Surfaces
 

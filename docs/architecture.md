@@ -64,6 +64,8 @@
 - catalog entry schema 正常化
 - catalog 列出 / 单项读取
 - 基于核心字段的基础筛选与查询
+- 基于 catalog entry 生成 setup packet
+- 维护者 authoring / packaging 说明见 `docs/en|zh/22_BENCHSTORE_YAML_REFERENCE.md` 与 `docs/en|zh/23_BENCHSTORE_GITHUB_RELEASES_SPEC.md`
 
 当前明确停在只读 contract，不扩到 `BenchStoreDialog`、`start_setup_patch`、setup quest 状态链或其他产品级 setup UI。
 
