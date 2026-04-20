@@ -6887,6 +6887,133 @@ def test_daemon_skips_retry_for_non_retryable_minimax_protocol_error(temp_home: 
     assert turn_errors[-1].get("diagnosis_code") == "minimax_tool_result_sequence_error"
 
 
+def test_daemon_skips_retry_for_argument_list_too_long_runner_exception(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": True,
+            "retry_max_attempts": 5,
+            "retry_initial_backoff_sec": 0,
+            "retry_backoff_multiplier": 2,
+            "retry_max_backoff_sec": 0,
+        }
+    )
+    quest = app.quest_service.create("argument list too long quest")
+    quest_id = quest["quest_id"]
+
+    class ArgumentListTooLongRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def run(self, request):
+            self.requests.append(request)
+            raise OSError(7, "Argument list too long")
+
+    runner = ArgumentListTooLongRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Please continue with the saved prompt.", "source": "tui-ink"})
+    assert payload["ok"] is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+        if any(item.get("type") == "runner.turn_error" for item in events):
+            if snapshot.get("retry_state") is None and str(snapshot.get("display_status") or "").strip() == "error":
+                break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("argument list too long failure did not settle into an immediate error state")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+    turn_errors = [item for item in events if item.get("type") == "runner.turn_error"]
+
+    assert len(runner.requests) == 1
+    assert snapshot["retry_state"] is None
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "non_retryable_runner_error"
+    assert snapshot["status"] == "error"
+    assert snapshot["display_status"] == "error"
+    assert not any(item.get("type") == "runner.turn_retry_scheduled" for item in events)
+    assert turn_errors
+    assert turn_errors[-1].get("diagnosis_code") == "runner_argument_list_too_long"
+
+
+def test_daemon_skips_retry_for_codex_binary_attachment_path_error(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": True,
+            "retry_max_attempts": 5,
+            "retry_initial_backoff_sec": 0,
+            "retry_backoff_multiplier": 2,
+            "retry_max_backoff_sec": 0,
+        }
+    )
+    quest = app.quest_service.create("binary attachment path unsupported quest")
+    quest_id = quest["quest_id"]
+
+    class BinaryAttachmentFailRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def run(self, request):
+            self.requests.append(request)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=False,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="",
+                exit_code=1,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text='{"type":"error","error":{"type":"bad_request_error","message":"unknown file extension `.png` while reading attachment path `/tmp/example.png`","http_code":"400"}}',
+            )
+
+    runner = BinaryAttachmentFailRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Review the screenshot attachment.", "source": "tui-ink"})
+    assert payload["ok"] is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+        if any(item.get("type") == "runner.turn_error" for item in events):
+            if snapshot.get("retry_state") is None and str(snapshot.get("display_status") or "").strip() == "error":
+                break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("binary attachment path failure did not settle into an immediate error state")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+    turn_errors = [item for item in events if item.get("type") == "runner.turn_error"]
+
+    assert len(runner.requests) == 1
+    assert snapshot["retry_state"] is None
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "non_retryable_runner_error"
+    assert snapshot["status"] == "error"
+    assert snapshot["display_status"] == "error"
+    assert not any(item.get("type") == "runner.turn_retry_scheduled" for item in events)
+    assert turn_errors
+    assert turn_errors[-1].get("diagnosis_code") == "runner_binary_attachment_path_unsupported"
+
+
 def test_chat_reply_auto_links_interaction_and_resumes_with_decision_skill(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
