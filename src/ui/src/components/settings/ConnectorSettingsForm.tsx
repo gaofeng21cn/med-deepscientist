@@ -1720,6 +1720,7 @@ function ConnectorProfileSettingsModal({
 function ConnectorCard({
   entry,
   locale,
+  value,
   config,
   snapshot,
   quests,
@@ -1737,6 +1738,7 @@ function ConnectorCard({
 }: {
   entry: ConnectorCatalogEntry
   locale: Locale
+  value: ConnectorConfigMap
   config: Record<string, unknown>
   snapshot?: ConnectorSnapshot
   quests: QuestSummary[]
@@ -2890,7 +2892,7 @@ function ConnectorCard({
       setProfileWizardOpen(true)
     }
 
-    const saveNewProfile = () => {
+    const saveNewProfile = async () => {
       const fieldDefaults = genericConnectorProfileDefaults[connectorName]
       const requestedProfileId = String(profileWizardDraft.profile_id || '').trim() || createGenericProfileId(connectorName)
       let profileId = requestedProfileId
@@ -2919,13 +2921,13 @@ function ConnectorCard({
           profiles: [...profiles, nextProfile],
         },
       }
-      onUpdateConnector(entry.name, {
-        enabled: true,
-        profiles: [...profiles, nextProfile],
-      })
+      const saved = await Promise.resolve(onSave(nextStructuredDraft))
+      if (!saved) {
+        return false
+      }
       setProfileWizardDraft(nextProfile)
       setProfileWizardProfileId(profileId)
-      onSave(nextStructuredDraft)
+      return true
     }
 
     return (
@@ -3244,12 +3246,15 @@ function ConnectorCard({
                 <Button onClick={() => setProfileWizardStep(2)}>{t.wizardContinue}</Button>
               ) : profileWizardStep === 2 ? (
                 <Button
-                  onClick={() => {
+                  onClick={async () => {
                     if (hasSavedProfile) {
                       setProfileWizardStep(3)
                       return
                     }
-                    saveNewProfile()
+                    const saved = await saveNewProfile()
+                    if (!saved) {
+                      return
+                    }
                     setProfileWizardStep(3)
                   }}
                   disabled={saving || (!hasSavedProfile && missingRequiredFields.length > 0)}
@@ -4086,6 +4091,7 @@ export function ConnectorSettingsForm({
               key={selectedEntry.name}
               entry={selectedEntry}
               locale={locale}
+              value={value}
               config={value[selectedEntry.name] || {}}
               snapshot={snapshots.get(selectedEntry.name)}
               quests={quests}
