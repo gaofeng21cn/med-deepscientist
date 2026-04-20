@@ -396,7 +396,6 @@ def test_write_skill_documents_reviewer_first_reader_first_contract_and_referenc
     assert "paper/related_work_map.md" in text
     assert "paper/paper_experiment_matrix.md" in text
     assert "paper/proofing/language_issues.md" in text
-    assert "`paper-plot`" in text
     assert (root / "references" / "paper-experiment-matrix-template.md").exists()
     assert (root / "references" / "reviewer-first-writing.md").exists()
     assert (root / "references" / "section-contracts.md").exists()
@@ -491,24 +490,23 @@ def test_analysis_campaign_skill_requires_one_slice_campaign_for_single_extra_ex
     assert "current workspace/result node" in text
 
 
-def test_research_stage_skills_document_three_layer_planning_and_launched_slice_artifacts() -> None:
+def test_research_stage_skills_document_upstream_aligned_baseline_and_campaign_contracts() -> None:
     root = repo_root() / "src" / "skills"
     baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
     experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
     campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "## Three-layer todo contract" in baseline_text
-    assert "## Research-map role" in baseline_text
-    assert "quest-root `plan.md`" in baseline_text
+    assert "## Fast-path first" in baseline_text
+    assert "`requested_baseline_ref` or `confirmed_baseline_ref`" in baseline_text
+    assert "default to reuse-and-verify" in baseline_text
 
-    assert "## Three-layer todo contract" in experiment_text
-    assert "## Research-map role" in experiment_text
-    assert "quest-root `plan.md`" in experiment_text
+    assert "## Required plan and checklist" in experiment_text
+    assert "selected idea summarized in `1-2` sentences" in experiment_text
+    assert "artifact.record_main_experiment(...)" in experiment_text
 
-    assert "## Hard artifact flow" in campaign_text
-    assert "Analysis-campaign has a hard artifact boundary." in campaign_text
-    assert "After each launched slice finishes, fails, becomes infeasible, or is superseded" in campaign_text
-    assert "Do not replace `artifact.record_analysis_slice(...)` with chat, memory, a local note, or a campaign summary" in campaign_text
+    assert "artifact.record_analysis_slice(...)" in campaign_text
+    assert "one-slice campaign" in campaign_text
+    assert "current workspace/result node" in campaign_text
 
 
 def test_review_and_rebuttal_skills_route_extra_evidence_into_shared_campaign_protocol() -> None:

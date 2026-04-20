@@ -58,29 +58,6 @@ Do not invent a separate experiment system for those cases.
 - Progress message templates are references only. Adapt to the actual context and vary wording so messages feel human, respectful, and non-robotic.
 - If a threaded user reply arrives, interpret it relative to the latest campaign progress update before assuming the task changed completely.
 
-## Three-layer todo contract
-
-- keep quest-root `plan.md` as the quest-level research map and parent loop tracker
-- keep workspace `PLAN.md` as the current campaign-node charter
-- keep workspace `CHECKLIST.md` as the campaign execution frontier; when writing-facing `todo_items` exist, treat them as the bottom-layer frontier rather than as a second parallel planning system
-- if the frontier stops changing across repeated passes, revise the campaign node or route instead of opening nested slice subtrees in chat
-
-## Research-map role
-
-- an analysis campaign is a subordinate evidence node under a parent experiment or paper-facing loop state
-- finishing or blocking a campaign should update quest-root `plan.md` with the next edge back to write, decision, another experiment node, or stop
-
-## Hard artifact flow
-
-Analysis-campaign has a hard artifact boundary.
-
-- Before launching slices, call `artifact.create_analysis_campaign(...)` with the currently justified slice list when the work is an analysis campaign, affects durable lineage, needs Canvas or branch visibility, supports paper, rebuttal, or review claims, or has more than one slice.
-- Even one extra experiment can still be represented as a one-slice campaign when durable lineage matters.
-- If `artifact.create_analysis_campaign(...)` returns slice worktrees, run each returned slice in its returned workspace unless a recorded reason makes another location more faithful.
-- After each launched slice finishes, fails, becomes infeasible, or is superseded, call `artifact.record_analysis_slice(...)` with the honest outcome.
-- Do not replace `artifact.record_analysis_slice(...)` with chat, memory, a local note, or a campaign summary for any launched slice.
-- If no slice is launched and the answer is only a bounded read-only audit, a durable report or decision may be enough; do not call that a completed campaign slice.
-
 ## Stage purpose
 
 The analysis-campaign stage exists to test the strength, boundaries, and failure modes of a result.
@@ -451,7 +428,6 @@ For slices that run longer than a quick smoke check:
 - stop them with `bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)` if the slice is invalid, wedged, or superseded; add `force=true` when immediate termination is required
 - when you control the slice code, prefer a throttled `tqdm` progress reporter and, when feasible, pair it with concise `__DS_PROGRESS__` lines carrying phase and ETA
 - do not mark a slice complete until the managed log and outputs both confirm completion
-- if the same failure class appears again without a real route or evidence change, stop widening the campaign and route through `decision`
 
 ### 3. Keep comparability
 

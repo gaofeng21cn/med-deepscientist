@@ -26,13 +26,8 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - Keep ordinary subtask completions concise. When a paper/draft milestone is actually completed, upgrade to a richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` report instead of another short progress update.
 - That richer writing-stage milestone report should normally cover: which draft, section, or outline milestone finished, what is now supportable, what is still missing, and the exact recommended next revision or route decision.
 - That richer milestone report is still normally non-blocking. If the next writing or return-to-experiment step is already clear, continue automatically after reporting instead of pausing by default.
-- If a manuscript-facing draft or journal package can already be built, missing author / affiliation / corresponding-author / funding / conflict / ethics / consent / data-availability metadata must not trigger a blocking request by default. Materialize the auditable package first, keep explicit placeholders on the title-page or declaration surfaces, and record the gap in the submission checklist, package manifest, or handoff notes.
-- For those package-polish metadata gaps, use a threaded `progress` or `milestone` follow-up plus TODO surfaces rather than `reply_mode='blocking'`, unless the missing item is a true external credential or secret without which no auditable package can be generated at all.
 - If the active communication surface is QQ, keep writing milestones text-first unless a final paper PDF or one clearly useful summary artifact already exists.
 - Treat connector-facing report charts separately from paper-facing figures; do not auto-send draft paper figures to QQ.
-- For a medical prediction or TRIPOD-style paper, build manuscript-facing wording around clinical question, primary finding, clinical implication, and interpretation boundary before expanding paragraphs or captions.
-- In those papers, prefer external validation, discrimination, calibration, clinical utility, and transportability when those are the supported concepts.
-- Keep support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice out of the manuscript headline, abstract, and main results surface; if they matter, place them in mechanistic explanation and pair them with manuscript-native wording.
 - For paper-facing figures and figure drafts, keep palette discipline explicit:
   - prefer `mist-stone` as the paper-default palette: `#F3EEE8`, `#D8D1C7`, `#8A9199`
   - use `sage-clay` when the method-vs-baseline contrast needs one stronger but still muted accent: `#E7E1D6`, `#B7A99A`, `#7F8F84`
@@ -54,7 +49,6 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - Matplotlib is acceptable for a first draft or data-faithful paper figure, but captions must remain manuscript-native: do not append tool names, service recommendations, URLs, or generation provenance unless the user explicitly requested manuscript-surface disclosure.
 - Prefer vector-first export for paper figures: `pdf` or `svg`, plus one `png` preview when helpful.
 - When practical, size figures so they can survive later single-column or double-column placement without unreadable text.
-- When the figure is a standard bar, line, scatter, or radar chart built from structured results, prefer `paper-plot` before inventing a fresh plotting stack.
 - For any figure that will enter the draft, appendix, or paper bundle, open `figure-polish/SKILL.md` and complete its render-inspect-revise pass before treating the figure as final.
 - If you generate figure code in Python, start from the system prompt Morandi plotting template and only adjust figure size, labels, and series colors as needed.
 - If the runtime starts an auto-continue turn with no new user message, keep drafting or verifying from the durable state and active requirements instead of replaying the previous user turn.
@@ -139,8 +133,6 @@ Before writing seriously, confirm:
 - the claims you intend to write are backed by durable artifacts
 - the code/diff path is available for method fidelity checks
 - the evaluation contract is explicit
-- if `startup_contract.publishability_gate_mode = enforce`, the current line still passes an explicit publishability gate
-- if `startup_contract.publishability_gate_mode = warn`, the current line has already been judged for publishability and any remaining weakness is being handled consciously rather than ignored
 - the active paper line is known
 - the selected outline is present and reflects the current evidence line
 - `paper/outline/manifest.json` and any relevant section files are present when the outline folder flow is enabled
@@ -149,7 +141,6 @@ Before writing seriously, confirm:
 - completed relevant analysis results under `experiments/analysis-results/` are mapped into the selected outline or matrix rather than floating only as standalone reports
 
 If major claims lack evidence, surface the gap first.
-If `startup_contract.publishability_gate_mode = off`, do not invent a gate requirement that the quest did not ask for.
 If the selected outline, outline folder, evidence ledger, or matrix feels underspecified, read `references/outline-evidence-contract-example.md` before drafting further.
 For paper-facing work, use this hard order instead of drifting between surfaces:
 
@@ -1018,7 +1009,6 @@ The self-review output should also make the verification logic externally legibl
 - what was downgraded or deferred
 
 When useful, add explicit “questions for the author” style prompts to expose what still needs proof or clarification.
-When the gap is limited to title-page or declaration metadata and an auditable package already exists, keep those questions threaded and non-blocking; the package should still be delivered with honest placeholders and a concrete follow-up checklist.
 If the draft is targeting publication quality, compare against a few strong nearby papers or templates only to raise quality, never to copy unsupported claims.
 
 Run that review with an adversarial mindset:
@@ -1165,9 +1155,6 @@ If a critical packaging issue remains, mark the stage as blocked or warn explici
 ```
 
 ### `submission_checklist.json` minimum shape
-
-- `blocking_items` records remaining submission-readiness blockers; it does not require opening a blocking user interaction.
-- If an auditable package already exists, unresolved title-page / declaration metadata should still be materialized honestly and handed off through checklist or manifest TODOs while the interaction remains threaded.
 
 ```json
 {

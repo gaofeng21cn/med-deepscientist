@@ -204,30 +204,27 @@ def test_system_prompt_keeps_compact_reference_wording_templates() -> None:
     assert "这里有个分叉需要你确认" in text
 
 
-def test_system_prompt_and_write_skill_keep_author_metadata_gaps_non_blocking_when_package_is_auditable() -> None:
+def test_system_prompt_keeps_author_metadata_policy_outside_base_write_skill() -> None:
     system_text = _system_prompt_text()
     write_text = _skill_text("write")
 
     assert "Missing author list, affiliations, corresponding-author details" in system_text
     assert "materialize the auditable package first" in system_text
     assert "do not turn author / title-page / declaration metadata gaps into blocking requests" in system_text
-    assert "must not trigger a blocking request by default" in write_text
-    assert "title-page or declaration metadata and an auditable package already exists" in write_text
-    assert "blocking_items` records remaining submission-readiness blockers; it does not require opening a blocking user interaction" in write_text
+    assert '"blocking_items": []' in write_text
+    assert "must not trigger a blocking request by default" not in write_text
+    assert "title-page or declaration metadata and an auditable package already exists" not in write_text
+    assert "blocking_items` records remaining submission-readiness blockers; it does not require opening a blocking user interaction" not in write_text
 
 
 def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     text = _skill_text("baseline")
 
     assert "## Quick workflow" in text
-    assert "## Comparator-first rule" in text
     assert "## Fast-path first" in text
     assert "## Required plan and checklist" in text
     assert "source paper and source repo first" in text
     assert "`PLAN.md` and `CHECKLIST.md`" in text
-    assert "comparator-first, not reproduction-first" in text
-    assert "what is the lightest trustworthy comparator?" in text
-    assert "For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction." in text
     assert "short-form `PLAN.md` and `CHECKLIST.md`" in text
     assert "references/baseline-plan-template.md" in text
     assert "references/baseline-checklist-template.md" in text
@@ -242,10 +239,9 @@ def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     assert "flat top-level dictionary keyed by the paper-facing metric ids" in text
     assert "`Result/metric.md` is optional temporary scratch memory only" in text
     assert "same failure class" in text
-    assert "If a lighter route already satisfies the current acceptance target, stop there." in text
-    assert "baseline should usually end" in text
     assert "## Baseline id and variant rules" in text
     assert "## Multi-baseline policy" in text
+    assert "## Route order" in text
     assert "references/artifact-payload-examples.md" in text
 
 
@@ -280,10 +276,6 @@ def test_experiment_skill_requires_incremental_seven_field_recording() -> None:
     assert "baseline_relation" in text
     assert "failure_mode" in text
     assert "next_action" in text
-    assert "## Three-layer todo contract" in text
-    assert "## Research-map role" in text
-    assert "keep quest-root `plan.md` as the quest-level research map and loop tracker" in text
-    assert "For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction." in text
     assert "maximize valid evidence per unit time and compute" in text
     assert "equivalence-preserving efficiency upgrades" in text
     assert "larger safe batch size" in text
@@ -472,10 +464,12 @@ def test_system_prompt_keeps_decision_actions_enumerated_and_python_env_managed(
 def test_write_skill_requires_medical_publication_native_rhetoric_for_medical_prediction_papers() -> None:
     text = _skill_text("write")
 
-    assert "medical prediction or TRIPOD-style paper" in text
-    assert "clinical question, primary finding, clinical implication, and interpretation boundary" in text
-    assert "external validation, discrimination, calibration, clinical utility, and transportability" in text
-    assert "support mismatch, risk compression, self-quantile, one-bin collapse, contextual layer, or analysis slice" in text
+    assert "medical prediction or TRIPOD-style paper" not in text
+    assert "clinical question, primary finding, clinical implication, and interpretation boundary" not in text
+    assert "publishability_gate_mode" not in text
+    assert "AutoFigure-Edit" not in text
+    assert "captions must remain manuscript-native" in text
+    assert "keep captions manuscript-facing" in text
 
 
 def test_idea_skill_adds_problem_importance_and_first_principles_memo() -> None:
@@ -659,8 +653,6 @@ def test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitorin
         assert "do not set `timeout_seconds` exactly equal to `N`" in text
         assert "prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command" in text
 
-    assert "if the same failure class appears again without a real route or evidence change" in experiment_text
-    assert "if the same failure class appears again without a real route or evidence change" in analysis_text
     assert "smoke test" in baseline_text
     assert "bash_exec(mode='detach', ...)" in baseline_text
     assert "tqdm" in experiment_text

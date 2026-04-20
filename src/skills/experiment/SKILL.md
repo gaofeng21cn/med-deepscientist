@@ -43,19 +43,6 @@ Use this skill for the main evidence-producing runs of the quest.
 - Prefer `bash_exec` for experiment commands so each run gets a durable session id, quest-local log folder, and later `read/list/kill` control.
 - For meaningful long-running runs, include the estimated next reply time or next check-in window whenever it is defensible.
 
-## Three-layer todo contract
-
-- keep quest-root `plan.md` as the quest-level research map and loop tracker
-- keep workspace `PLAN.md` as the active experiment-node contract
-- keep workspace `CHECKLIST.md` as the active execution frontier with one real in-progress item and a short `Next` list
-- if the checklist stops changing across repeated passes, revise the node contract or route instead of nesting more execution subtasks
-
-## Research-map role
-
-- `experiment` is the evidence-producing node inside the current loop, not the whole loop itself
-- after each measured result, update quest-root `plan.md` with the actual next edge: analysis, write, decision, or a new loop entry
-- if a result becomes the new incumbent and the quest still has headroom, create the next loop entry in quest-root `plan.md` instead of treating writing as automatic termination
-
 ## Stage purpose
 
 The experiment stage should turn a selected idea into auditable evidence.
@@ -73,7 +60,6 @@ It is also the stage that should decide the next route once the measured result 
 Within the user's explicit constraints, maximize valid evidence per unit time and compute.
 Prefer equivalence-preserving efficiency upgrades first: larger safe batch size, mixed precision, gradient accumulation, dataloader workers, cache reuse, checkpoint resume, precomputed features, and smaller pilots.
 If a proposed efficiency change alters optimization dynamics, effective budget, or baseline comparability, treat it as a real experiment change and record it as such.
-For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction.
 
 Use `references/evidence-ladder.md` when deciding whether the current package is merely executable, solid enough to carry the main claim, or already in the stage where broader polish is justified.
 
@@ -378,7 +364,6 @@ Retry-delta discipline:
 - if broader recovery is unavoidable, record exactly which layer changed: data, preprocessing, model, objective, optimization, evaluation, or environment
 - before each retry, state the expected effect and the fastest falsification signal
 - if the retry produced no interpretable delta, do not treat it as meaningful evidence about the underlying research hypothesis
-- if the same failure class appears again without a real route or evidence change, stop looping and route through `decision`
 
 ### 5. Execute the run
 
