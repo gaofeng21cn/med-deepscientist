@@ -408,6 +408,7 @@ artifact 名字虽然多，但本质上还是一个家族。
 
 #### F. 阅读与交互连续性
 
+- `artifact.deepxiv(...)`
 - `artifact.arxiv(...)`
 - `artifact.interact(...)`
 - `artifact.complete_quest(...)`

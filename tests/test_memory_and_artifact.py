@@ -4240,6 +4240,81 @@ def test_artifact_arxiv_read_mode_preserves_placeholder_when_metadata_times_out(
     assert listed["items"][0]["metadata_status"] == "pending"
 
 
+def test_artifact_deepxiv_uses_runtime_config_and_returns_structured_results(
+    temp_home: Path, monkeypatch
+) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    config = manager.load_named("config")
+    literature = config.get("literature") if isinstance(config.get("literature"), dict) else {}
+    literature["deepxiv"] = {
+        "enabled": True,
+        "base_url": "https://data.rag.ac.cn/custom",
+        "token": "deepxiv-token",
+        "token_env": "DEEPXIV_TOKEN",
+        "default_result_size": 3,
+        "preview_characters": 140,
+        "request_timeout_seconds": 11,
+    }
+    config["literature"] = literature
+    manager.save_named_payload("config", config)
+    artifact = ArtifactService(temp_home)
+
+    def fake_urlopen(request, timeout=0):  # noqa: ANN001
+        assert request.headers["Authorization"] == "Bearer deepxiv-token"
+        assert request.full_url == (
+            "https://data.rag.ac.cn/custom/arxiv/?type=retrieve&query=vision+transformers&size=3"
+        )
+        assert timeout == 11
+        return _FakeUrlopenResponse(
+            json.dumps(
+                {
+                    "total": 2,
+                    "took": 0.42,
+                    "results": [
+                        {
+                            "paper_id": "2010.11929",
+                            "title": "An Image is Worth 16x16 Words",
+                            "authors": ["Dosovitskiy, Alexey"],
+                            "abstract": (
+                                "Vision Transformers apply pure transformer layers directly to image patches and "
+                                "remain competitive with CNNs on image recognition benchmarks while scaling cleanly "
+                                "across larger pretraining corpora and stronger downstream transfer settings."
+                            ),
+                            "abs_url": "https://arxiv.org/abs/2010.11929",
+                            "pdf_url": "https://arxiv.org/pdf/2010.11929.pdf",
+                        },
+                        {
+                            "paper_id": "2106.04554",
+                            "title": "Early Convolutions Help Transformers See Better",
+                            "authors": ["Xiao, Tete"],
+                            "abstract": "Hybrid vision models improve sample efficiency.",
+                        },
+                    ],
+                }
+            )
+        )
+
+    monkeypatch.setattr("deepscientist.artifact.deepxiv.urlopen", fake_urlopen)
+
+    result = artifact.deepxiv("vision transformers")
+
+    assert result["ok"] is True
+    assert result["mode"] == "retrieve"
+    assert result["query"] == "vision transformers"
+    assert result["result_size"] == 3
+    assert result["total"] == 2
+    assert result["request_timeout_seconds"] == 11
+    assert result["results"][0]["paper_id"] == "2010.11929"
+    assert result["results"][0]["title"] == "An Image is Worth 16x16 Words"
+    assert result["results"][0]["authors"] == ["Dosovitskiy, Alexey"]
+    assert result["results"][0]["source_url"] == "https://arxiv.org/abs/2010.11929"
+    assert result["results"][0]["abstract_preview"].endswith("...[truncated]")
+    assert "DeepXiv results for `vision transformers`" in result["content"]
+    assert "An Image is Worth 16x16 Words" in result["preview"]
+
+
 def test_open_document_supports_legacy_path_arxiv_ids_from_worktree(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

@@ -48,6 +48,7 @@ from ..memory.frontmatter import dump_markdown_document, load_markdown_document
 from ..prompts.builder import CONTINUATION_SKILLS
 from .arxiv import fetch_arxiv_metadata, read_arxiv_content
 from .charts import render_main_experiment_metric_timeline_chart
+from .deepxiv import read_deepxiv_content
 from .guidance import build_guidance_for_record, guidance_summary
 from .metrics import (
     baseline_metric_lines,
@@ -6978,6 +6979,19 @@ class ArtifactService:
             "metadata_status": latest.get("metadata_status"),
             **self._arxiv_file_payload(quest_root, latest),
         }
+
+    def deepxiv(
+        self,
+        query: str | None = None,
+        *,
+        size: int | None = None,
+    ) -> dict[str, Any]:
+        runtime_config = ConfigManager(self.home).load_runtime_config()
+        return read_deepxiv_content(
+            query,
+            runtime_config=runtime_config,
+            size=size,
+        )
 
     def record(
         self,

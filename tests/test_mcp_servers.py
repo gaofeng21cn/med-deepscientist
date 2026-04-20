@@ -318,6 +318,7 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
             "confirm_baseline",
             "waive_baseline",
             "arxiv",
+            "deepxiv",
             "refresh_summary",
             "render_git_graph",
             "interact",
@@ -1388,6 +1389,65 @@ def test_artifact_mcp_server_arxiv_list_mode_calls_service(temp_home: Path, monk
         assert result["count"] == 1
         assert result["items"][0]["arxiv_id"] == "2010.11929"
         assert calls == [(None, "list", False, str(quest_root))]
+
+    asyncio.run(scenario())
+
+
+def test_artifact_mcp_server_deepxiv_tool_calls_service(temp_home: Path, monkeypatch) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp deepxiv quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        calls: list[tuple[str, int | None]] = []
+
+        def fake_deepxiv(  # noqa: ANN001
+            self,
+            query: str | None = None,
+            *,
+            size: int | None = None,
+        ) -> dict[str, object]:
+            calls.append((str(query), size))
+            return {
+                "ok": True,
+                "mode": "retrieve",
+                "query": query,
+                "result_size": size or 2,
+                "results": [{"paper_id": "2010.11929", "title": "Vision Transformers"}],
+                "content": "# DeepXiv",
+            }
+
+        monkeypatch.setattr(ArtifactService, "deepxiv", fake_deepxiv)
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-deepxiv",
+            active_anchor="idea",
+            conversation_id="quest:test",
+            agent_role="idea",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "deepxiv",
+                {
+                    "query": "vision transformers",
+                    "size": 2,
+                },
+            )
+        )
+
+        assert result["ok"] is True
+        assert result["query"] == "vision transformers"
+        assert result["result_size"] == 2
+        assert result["results"][0]["paper_id"] == "2010.11929"
+        assert calls == [("vision transformers", 2)]
 
     asyncio.run(scenario())
 

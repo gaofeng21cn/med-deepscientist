@@ -408,6 +408,7 @@ The artifact namespace is large, but it is still one family.
 
 #### F. Reading and interaction continuity
 
+- `artifact.deepxiv(...)`
 - `artifact.arxiv(...)`
 - `artifact.interact(...)`
 - `artifact.complete_quest(...)`

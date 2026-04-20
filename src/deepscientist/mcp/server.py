@@ -1191,6 +1191,24 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             quest_root=context.require_quest_root(),
         )
 
+    @server.tool(
+        name="deepxiv",
+        description=(
+            "Query the configured DeepXiv literature retrieval surface and return structured paper shortlist results "
+            "for the current runtime."
+        ),
+        annotations=_read_only_tool_annotations(title="Retrieve DeepXiv papers"),
+    )
+    def deepxiv(
+        query: str,
+        size: int | None = None,
+        comment: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return service.deepxiv(
+            query,
+            size=size,
+        )
+
     @server.tool(name="refresh_summary", description="Refresh SUMMARY.md from recent artifact state.")
     def refresh_summary(
         reason: str | None = None,
