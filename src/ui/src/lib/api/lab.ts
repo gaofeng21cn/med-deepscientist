@@ -10,6 +10,7 @@ import {
 } from '@/demo/adapter'
 import { isDemoProjectId } from '@/demo/projects'
 import { isQuestRuntimeSurface, shouldUseQuestProject } from '@/lib/runtime/quest-runtime'
+import { safeJsonStringify } from '@/lib/safe-json'
 import type {
   GuidanceVm,
   GitBranchNode,
@@ -1358,7 +1359,7 @@ function compactText(value: unknown, limit = 240): string | null {
     typeof value === 'string'
       ? value.trim()
       : value && typeof value === 'object'
-        ? JSON.stringify(value)
+        ? safeJsonStringify(value)
         : asStringValue(value) || ''
   if (!text) return null
   if (text.length <= limit) return text
