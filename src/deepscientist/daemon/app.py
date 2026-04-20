@@ -7657,7 +7657,7 @@ class DaemonApp:
                         payload = result(**params, body=body)
                     elif route_name == "config_validate":
                         payload = result(body)
-                    elif route_name == "config_test":
+                    elif route_name in {"config_test", "config_deepxiv_test"}:
                         payload = result(body)
                     elif method in {"PUT", "PATCH"}:
                         payload = result(**params, body=body)

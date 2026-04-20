@@ -57,6 +57,17 @@ def default_config(home: Path) -> dict:
             "sync_quest_on_create": True,
             "sync_quest_on_open": True,
         },
+        "literature": {
+            "deepxiv": {
+                "enabled": False,
+                "base_url": "https://data.rag.ac.cn",
+                "token": None,
+                "token_env": "DEEPXIV_TOKEN",
+                "default_result_size": 20,
+                "preview_characters": 5000,
+                "request_timeout_seconds": 90,
+            },
+        },
         "bootstrap": {
             "codex_ready": False,
             "codex_last_checked_at": None,

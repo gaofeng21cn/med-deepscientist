@@ -7,6 +7,7 @@ import tempfile
 from shutil import copy2
 from copy import deepcopy
 from pathlib import Path
+from urllib.parse import urlencode
 from urllib.error import URLError
 from urllib.request import Request
 
@@ -601,6 +602,105 @@ Use **Test** when the file exposes runtime dependencies.
     def test_named_payload(self, name: str, payload: dict, *, live: bool = True, delivery_targets: dict | None = None) -> dict:
         rendered = self.render_named_payload(name, payload)
         return self.test_named_text(name, rendered, live=live, delivery_targets=delivery_targets)
+
+    def test_deepxiv_payload(self, payload: dict | None = None) -> dict:
+        normalized = self._normalize_named_payload("config", payload if isinstance(payload, dict) else self.load_named_normalized("config"))
+        literature = normalized.get("literature") if isinstance(normalized.get("literature"), dict) else {}
+        deepxiv = literature.get("deepxiv") if isinstance(literature.get("deepxiv"), dict) else {}
+        base_url = str(deepxiv.get("base_url") or "https://data.rag.ac.cn").strip() or "https://data.rag.ac.cn"
+        direct_token = str(deepxiv.get("token") or "").strip()
+        token_env_name = str(deepxiv.get("token_env") or "").strip()
+        env_token = str(os.environ.get(token_env_name) or "").strip() if token_env_name else ""
+        resolved_token = direct_token or env_token
+        query = "transformers"
+        result_size = max(1, int(deepxiv.get("default_result_size") or 20))
+        preview_characters = max(200, int(deepxiv.get("preview_characters") or 5000))
+        request_timeout_seconds = max(3, int(deepxiv.get("request_timeout_seconds") or 90))
+        details = {
+            "base_url": base_url,
+            "query": query,
+            "result_size": result_size,
+            "preview_characters": preview_characters,
+            "request_timeout_seconds": request_timeout_seconds,
+            "token_source": "direct_token" if direct_token else ("env" if env_token else "missing"),
+            "token_env": token_env_name or None,
+        }
+        if not resolved_token:
+            return {
+                "ok": False,
+                "summary": "DeepXiv test failed: token is missing.",
+                "warnings": [],
+                "errors": ["Provide a DeepXiv token before running the test."],
+                "details": details,
+                "results": [],
+                "preview": "",
+            }
+        url = f"{base_url.rstrip('/')}/arxiv/?{urlencode({'type': 'retrieve', 'query': query, 'size': str(result_size)})}"
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {resolved_token}",
+                "User-Agent": "DeepScientist/DeepXivTest",
+            },
+        )
+        try:
+            with urlopen(request, timeout=request_timeout_seconds) as response:  # noqa: S310
+                response_text = response.read().decode("utf-8", errors="replace")
+        except Exception as exc:
+            details["request_url"] = url
+            return {
+                "ok": False,
+                "summary": "DeepXiv test request failed.",
+                "warnings": [],
+                "errors": [str(exc)],
+                "details": details,
+                "results": [],
+                "preview": "",
+            }
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            preview = response_text[:preview_characters].rstrip()
+            if len(response_text) > preview_characters:
+                preview = f"{preview}\n...[truncated]"
+            details["request_url"] = url
+            return {
+                "ok": False,
+                "summary": "DeepXiv test returned invalid JSON.",
+                "warnings": [],
+                "errors": ["DeepXiv returned invalid JSON."],
+                "details": details,
+                "results": [],
+                "preview": preview,
+            }
+        results = parsed.get("results") if isinstance(parsed.get("results"), list) else []
+        preview_payload = {
+            "total": parsed.get("total"),
+            "took": parsed.get("took"),
+            "results": results[: min(3, len(results))],
+        }
+        preview = json.dumps(preview_payload, ensure_ascii=False, indent=2)
+        if len(preview) > preview_characters:
+            preview = f"{preview[:preview_characters].rstrip()}\n...[truncated]"
+        details.update(
+            {
+                "request_url": url,
+                "total": parsed.get("total"),
+                "result_count": len(results),
+                "first_title": str((results[0] or {}).get("title") or "").strip() if results else None,
+            }
+        )
+        ok = len(results) > 0
+        return {
+            "ok": ok,
+            "summary": "DeepXiv returned search results for `transformers`." if ok else "DeepXiv returned no search results for `transformers`.",
+            "warnings": [],
+            "errors": [],
+            "details": details,
+            "results": results,
+            "preview": preview,
+        }
 
     def probe_codex_bootstrap(self, *, persist: bool = False, payload: dict | None = None) -> dict:
         runners_payload = payload if isinstance(payload, dict) else self.load_named_normalized("runners")
@@ -1968,6 +2068,49 @@ Use **Test** when the file exposes runtime dependencies.
             for name in SYSTEM_CONNECTOR_NAMES
         }
         normalized["connectors"] = connectors
+        literature = normalized.get("literature") if isinstance(normalized.get("literature"), dict) else {}
+        raw_literature = payload.get("literature") if isinstance(payload.get("literature"), dict) else {}
+        default_literature = defaults.get("literature") if isinstance(defaults.get("literature"), dict) else {}
+        deepxiv_defaults = default_literature.get("deepxiv") if isinstance(default_literature.get("deepxiv"), dict) else {}
+        deepxiv = literature.get("deepxiv") if isinstance(literature.get("deepxiv"), dict) else {}
+        raw_deepxiv = raw_literature.get("deepxiv") if isinstance(raw_literature.get("deepxiv"), dict) else {}
+        deepxiv["enabled"] = self._coerce_bool(
+            raw_deepxiv.get("enabled", deepxiv.get("enabled", deepxiv_defaults.get("enabled", False))),
+            default=bool(deepxiv_defaults.get("enabled", False)),
+        )
+        deepxiv["base_url"] = str(
+            raw_deepxiv.get("base_url", deepxiv.get("base_url", deepxiv_defaults.get("base_url", "https://data.rag.ac.cn"))) or ""
+        ).strip() or str(deepxiv_defaults.get("base_url") or "https://data.rag.ac.cn")
+        deepxiv["token"] = str(raw_deepxiv.get("token", deepxiv.get("token", "")) or "").strip() or None
+        deepxiv["token_env"] = str(
+            raw_deepxiv.get("token_env", deepxiv.get("token_env", deepxiv_defaults.get("token_env", "DEEPXIV_TOKEN"))) or ""
+        ).strip() or None
+        try:
+            deepxiv_default_result_size = raw_deepxiv.get(
+                "default_result_size",
+                deepxiv.get("default_result_size", deepxiv_defaults.get("default_result_size", 20)),
+            )
+            deepxiv["default_result_size"] = max(1, int(deepxiv_default_result_size))
+        except (TypeError, ValueError):
+            deepxiv["default_result_size"] = int(deepxiv_defaults.get("default_result_size", 20) or 20)
+        try:
+            deepxiv_preview_characters = raw_deepxiv.get(
+                "preview_characters",
+                deepxiv.get("preview_characters", deepxiv_defaults.get("preview_characters", 5000)),
+            )
+            deepxiv["preview_characters"] = max(200, int(deepxiv_preview_characters))
+        except (TypeError, ValueError):
+            deepxiv["preview_characters"] = int(deepxiv_defaults.get("preview_characters", 5000) or 5000)
+        try:
+            deepxiv_request_timeout_seconds = raw_deepxiv.get(
+                "request_timeout_seconds",
+                deepxiv.get("request_timeout_seconds", deepxiv_defaults.get("request_timeout_seconds", 90)),
+            )
+            deepxiv["request_timeout_seconds"] = max(3, int(deepxiv_request_timeout_seconds))
+        except (TypeError, ValueError):
+            deepxiv["request_timeout_seconds"] = int(deepxiv_defaults.get("request_timeout_seconds", 90) or 90)
+        literature["deepxiv"] = deepxiv
+        normalized["literature"] = literature
         return normalized
 
     @staticmethod

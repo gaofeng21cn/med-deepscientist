@@ -1399,6 +1399,47 @@ Mandatory Working Rules
     assert "turn_mode: stage_execution" in prompt
 
 
+def test_prompt_builder_deepxiv_capability_block_changes_with_config(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+    config_manager = ConfigManager(temp_home)
+
+    base_prompt = builder.build(
+        quest_id=snapshot["quest_id"],
+        skill_id="idea",
+        user_message="Read related papers and select one direction.",
+        model="gpt-5.4",
+    )
+
+    assert "## DeepXiv Capability" in base_prompt
+    assert "deepxiv_available: False" in base_prompt
+    assert "deepxiv_forbidden_rule:" in base_prompt
+    assert "artifact.arxiv(...)" in base_prompt
+
+    config = config_manager.load_runtime_config()
+    literature = config.get("literature") if isinstance(config.get("literature"), dict) else {}
+    deepxiv = literature.get("deepxiv") if isinstance(literature.get("deepxiv"), dict) else {}
+    deepxiv["enabled"] = True
+    deepxiv["token"] = "test-token"
+    literature["deepxiv"] = deepxiv
+    config["literature"] = literature
+    config_manager.save_named_payload("config", config)
+
+    configured_builder, configured_snapshot = _make_builder(temp_home)
+    configured_prompt = configured_builder.build(
+        quest_id=configured_snapshot["quest_id"],
+        skill_id="idea",
+        user_message="Read related papers and select one direction.",
+        model="gpt-5.4",
+    )
+
+    assert "## DeepXiv Capability" in configured_prompt
+    assert "deepxiv_available: True" in configured_prompt
+    assert "deepxiv_preferred_path:" in configured_prompt
+    assert "artifact.deepxiv(...)" in configured_prompt
+    assert "deepxiv_fallback_rule:" in configured_prompt
+    assert "artifact.arxiv(...)" in configured_prompt
+
+
 def test_prompt_builder_next_required_step_tracks_gated_optimize_route(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     quest_root = Path(snapshot["quest_root"])

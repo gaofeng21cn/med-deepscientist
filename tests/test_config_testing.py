@@ -141,6 +141,53 @@ def test_config_normalization_preserves_browser_locale_bootstrap_metadata(temp_h
     assert normalized["bootstrap"]["locale_initialized_browser_locale"] == "en-US"
 
 
+def test_default_config_includes_deepxiv_defaults(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+
+    config_payload = manager.load_named("config")
+    deepxiv = config_payload["literature"]["deepxiv"]
+
+    assert deepxiv["enabled"] is False
+    assert deepxiv["base_url"] == "https://data.rag.ac.cn"
+    assert deepxiv["token"] is None
+    assert deepxiv["token_env"] == "DEEPXIV_TOKEN"
+    assert deepxiv["default_result_size"] == 20
+    assert deepxiv["preview_characters"] == 5000
+    assert deepxiv["request_timeout_seconds"] == 90
+
+
+def test_config_normalization_sanitizes_deepxiv_settings(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+
+    config_payload = manager.load_named("config")
+    config_payload["literature"] = {
+        "deepxiv": {
+            "enabled": "yes",
+            "base_url": " https://data.rag.ac.cn/custom ",
+            "token": "  direct-token  ",
+            "token_env": "   ",
+            "default_result_size": 0,
+            "preview_characters": 10,
+            "request_timeout_seconds": 1,
+        }
+    }
+
+    normalized = manager._normalize_named_payload("config", config_payload)
+    deepxiv = normalized["literature"]["deepxiv"]
+
+    assert deepxiv["enabled"] is True
+    assert deepxiv["base_url"] == "https://data.rag.ac.cn/custom"
+    assert deepxiv["token"] == "direct-token"
+    assert deepxiv["token_env"] is None
+    assert deepxiv["default_result_size"] == 1
+    assert deepxiv["preview_characters"] == 200
+    assert deepxiv["request_timeout_seconds"] == 3
+
+
 def test_connectors_config_test_uses_system_probe(monkeypatch, temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     manager = ConfigManager(temp_home)
@@ -293,6 +340,85 @@ def test_config_test_api_route_returns_items(monkeypatch, temp_home: Path) -> No
 
     assert payload["ok"] is True
     assert payload["items"][0]["name"] == "git"
+
+
+def test_config_deepxiv_test_api_route_delegates_to_manager(monkeypatch, temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    structured = {"literature": {"deepxiv": {"enabled": True, "token": "deepxiv-token"}}}
+
+    def fake_test_deepxiv_payload(payload):  # noqa: ANN001
+        assert payload == structured
+        return {
+            "ok": True,
+            "summary": "DeepXiv test completed.",
+            "warnings": [],
+            "errors": [],
+            "details": {"token_source": "direct_token"},
+            "results": [{"title": "Transformers"}],
+            "preview": '{"results":[{"title":"Transformers"}]}',
+        }
+
+    monkeypatch.setattr(app.config_manager, "test_deepxiv_payload", fake_test_deepxiv_payload)
+
+    payload = app.handlers.config_deepxiv_test({"structured": structured})
+
+    assert payload["ok"] is True
+    assert payload["details"]["token_source"] == "direct_token"
+    assert payload["results"][0]["title"] == "Transformers"
+
+
+def test_config_manager_deepxiv_test_returns_preview(monkeypatch, temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+
+    class _FakeResponse:
+        def __enter__(self) -> "_FakeResponse":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "results": [
+                        {"title": "Transformers", "abstract": "Attention is all you need."},
+                        {"title": "BERT", "abstract": "Bidirectional encoder."},
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):  # noqa: ANN001
+        assert request.headers["Authorization"] == "Bearer deepxiv-token"
+        assert "query=transformers" in request.full_url
+        assert "size=3" in request.full_url
+        assert timeout == 11
+        return _FakeResponse()
+
+    monkeypatch.setattr("deepscientist.config.service.urlopen", fake_urlopen)
+
+    result = manager.test_deepxiv_payload(
+        {
+            "literature": {
+                "deepxiv": {
+                    "enabled": True,
+                    "token": "deepxiv-token",
+                    "default_result_size": 3,
+                    "preview_characters": 120,
+                    "request_timeout_seconds": 11,
+                }
+            }
+        }
+    )
+
+    assert result["ok"] is True
+    assert result["details"]["token_source"] == "direct_token"
+    assert result["details"]["result_size"] == 3
+    assert result["results"][0]["title"] == "Transformers"
+    assert '"title": "Transformers"' in result["preview"]
 
 
 def test_connectors_config_test_supports_lingzhu_probe(monkeypatch, temp_home: Path) -> None:

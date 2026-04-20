@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -174,6 +175,7 @@ class PromptBuilder:
             quest_root=quest_root,
         )
         medical_manuscript_delivery_block = self._medical_manuscript_delivery_block(snapshot)
+        deepxiv_capability_block = self._deepxiv_capability_block(runtime_config=runtime_config)
         connector_contract_block = self._connector_contract_block(quest_id=quest_id, snapshot=snapshot)
         sections = [
             system_block,
@@ -219,6 +221,14 @@ class PromptBuilder:
                 connectors_config=connectors_config,
             ),
         ]
+        if deepxiv_capability_block:
+            sections.extend(
+                [
+                    "",
+                    "## DeepXiv Capability",
+                    deepxiv_capability_block,
+                ]
+            )
         if connector_contract_block:
             sections.extend(
                 [
@@ -460,6 +470,38 @@ class PromptBuilder:
         if not connector or connector == "local":
             return None
         return connector
+
+    def _deepxiv_capability_block(self, *, runtime_config: dict) -> str:
+        literature = runtime_config.get("literature") if isinstance(runtime_config.get("literature"), dict) else {}
+        deepxiv = literature.get("deepxiv") if isinstance(literature.get("deepxiv"), dict) else {}
+        enabled = bool(deepxiv.get("enabled"))
+        direct_token = str(deepxiv.get("token") or "").strip()
+        token_env_name = str(deepxiv.get("token_env") or "").strip()
+        env_token = str(os.environ.get(token_env_name) or "").strip() if token_env_name else ""
+        configured = enabled and bool(direct_token or env_token)
+        lines = [
+            f"- deepxiv_available: {configured}",
+            f"- deepxiv_enabled: {enabled}",
+            f"- deepxiv_base_url: {str(deepxiv.get('base_url') or 'https://data.rag.ac.cn').strip() or 'https://data.rag.ac.cn'}",
+            f"- deepxiv_default_result_size: {int(deepxiv.get('default_result_size') or 20)}",
+            f"- deepxiv_preview_characters: {int(deepxiv.get('preview_characters') or 5000)}",
+        ]
+        if configured:
+            lines.extend(
+                [
+                    "- deepxiv_rule: DeepXiv is configured in this runtime. For paper-centric literature discovery and shortlist paper triage, prefer the DeepXiv route before broad open-web search when it can answer the question more directly.",
+                    "- deepxiv_preferred_path: use `artifact.deepxiv(...)` for paper retrieval and structured DeepXiv reads when that tool is available in this runtime.",
+                    "- deepxiv_fallback_rule: if the runtime does not expose a DeepXiv tool, or if DeepXiv is insufficient for the needed paper detail, fall back to the legacy route: memory reuse, web discovery, and `artifact.arxiv(...)`.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "- deepxiv_forbidden_rule: DeepXiv is not configured in this runtime. Do not rely on DeepXiv or assume its token exists.",
+                    "- deepxiv_required_fallback: use the legacy route only: memory reuse, web discovery, and `artifact.arxiv(...)`.",
+                ]
+            )
+        return "\n".join(lines)
 
     def _connector_contract_block(self, *, quest_id: str, snapshot: dict) -> str:
         connector = self._active_external_connector_name(quest_id=quest_id, snapshot=snapshot)

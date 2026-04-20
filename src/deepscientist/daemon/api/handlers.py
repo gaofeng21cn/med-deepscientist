@@ -2011,6 +2011,10 @@ npm --prefix src/ui run build</pre>
             return {"ok": False, "summary": "Config test requires `name` and `content`."}
         return self.app.config_manager.test_named_text(body["name"], body["content"], live=bool(body.get("live", True)))
 
+    def config_deepxiv_test(self, body: dict | None = None) -> dict:
+        payload = body.get("structured") if isinstance((body or {}).get("structured"), dict) else None
+        return self.app.config_manager.test_deepxiv_payload(payload)
+
     def asset(self, asset_path: str) -> tuple[int, dict, bytes]:
         candidate_roots = [
             self.app.repo_root / "src" / "ui" / "public" / "assets",
