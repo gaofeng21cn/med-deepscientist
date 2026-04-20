@@ -11,7 +11,9 @@ from mcp.types import ToolAnnotations
 
 from ..artifact import ArtifactService
 from ..artifact.metrics import MetricContractValidationError
+from ..benchstore import BenchStoreRegistryService
 from ..bash_exec import BashExecService
+from ..home import repo_root
 from ..memory import MemoryService
 from ..quest import QuestService
 from .context import McpContext
@@ -54,6 +56,16 @@ ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES = {
         "received an equivalent completion summary."
     ),
 }
+START_SETUP_FORM_FIELDS: tuple[str, ...] = (
+    "title",
+    "goal",
+    "baseline_urls",
+    "paper_urls",
+    "runtime_constraints",
+    "objectives",
+    "custom_brief",
+    "need_research_paper",
+)
 
 
 def _normalize_bash_exec_command_input(raw_command: Any) -> str:
@@ -81,6 +93,50 @@ def _read_only_tool_annotations(*, title: str | None = None) -> ToolAnnotations:
 
 def _metric_validation_error_payload(exc: MetricContractValidationError) -> dict[str, Any]:
     return exc.as_payload()
+
+
+def _coerce_prepare_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    raise ValueError(f"`{field_name}` must be a boolean.")
+
+
+def _sanitize_start_setup_form_patch(form_patch: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(form_patch, dict):
+        raise ValueError("`form_patch` must be an object.")
+    patch: dict[str, Any] = {}
+    for key in START_SETUP_FORM_FIELDS:
+        if key not in form_patch:
+            continue
+        value = form_patch.get(key)
+        if value is None:
+            continue
+        if key == "need_research_paper":
+            patch[key] = _coerce_prepare_bool(value, field_name=key)
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            patch[key] = str(value).strip() if not isinstance(value, bool) else value
+            continue
+        raise ValueError(f"`form_patch.{key}` must be a string or boolean.")
+    if not patch:
+        raise ValueError("`form_patch` must include at least one supported field.")
+    return patch
+
+
+def _start_setup_patch_effect(form_patch: dict[str, Any], *, message: str | None = None) -> dict[str, Any]:
+    return {
+        "name": "start_setup:patch",
+        "data": {
+            "patch": dict(form_patch),
+            "message": str(message or "").strip() or None,
+        },
+    }
 
 
 def _progress_watchdog_note(tool_call_count: int) -> str:
@@ -559,6 +615,15 @@ def build_memory_server(context: McpContext) -> FastMCP:
 def build_artifact_server(context: McpContext) -> FastMCP:
     service = ArtifactService(context.home)
     quest_service = service.quest_service
+    snapshot = quest_service.snapshot(context.quest_id) if context.quest_id else {}
+    startup_contract = (
+        dict(snapshot.get("startup_contract") or {})
+        if isinstance(snapshot.get("startup_contract"), dict)
+        else {}
+    )
+    start_setup_prepare_profile = isinstance(startup_contract.get("start_setup_session"), dict) or (
+        str(startup_contract.get("custom_profile") or "").strip().lower() == "start_setup_prepare"
+    )
     server = FastMCP(
         "artifact",
         instructions=(
@@ -581,6 +646,30 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             watchdog,
             state_change_note=ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES.get(tool_name),
         )
+
+    if start_setup_prepare_profile:
+        @server.tool(
+            name="prepare_start_setup_form",
+            description=(
+                "Prepare and apply a structured patch for the autonomous start form. "
+                "Use this when the setup agent has enough information to fill or refine the form automatically."
+            ),
+        )
+        def prepare_start_setup_form(
+            form_patch: dict[str, Any],
+            message: str = "",
+            comment: str | dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            sanitized_patch = _sanitize_start_setup_form_patch(form_patch)
+            result = {
+                "ok": True,
+                "form_patch": sanitized_patch,
+                "message": str(message or "").strip() or None,
+                "ui_effects": [_start_setup_patch_effect(sanitized_patch, message=message)],
+            }
+            return result
+
+        return server
 
     @server.tool(name="record", description="Write a structured artifact record under the current quest.")
     def record(payload: dict[str, Any], comment: str | dict[str, Any] | None = None) -> dict[str, Any]:
@@ -797,6 +886,78 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             detail=detail,
             locale=locale,
         )
+
+    @server.tool(
+        name="get_benchstore_catalog",
+        description=(
+            "Read the BenchStore catalog with current-device recommendation hints. "
+            "Use detail='summary' for compact recommendations or detail='full' for the full structured catalog."
+        ),
+        annotations=_read_only_tool_annotations(title="Get BenchStore catalog"),
+    )
+    def get_benchstore_catalog(
+        detail: str = "summary",
+        comment: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = BenchStoreRegistryService(repo_root=repo_root()).list_entries()
+        if str(detail or "summary").strip().lower() == "full":
+            return payload
+        summary_items = []
+        for item in payload.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            summary_items.append(
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "one_line": item.get("one_line"),
+                    "task_description": item.get("task_description"),
+                    "requires_execution": item.get("requires_execution"),
+                    "requires_paper": item.get("requires_paper"),
+                    "track_fit": item.get("track_fit") or [],
+                    "capability_tags": item.get("capability_tags") or [],
+                }
+            )
+        return {
+            "ok": True,
+            "catalog_root": payload.get("catalog_root"),
+            "total": payload.get("total") or len(summary_items),
+            "filter_options": payload.get("filter_options") or {},
+            "invalid_entries": payload.get("invalid_entries") or [],
+            "items": summary_items,
+        }
+
+    @server.tool(
+        name="get_start_setup_context",
+        description=(
+            "Read the current autonomous start-setup context, including the suggested form and selected benchmark context when present."
+        ),
+        annotations=_read_only_tool_annotations(title="Get start setup context"),
+    )
+    def get_start_setup_context(comment: str | dict[str, Any] | None = None) -> dict[str, Any]:
+        current_snapshot = quest_service.snapshot(context.quest_id) if context.quest_id else {}
+        current_startup_contract = (
+            dict(current_snapshot.get("startup_contract") or {})
+            if isinstance(current_snapshot.get("startup_contract"), dict)
+            else {}
+        )
+        start_setup_session = (
+            dict(current_startup_contract.get("start_setup_session") or {})
+            if isinstance(current_startup_contract.get("start_setup_session"), dict)
+            else {}
+        )
+        benchstore_context = (
+            dict(current_startup_contract.get("benchstore_context") or {})
+            if isinstance(current_startup_contract.get("benchstore_context"), dict)
+            else {}
+        )
+        return {
+            "ok": True,
+            "quest_id": context.quest_id,
+            "start_setup_session": start_setup_session,
+            "benchstore_context": benchstore_context,
+            "startup_contract": current_startup_contract,
+        }
 
     @server.tool(
         name="get_method_scoreboard",

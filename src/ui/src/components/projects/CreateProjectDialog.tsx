@@ -1,9 +1,11 @@
 import { ArrowUpRight, BookmarkPlus, CircleHelp, Lock, RotateCcw, Sparkles } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { ConnectorTargetRadioGroup, type ConnectorTargetRadioItem } from '@/components/connectors/ConnectorTargetRadioGroup'
 import { OverlayDialog } from '@/components/home/OverlayDialog'
+import { SetupAgentQuestPanel } from '@/components/projects/SetupAgentQuestPanel'
+import { SetupAgentRail } from '@/components/projects/SetupAgentRail'
 import { connectorCatalog } from '@/components/settings/connectorCatalog'
 import { AnimatedCheckbox } from '@/components/ui/animated-checkbox'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { useQuestWorkspace } from '@/lib/acp'
 import { client } from '@/lib/api'
 import { connectorInstanceMode, connectorTargetLabel, normalizeConnectorTargets, parseConversationId, recentConversationLabel } from '@/lib/connectors'
 import { useI18n } from '@/lib/i18n'
@@ -49,6 +52,7 @@ import type {
   ConnectorAvailabilitySnapshot,
   ConnectorSnapshot,
 } from '@/types'
+import type { BenchSetupPacket } from '@/lib/types/benchstore'
 
 const copy = {
   en: {
@@ -1229,18 +1233,89 @@ function formatBaselineStatus(value: string | null | undefined, locale: 'en' | '
   return normalized.replace(/_/g, ' ')
 }
 
+const START_SETUP_PATCH_KEYS = [
+  'title',
+  'goal',
+  'baseline_urls',
+  'paper_urls',
+  'runtime_constraints',
+  'objectives',
+  'custom_brief',
+  'need_research_paper',
+] as const
+
+type StartSetupPatch = Partial<Pick<StartResearchTemplate, (typeof START_SETUP_PATCH_KEYS)[number]>>
+
+function sanitizeStartSetupPatch(value: unknown): StartSetupPatch {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+  const patch: StartSetupPatch = {}
+  for (const key of START_SETUP_PATCH_KEYS) {
+    if (!(key in value)) continue
+    const raw = (value as Record<string, unknown>)[key]
+    if (raw == null) continue
+    if (key === 'need_research_paper') {
+      if (typeof raw === 'boolean') {
+        patch[key] = raw
+      }
+      continue
+    }
+    if (typeof raw === 'string') {
+      patch[key] = raw
+    }
+  }
+  return patch
+}
+
+function buildBenchSetupAssistMessage(setupPacket: BenchSetupPacket, locale: 'en' | 'zh') {
+  const entryId = String(setupPacket.entry_id || '').trim() || 'unknown'
+  const title = String(setupPacket.project_title || '').trim() || entryId
+  const goal = String(setupPacket.benchmark_goal || '').trim() || ''
+  const constraints = (setupPacket.constraints || []).filter((item) => String(item || '').trim())
+  if (locale === 'zh') {
+    return [
+      `请先帮我把 BenchStore 条目 ${title} 的启动表单整理完整。`,
+      `- entry_id: ${entryId}`,
+      goal ? `- benchmark_goal: ${goal}` : '',
+      ...constraints.map((item) => `- constraint: ${item}`),
+      '- 如果当前信息已经足够，请直接用 artifact.prepare_start_setup_form(form_patch={...}) 回写表单。',
+      '- 如果还差关键内容，只追问最短、最必要的那一两项。',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+  return [
+    `Please complete the launch form for BenchStore entry ${title}.`,
+    `- entry_id: ${entryId}`,
+    goal ? `- benchmark_goal: ${goal}` : '',
+    ...constraints.map((item) => `- constraint: ${item}`),
+    '- If the current information is already sufficient, call artifact.prepare_start_setup_form(form_patch={...}) directly.',
+    '- Ask only the shortest critical follow-up questions if something truly necessary is missing.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 export function CreateProjectDialog({
   open,
   loading,
   error,
   initialGoal = '',
+  setupPacket = null,
+  setupQuestId = null,
+  setupQuestCreating = false,
   onClose,
   onCreate,
+  onRequestSetupAgent,
 }: {
   open: boolean
   loading?: boolean
   error?: string | null
   initialGoal?: string
+  setupPacket?: BenchSetupPacket | null
+  setupQuestId?: string | null
+  setupQuestCreating?: boolean
   onClose: () => void
   onCreate: (payload: {
     title: string
@@ -1249,6 +1324,11 @@ export function CreateProjectDialog({
     requested_connector_bindings?: Array<{ connector: string; conversation_id?: string | null }>
     requested_baseline_ref?: { baseline_id: string; variant_id?: string | null } | null
     startup_contract?: Record<string, unknown> | null
+  }) => Promise<void>
+  onRequestSetupAgent?: (payload: {
+    message: string
+    form?: StartResearchTemplate
+    setupPacket?: BenchSetupPacket | null
   }) => Promise<void>
 }) {
   const navigate = useNavigate()
@@ -1276,6 +1356,10 @@ export function CreateProjectDialog({
   const [selectedConnectorBindings, setSelectedConnectorBindings] = useState<Record<string, string | null>>({})
   const [showConnectorRecommendation, setShowConnectorRecommendation] = useState(false)
   const [connectorRecommendationHandled, setConnectorRecommendationHandled] = useState(false)
+  const [agentManagedValues, setAgentManagedValues] = useState<StartSetupPatch>({})
+  const [setupAgentError, setSetupAgentError] = useState<string | null>(null)
+  const processedPatchMessageIdsRef = useRef<Set<string>>(new Set())
+  const setupWorkspace = useQuestWorkspace(setupQuestId || null)
   const referenceTemplates = useMemo(() => listReferenceStartResearchTemplates(), [])
 
   const activeResearchIntensity = useMemo(
@@ -1410,6 +1494,30 @@ export function CreateProjectDialog({
     if (!open) {
       return
     }
+    if (setupPacket && setupPacket.suggested_form && typeof setupPacket.suggested_form === 'object') {
+      const suggested = sanitizeStartSetupPatch(setupPacket.suggested_form)
+      const next = {
+        ...defaultStartResearchTemplate(locale),
+        ...suggested,
+        quest_id: '',
+        user_language: locale,
+      }
+      setForm(next)
+      setTemplates(loadStartResearchHistory())
+      setSelectedTemplateId('__new__')
+      setManualOverride(false)
+      setQuestIdManualOverride(false)
+      setSuggestedQuestId('')
+      setSelectedConnectorBindings({})
+      setShowConnectorRecommendation(false)
+      setConnectorRecommendationHandled(false)
+      setConnectorAvailability(null)
+      setConnectorAvailabilityResolved(false)
+      setAgentManagedValues(suggested)
+      setSetupAgentError(null)
+      processedPatchMessageIdsRef.current = new Set()
+      return
+    }
     const next = loadStartResearchTemplate(locale)
     const tutorialSeed = onboardingStatus === 'running' ? buildTutorialStartResearchExample(locale) : null
     const withSeed = {
@@ -1432,7 +1540,10 @@ export function CreateProjectDialog({
     setConnectorRecommendationHandled(false)
     setConnectorAvailability(null)
     setConnectorAvailabilityResolved(false)
-  }, [initialGoal, locale, onboardingStatus, open])
+    setAgentManagedValues({})
+    setSetupAgentError(null)
+    processedPatchMessageIdsRef.current = new Set()
+  }, [initialGoal, locale, onboardingStatus, open, setupPacket])
 
   const setField = <K extends keyof StartResearchTemplate>(
     key: K,
@@ -1444,6 +1555,36 @@ export function CreateProjectDialog({
       return next
     })
   }
+
+  const applyAgentPatch = useCallback(
+    (patch: StartSetupPatch) => {
+      const sanitized = sanitizeStartSetupPatch(patch)
+      if (Object.keys(sanitized).length === 0) return
+      setForm((current) => {
+        const next = { ...current }
+        const nextManaged = { ...agentManagedValues }
+        for (const key of Object.keys(sanitized) as Array<keyof StartSetupPatch>) {
+          const proposed = sanitized[key]
+          const currentValue = current[key as keyof StartResearchTemplate]
+          const previousManaged = nextManaged[key]
+          const canApply =
+            previousManaged === undefined ||
+            currentValue === previousManaged ||
+            currentValue === '' ||
+            currentValue === null ||
+            currentValue === undefined
+          if (!canApply) continue
+          ;(next as Record<string, unknown>)[key] = proposed as unknown
+          ;(nextManaged as Record<string, unknown>)[key as string] = proposed as unknown
+        }
+        saveStartResearchDraft(next)
+        setAgentManagedValues(nextManaged)
+        return next
+      })
+      setSetupAgentError(null)
+    },
+    [agentManagedValues]
+  )
 
   const applyStandardProfile = useCallback((profile: StandardProfile) => {
     setForm((current) => {
@@ -1806,6 +1947,57 @@ export function CreateProjectDialog({
     resetDemoRuntime('demo-memory')
     navigate('/projects/demo-memory')
   }, [navigate, onClose])
+
+  const handleRequestSetupAgent = useCallback(
+    async (message: string) => {
+      if (!onRequestSetupAgent) return
+      setSetupAgentError(null)
+      try {
+        await onRequestSetupAgent({
+          message: message.trim() || buildBenchSetupAssistMessage(setupPacket || { entry_id: 'manual' }, locale),
+          form,
+          setupPacket,
+        })
+      } catch (caught) {
+        setSetupAgentError(caught instanceof Error ? caught.message : 'Failed to start SetupAgent.')
+      }
+    },
+    [form, locale, onRequestSetupAgent, setupPacket]
+  )
+
+  useEffect(() => {
+    if (!setupQuestId) return
+    for (const item of setupWorkspace.feed) {
+      if (item.type !== 'message' || item.role !== 'assistant' || item.stream) continue
+      if (processedPatchMessageIdsRef.current.has(item.id)) continue
+      processedPatchMessageIdsRef.current.add(item.id)
+      const match = item.content.match(/```start_setup_patch\s*([\s\S]*?)```/i)
+      if (!match) continue
+      try {
+        applyAgentPatch(JSON.parse(match[1].trim()))
+      } catch {
+        // ignore malformed fallback patch blocks
+      }
+    }
+  }, [applyAgentPatch, setupQuestId, setupWorkspace.feed])
+
+  useEffect(() => {
+    if (!setupQuestId || typeof window === 'undefined') return
+    const handleStartSetupPatch = (event: Event) => {
+      const detail = (event as CustomEvent<Record<string, unknown>>).detail
+      const candidate =
+        detail?.patch && typeof detail.patch === 'object' && !Array.isArray(detail.patch)
+          ? detail.patch
+          : detail
+      applyAgentPatch(candidate)
+    }
+    window.addEventListener('ds:start-setup:patch', handleStartSetupPatch as EventListener)
+    return () => {
+      window.removeEventListener('ds:start-setup:patch', handleStartSetupPatch as EventListener)
+    }
+  }, [applyAgentPatch, setupQuestId])
+
+  const showSetupAssist = Boolean(setupPacket || setupQuestId)
 
   const handleCreate = async () => {
     if (onboardingStatus === 'running') {
@@ -2356,10 +2548,14 @@ export function CreateProjectDialog({
           <div className="mb-2 flex shrink-0 flex-wrap items-start justify-between gap-2 px-1 lg:mb-3 lg:px-0">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[rgba(107,103,97,0.8)] dark:text-[rgba(107,103,97,0.8)] lg:text-sm lg:normal-case lg:tracking-normal lg:text-[rgba(38,36,33,0.95)]">
-                {t.preview}
+                {showSetupAssist ? 'SetupAgent' : t.preview}
               </div>
               <div className="mt-1 text-[11px] leading-5 text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)] lg:text-xs">
-                {t.previewBody}
+                {showSetupAssist
+                  ? locale === 'zh'
+                    ? '右侧后端助手会继续整理启动表单，任何 start_setup_patch 都会自动回写到左侧。'
+                    : 'The backend setup assistant keeps refining the launch form here, and any start_setup_patch is written back to the form automatically.'
+                  : t.previewBody}
               </div>
             </div>
             {manualOverride ? (
@@ -2367,68 +2563,86 @@ export function CreateProjectDialog({
             ) : null}
           </div>
 
-          <div className="mb-3 shrink-0 grid grid-cols-2 gap-2 px-1 sm:grid-cols-3 lg:px-0 xl:grid-cols-6">
-            <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.repoLabel}</div>
-              <div
-                className="mt-1 truncate font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]"
-                title={displayedQuestId || (suggestedQuestIdLoading ? t.repoLoading : t.repoAutoAssigned)}
-              >
-                {displayedQuestId || (suggestedQuestIdLoading ? t.repoLoading : t.repoAutoAssigned)}
-              </div>
+          {showSetupAssist ? (
+            <div className="min-h-[28svh] flex-1 overflow-hidden sm:min-h-[34svh] lg:min-h-0">
+              {setupQuestId ? (
+                <SetupAgentQuestPanel questId={setupQuestId} locale={locale} />
+              ) : (
+                <SetupAgentRail
+                  locale={locale}
+                  setupPacket={setupPacket}
+                  loading={setupQuestCreating}
+                  error={setupAgentError}
+                  onStartAssist={handleRequestSetupAgent}
+                />
+              )}
             </div>
-            <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.researchIntensityLabel}</div>
-              <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
-                {t.intensityOptions[activeResearchIntensity].title}
+          ) : (
+            <>
+              <div className="mb-3 shrink-0 grid grid-cols-2 gap-2 px-1 sm:grid-cols-3 lg:px-0 xl:grid-cols-6">
+                <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.repoLabel}</div>
+                  <div
+                    className="mt-1 truncate font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]"
+                    title={displayedQuestId || (suggestedQuestIdLoading ? t.repoLoading : t.repoAutoAssigned)}
+                  >
+                    {displayedQuestId || (suggestedQuestIdLoading ? t.repoLoading : t.repoAutoAssigned)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.researchIntensityLabel}</div>
+                  <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
+                    {t.intensityOptions[activeResearchIntensity].title}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.connectorSummaryLabel}</div>
+                  <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
+                    {selectedConnectorTarget
+                      ? selectedConnectorTarget.connector
+                      : t.connectorSummaryAuto}
+                  </div>
+                  <div
+                    className="mt-1 truncate text-[10px] leading-4 text-[rgba(107,103,97,0.78)] dark:text-[rgba(107,103,97,0.78)]"
+                    title={
+                      selectedConnectorTarget
+                        ? `${selectedConnectorTarget.connector} · ${selectedConnectorTarget.target.compactLabel}`
+                        : t.connectorSummaryLocalBody
+                    }
+                  >
+                    {selectedConnectorTarget
+                      ? selectedConnectorTarget.target.compactLabel
+                      : t.connectorSummaryLocalBody}
+                  </div>
+                </div>
+                <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.decisionPolicyLabel}</div>
+                  <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
+                    {t.decisionPolicyOptions[form.decision_policy].title}
+                  </div>
+                </div>
+                <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.deliveryModeLabel}</div>
+                  <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
+                    {form.need_research_paper ? t.researchPaperEnabled : t.researchPaperDisabled}
+                  </div>
+                </div>
+                <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
+                  <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.launchModeLabel}</div>
+                  <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
+                    {launchModeCopy.title}
+                  </div>
+                </div>
               </div>
-            </div>
-            <div className="rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.connectorSummaryLabel}</div>
-              <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
-                {selectedConnectorTarget
-                  ? selectedConnectorTarget.connector
-                  : t.connectorSummaryAuto}
-              </div>
-              <div
-                className="mt-1 truncate text-[10px] leading-4 text-[rgba(107,103,97,0.78)] dark:text-[rgba(107,103,97,0.78)]"
-                title={
-                  selectedConnectorTarget
-                    ? `${selectedConnectorTarget.connector} · ${selectedConnectorTarget.target.compactLabel}`
-                    : t.connectorSummaryLocalBody
-                }
-              >
-                {selectedConnectorTarget
-                  ? selectedConnectorTarget.target.compactLabel
-                  : t.connectorSummaryLocalBody}
-              </div>
-            </div>
-            <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.decisionPolicyLabel}</div>
-              <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
-                {t.decisionPolicyOptions[form.decision_policy].title}
-              </div>
-            </div>
-            <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.deliveryModeLabel}</div>
-              <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
-                {form.need_research_paper ? t.researchPaperEnabled : t.researchPaperDisabled}
-              </div>
-            </div>
-            <div className="hidden rounded-lg border border-[rgba(45,42,38,0.09)] bg-[rgba(244,239,233,0.55)] px-3 py-2 text-[11px] sm:block dark:border-[rgba(45,42,38,0.09)] dark:bg-[rgba(244,239,233,0.65)]">
-              <div className="text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)]">{t.launchModeLabel}</div>
-              <div className="mt-1 font-semibold text-[rgba(38,36,33,0.95)] dark:text-[rgba(38,36,33,0.95)]">
-                {launchModeCopy.title}
-              </div>
-            </div>
-          </div>
 
-          <textarea
-            aria-label={t.preview}
-            value={promptDraft}
-            onChange={(event) => handlePromptChange(event.target.value)}
-            className="feed-scrollbar min-h-[28svh] flex-1 overflow-y-auto overscroll-contain resize-none rounded-[18px] border border-[rgba(45,42,38,0.09)] bg-white/72 p-3 font-mono text-xs leading-5 text-[rgba(38,36,33,0.95)] outline-none dark:border-[rgba(45,42,38,0.09)] dark:bg-white/82 dark:text-[rgba(38,36,33,0.95)] sm:min-h-[34svh] lg:min-h-0"
-          />
+              <textarea
+                aria-label={t.preview}
+                value={promptDraft}
+                onChange={(event) => handlePromptChange(event.target.value)}
+                className="feed-scrollbar min-h-[28svh] flex-1 overflow-y-auto overscroll-contain resize-none rounded-[18px] border border-[rgba(45,42,38,0.09)] bg-white/72 p-3 font-mono text-xs leading-5 text-[rgba(38,36,33,0.95)] outline-none dark:border-[rgba(45,42,38,0.09)] dark:bg-white/82 dark:text-[rgba(38,36,33,0.95)] sm:min-h-[34svh] lg:min-h-0"
+              />
+            </>
+          )}
 
           <div className="mt-2 flex shrink-0 flex-col items-start justify-between gap-1 px-1 text-[11px] text-[rgba(107,103,97,0.72)] dark:text-[rgba(107,103,97,0.72)] sm:flex-row sm:items-center sm:gap-2 lg:px-0">
             <span>{t.footer}</span>

@@ -554,4 +554,19 @@ export const client = {
       method: 'POST',
       body: JSON.stringify({ structured }),
     }),
+  benchstoreEntries: () =>
+    api<{
+      ok: boolean
+      catalog_root?: string
+      filter_options?: Record<string, unknown>
+      invalid_entries?: Array<Record<string, unknown>>
+      items?: Array<Record<string, unknown>>
+      total?: number
+    }>('/api/benchstore/entries'),
+  benchstoreEntrySetupPacket: (entryId: string) =>
+    api<{
+      ok: boolean
+      entry_id: string
+      setup_packet: Record<string, unknown>
+    }>(`/api/benchstore/entries/${encodeURIComponent(entryId)}/setup-packet`),
 }

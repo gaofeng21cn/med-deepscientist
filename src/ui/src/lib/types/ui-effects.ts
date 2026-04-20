@@ -1,4 +1,5 @@
 export type UIEffectName =
+  | 'start_setup:patch'
   | 'file:read'
   | 'file:write'
   | 'file:delete'
@@ -82,6 +83,10 @@ export interface PdfAnnotationEffectData {
 }
 
 export interface UIEffectDataMap {
+  'start_setup:patch': {
+    patch?: Record<string, unknown>
+    message?: string | null
+  }
   'file:read': FileEffectData
   'file:write': FileEffectData
   'file:delete': FileEffectData

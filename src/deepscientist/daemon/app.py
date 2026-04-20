@@ -25,6 +25,7 @@ from urllib.request import Request
 from .. import __version__
 from ..annotations import AnnotationService
 from ..artifact import ArtifactService
+from ..benchstore import BenchStoreRegistryService
 from ..bash_exec import BashExecService
 from ..bash_exec.models import TerminalClient
 from ..bridges import register_builtin_connector_bridges
@@ -177,6 +178,7 @@ class DaemonApp:
         self.memory_service = MemoryService(home)
         self.annotation_service = AnnotationService(home)
         self.artifact_service = ArtifactService(home)
+        self.benchstore_service = BenchStoreRegistryService(repo_root=self.repo_root)
         self.bash_exec_service = BashExecService(home)
         self.team_service = SingleTeamService(home)
         self.cloud_service = CloudLinkService(home)

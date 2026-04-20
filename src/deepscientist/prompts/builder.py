@@ -169,14 +169,24 @@ class PromptBuilder:
         quest_root = Path(snapshot["quest_root"])
         active_anchor = str(snapshot.get("active_anchor") or skill_id)
         default_locale = str(runtime_config.get("default_locale") or "en-US")
-        system_block = self._prompt_fragment("system.md", quest_root=quest_root)
+        start_setup_session = self._start_setup_session(snapshot)
+        system_block = self._prompt_fragment(
+            Path("start_setup") / "system.md" if start_setup_session else "system.md",
+            quest_root=quest_root,
+        )
         shared_interaction_block = self._prompt_fragment(
             Path("contracts") / "shared_interaction.md",
             quest_root=quest_root,
         )
         medical_manuscript_delivery_block = self._medical_manuscript_delivery_block(snapshot)
-        deepxiv_capability_block = self._deepxiv_capability_block(runtime_config=runtime_config)
+        deepxiv_capability_block = "" if start_setup_session else self._deepxiv_capability_block(runtime_config=runtime_config)
         connector_contract_block = self._connector_contract_block(quest_id=quest_id, snapshot=snapshot)
+        built_in_mcp_namespaces = "artifact, bash_exec" if start_setup_session else "memory, artifact, bash_exec"
+        mcp_namespace_note = (
+            "mcp_namespace_note: only `artifact.prepare_start_setup_form(...)` and `bash_exec(...)` are available in this session."
+            if start_setup_session
+            else "mcp_namespace_note: any shell-like command execution must use bash_exec, including curl/python/bash/node and similar CLI tools; do not use transient shell snippets."
+        )
         sections = [
             system_block,
             "",
@@ -199,8 +209,8 @@ class PromptBuilder:
             f"model: {model}",
             f"conversation_id: quest:{quest_id}",
             f"default_locale: {default_locale}",
-            "built_in_mcp_namespaces: memory, artifact, bash_exec",
-            "mcp_namespace_note: any shell-like command execution must use bash_exec, including curl/python/bash/node and similar CLI tools; do not use transient shell snippets.",
+            f"built_in_mcp_namespaces: {built_in_mcp_namespaces}",
+            mcp_namespace_note,
             "skill_loading_note: this runner does not mount a `skills` MCP server; do not call `skills.read_mcp_resource` or similar skill-reader tools.",
             "skill_loading_protocol: when you need to inspect a skill, read the relevant quest-local or canonical SKILL.md path with bash_exec using the skill paths listed below.",
             "",
@@ -235,6 +245,14 @@ class PromptBuilder:
                     "",
                     "## Connector Contract",
                     connector_contract_block,
+                ]
+            )
+        if start_setup_session:
+            sections.extend(
+                [
+                    "",
+                    "## Start Setup Session",
+                    self._start_setup_session_block(snapshot),
                 ]
             )
         sections.extend(
@@ -904,6 +922,82 @@ class PromptBuilder:
         return "freeform"
 
     @staticmethod
+    def _start_setup_session(snapshot: dict) -> dict[str, Any] | None:
+        startup_contract = snapshot.get("startup_contract")
+        if not isinstance(startup_contract, dict):
+            return None
+        payload = startup_contract.get("start_setup_session")
+        if isinstance(payload, dict):
+            return dict(payload)
+        return None
+
+    def _start_setup_session_block(self, snapshot: dict) -> str:
+        payload = self._start_setup_session(snapshot) or {}
+        locale = str(payload.get("locale") or "zh").strip().lower() or "zh"
+        source = str(payload.get("source") or "manual").strip() or "manual"
+        benchmark_context = payload.get("benchmark_context") if isinstance(payload.get("benchmark_context"), dict) else {}
+        suggested_form = payload.get("suggested_form") if isinstance(payload.get("suggested_form"), dict) else {}
+        lines = [
+            "- session_kind: autonomous_start_setup",
+            f"- source: {source}",
+            f"- preferred_language: {locale}",
+            self._local_daemon_api_block(include_benchstore=True),
+            "- mission: help the user complete the autonomous start form and stop there; do not begin the real research workflow",
+            "- context_first_rule: before asking the user for missing information, first read the current setup state and use the information already present in the form or benchmark context",
+            "- start_setup_prepare_tool_rule: when you want to update the left-side form, prefer `artifact.prepare_start_setup_form(form_patch={...})` so the browser can patch the form automatically",
+            "- start_setup_prepare_signature_rule: `form_patch` is the required top-level argument for `artifact.prepare_start_setup_form(...)`; do not hide the patch JSON inside `message`.",
+            "- start_setup_context_rule: the current suggested form and benchmark context are already injected into this prompt; do not assume `memory.*` or extra `artifact.*` helpers are available here",
+            "- benchmark_context_source_rule: if `benchmark_context.raw_payload` exists, treat it as the full benchmark description file for this setup session rather than relying only on the shorter summary fields.",
+            "- aisb_selection_rule: when the user asks you to choose or recommend a task, prefer the existing AISB / BenchStore catalog first instead of asking the user to invent a task from scratch.",
+            "- aisb_selection_path: use `bash_exec(...)` against the injected local daemon BenchStore endpoints to inspect current catalog entries, then recommend the best fit based on both the user's stated needs and the current device boundary.",
+            "- aisb_selection_truncation_rule: if you inspect BenchStore output through `head`, `tail`, `sed -n`, or another clipped shell window, explicitly treat it as truncated / partial output and never infer the global entry count from that preview alone.",
+            "- aisb_selection_count_rule: before claiming how many BenchStore entries exist, read an explicit count such as `total`, `count`, or `items | length` from the daemon API result.",
+            "- aisb_selection_output_rule: when multiple AISB candidates fit, summarize the top 1 to 3 options briefly, recommend one first, and then patch the form toward that recommendation.",
+            "- performance_fit_rule: combine the user's requested task shape with the current machine boundary; if the machine is weak, prefer API-only, low-compute, short-cycle, and benchmark-faithful routes.",
+            "- output_rule: if the prepare tool is unavailable, fall back to one fenced block named `start_setup_patch` containing a JSON object with only the fields that should change",
+            "- patch_fallback_example:",
+            "```start_setup_patch",
+            '{"title":"Example Project","goal":"Example goal","runtime_constraints":"- One key limit"}',
+            "```",
+            "- patch_rule: keep the patch small; only include fields that truly need to change",
+            "- no_black_talk_rule: use natural user-facing language and avoid internal words like route, taxonomy, stage, slice, trace, checkpoint, or contract unless the user explicitly asks for them",
+            "- no_research_execution_rule: do not start baseline work, experiments, analysis campaigns, or paper drafting in this setup session",
+            "- user_choice_rule: if the user already filled the form clearly enough, say so and avoid unnecessary follow-up questions",
+            "- ask_rule: only ask short questions when a missing answer would materially change what gets submitted",
+            "- question_categories: when user input is incomplete, ask at most for these practical categories: task goal, current materials, runtime limits, and whether they prefer paper-facing delivery or result-first delivery",
+            "- field_mapping_rule: treat title as a short project name, goal as the real mission, baseline_urls as baseline/code/data inputs, paper_urls as paper or benchmark references, runtime_constraints as hard limits, objectives as the first 2-4 near-term outcomes, and custom_brief as extra preferences",
+        ]
+        entry_id = str(benchmark_context.get("entry_id") or "").strip()
+        entry_name = str(benchmark_context.get("entry_name") or "").strip()
+        if entry_id:
+            lines.append(f"- entry_id: {entry_id}")
+        if entry_name:
+            lines.append(f"- entry_name: {entry_name}")
+        if benchmark_context:
+            lines.extend(
+                [
+                    "- benchmark_context_json:",
+                    "```json",
+                    json.dumps(benchmark_context, ensure_ascii=False, indent=2),
+                    "```",
+                ]
+            )
+        else:
+            lines.append("- benchmark_context_json: {}")
+        if suggested_form:
+            lines.extend(
+                [
+                    "- current_suggested_form_json:",
+                    "```json",
+                    json.dumps(suggested_form, ensure_ascii=False, indent=2),
+                    "```",
+                ]
+            )
+        else:
+            lines.append("- current_suggested_form_json: {}")
+        return "\n".join(lines)
+
+    @staticmethod
     def _baseline_execution_policy(snapshot: dict) -> str:
         startup_contract = runtime_owned_startup_contract(
             snapshot.get("startup_contract") if isinstance(snapshot.get("startup_contract"), dict) else None
@@ -932,6 +1026,63 @@ class PromptBuilder:
         if value in {"none", "copy_ready_text", "latex_required"}:
             return value
         return "none"
+
+    def _local_daemon_api_block(self, *, include_benchstore: bool = False, include_admin: bool = False) -> str:
+        runtime_config = self.config_manager.load_named("config")
+        ui_config = runtime_config.get("ui") if isinstance(runtime_config.get("ui"), dict) else {}
+        host = str(ui_config.get("host") or "0.0.0.0").strip() or "0.0.0.0"
+        raw_port = ui_config.get("port")
+        try:
+            port = int(raw_port)
+        except (TypeError, ValueError):
+            port = 20999
+        daemon_state = read_json(self.home / "runtime" / "daemon.json", {})
+        daemon_url = str((daemon_state.get("url") if isinstance(daemon_state, dict) else "") or "").strip()
+        bind_url = str((daemon_state.get("bind_url") if isinstance(daemon_state, dict) else "") or "").strip()
+        if not daemon_url:
+            normalized_host = "127.0.0.1" if host in {"0.0.0.0", "::", "[::]", ""} else host
+            rendered_host = normalized_host if ":" not in normalized_host or normalized_host.startswith("[") else f"[{normalized_host}]"
+            daemon_url = f"http://{rendered_host}:{port}"
+        if not bind_url:
+            bind_url = f"http://{host}:{port}"
+        auth_enabled = bool((daemon_state.get("auth_enabled") if isinstance(daemon_state, dict) else False))
+        auth_token = str((daemon_state.get("auth_token") if isinstance(daemon_state, dict) else "") or "").strip() or None
+
+        lines = [
+            f"- local_daemon_api_base_url: {daemon_url}",
+            f"- local_daemon_bind_url: {bind_url}",
+            f"- local_daemon_auth_enabled: {auth_enabled}",
+            f"- local_daemon_auth_token: {auth_token or 'none'}",
+            "- local_daemon_api_call_rule: if you need direct daemon API state beyond the MCP surface, use `bash_exec(...)` to call the local daemon over HTTP.",
+            "- local_daemon_api_auth_rule: when `local_daemon_auth_enabled` is true, include header `Authorization: Bearer <local_daemon_auth_token>` in those HTTP calls.",
+            "- local_daemon_api_health_endpoint: GET /api/health",
+        ]
+        if include_benchstore:
+            lines.extend(
+                [
+                    "- local_daemon_api_benchstore_endpoints:",
+                    "  - GET /api/benchstore/entries",
+                    "  - GET /api/benchstore/entries/:entry_id",
+                    "  - GET /api/benchstore/entries/:entry_id/setup-packet",
+                ]
+            )
+        if include_admin:
+            lines.extend(
+                [
+                    "- local_daemon_api_admin_endpoints:",
+                    "  - GET /api/system/overview",
+                    "  - GET /api/system/hardware",
+                    "  - GET /api/system/logs/sources",
+                    "  - GET /api/system/logs/tail?source=<source>&line_count=<n>",
+                    "  - GET /api/system/quests",
+                    "  - GET /api/system/quests/:quest_id/summary",
+                    "  - GET /api/system/repairs",
+                    "  - POST /api/system/repairs",
+                    "  - GET /api/system/tasks",
+                    "  - GET /api/system/tasks/:task_id",
+                ]
+            )
+        return "\n".join(lines)
 
     @staticmethod
     def _publishability_gate_mode(snapshot: dict) -> str:
@@ -966,6 +1117,16 @@ class PromptBuilder:
         return "\n".join(lines)
 
     def _research_delivery_policy_block(self, snapshot: dict) -> str:
+        if self._start_setup_session(snapshot):
+            return "\n".join(
+                [
+                    "- workspace_mode: start_setup",
+                    "- delivery_goal: fill the autonomous start form well enough that the user can launch confidently",
+                    "- hard_boundary: this is a setup session, not the real research session",
+                    "- patch_protocol: prefer `artifact.prepare_start_setup_form(form_patch={...})`; only use a fenced `start_setup_patch` block as fallback when the tool path is unavailable",
+                    "- completion_rule: once the form is good enough to launch, say so clearly and stop asking for more unless the user requests changes",
+                ]
+            )
         need_research_paper = self._need_research_paper(snapshot)
         launch_mode = self._launch_mode(snapshot)
         standard_profile = self._standard_profile(snapshot)

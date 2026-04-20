@@ -36,6 +36,23 @@ def test_deepxiv_setup_dialog_uses_live_draft_for_test_and_save() -> None:
     assert "structured_config: nextStructuredDraft" in dialog_source
 
 
+def test_create_project_dialog_keeps_deepxiv_out_of_start_research_mount_tree() -> None:
+    dialog_source = _read("src/ui/src/components/projects/CreateProjectDialog.tsx")
+
+    assert "DeepXivSetupDialog" not in dialog_source
+
+
+def test_benchstore_entry_surface_is_wired_into_landing_and_start_research() -> None:
+    hero_source = _read("src/ui/src/components/landing/Hero.tsx")
+    dialog_source = _read("src/ui/src/components/projects/CreateProjectDialog.tsx")
+
+    assert "BenchStoreDialog" in hero_source
+    assert "setupPacket" in dialog_source
+    assert "setupQuestId" in dialog_source
+    assert "onRequestSetupAgent" in dialog_source
+    assert "start_setup_patch" in dialog_source
+
+
 def test_quest_settings_surface_routes_control_mode_through_startup_context() -> None:
     surface_source = _read("src/ui/src/components/workspace/QuestSettingsSurface.tsx")
     api_source = _read("src/ui/src/lib/api.ts")

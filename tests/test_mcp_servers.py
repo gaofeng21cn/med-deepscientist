@@ -302,6 +302,8 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
             "get_paper_contract_health",
             "get_quest_state",
             "get_global_status",
+            "get_benchstore_catalog",
+            "get_start_setup_context",
             "get_method_scoreboard",
             "get_optimization_frontier",
             "read_quest_documents",
@@ -328,6 +330,8 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         assert tool_map["get_quest_state"].annotations.readOnlyHint is True
         assert tool_map["read_quest_documents"].annotations.readOnlyHint is True
         assert tool_map["get_conversation_context"].annotations.readOnlyHint is True
+        assert tool_map["get_benchstore_catalog"].annotations.readOnlyHint is True
+        assert tool_map["get_start_setup_context"].annotations.readOnlyHint is True
 
         record_result = _unwrap_tool_result(
             await server.call_tool(
@@ -713,6 +717,67 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         )
         assert completion_result["ok"] is True
         assert completion_result["snapshot"]["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_start_setup_profile_artifact_server_exposes_prepare_form_only(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "start setup quest",
+            startup_contract={
+                "start_setup_session": {
+                    "source": "benchstore",
+                    "locale": "zh",
+                    "benchmark_context": {
+                        "entry_id": "vision.demo",
+                    },
+                    "suggested_form": {
+                        "title": "Vision Demo",
+                    },
+                }
+            },
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-start-setup",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="baseline",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        tools = await server.list_tools()
+        assert [tool.name for tool in tools] == ["prepare_start_setup_form"]
+
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "prepare_start_setup_form",
+                {
+                    "form_patch": {
+                        "title": "Vision Demo Setup",
+                        "goal": "Prepare a faithful launch form.",
+                        "need_research_paper": True,
+                    },
+                    "message": "已更新表单草案。",
+                },
+            )
+        )
+
+        assert result["ok"] is True
+        assert result["form_patch"]["title"] == "Vision Demo Setup"
+        assert result["form_patch"]["goal"] == "Prepare a faithful launch form."
+        assert result["form_patch"]["need_research_paper"] is True
+        assert result["ui_effects"][0]["name"] == "start_setup:patch"
+        assert result["ui_effects"][0]["data"]["patch"]["title"] == "Vision Demo Setup"
 
     asyncio.run(scenario())
 

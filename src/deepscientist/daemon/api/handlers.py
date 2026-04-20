@@ -227,6 +227,19 @@ npm --prefix src/ui run build</pre>
             },
         }
 
+    def benchstore_entries(self) -> dict:
+        return self.app.benchstore_service.list_entries()
+
+    def benchstore_entry(self, entry_id: str) -> dict:
+        return self.app.benchstore_service.get_entry(entry_id)
+
+    def benchstore_entry_setup_packet(self, entry_id: str) -> dict:
+        return {
+            "ok": True,
+            "entry_id": str(entry_id or "").strip(),
+            "setup_packet": self.app.benchstore_service.build_setup_packet(entry_id),
+        }
+
     def admin_shutdown(self, body: dict) -> dict:
         source = str(body.get("source") or "local-admin").strip() or "local-admin"
         expected_daemon_id = str(body.get("daemon_id") or "").strip()

@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useReducedMotion } from 'framer-motion'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen, Sparkles } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { BenchStoreDialog } from '@/components/landing/BenchStoreDialog'
 import { CreateProjectDialog } from '@/components/projects/CreateProjectDialog'
 import { OpenQuestDialog } from '@/components/projects/OpenQuestDialog'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ import { useUILanguageStore } from '@/lib/stores/ui-language'
 import { runtimeVersion } from '@/lib/runtime/quest-runtime'
 import { getHeroBundle } from './hero-content'
 import type { ConnectorAvailabilitySnapshot, QuestSummary } from '@/types'
+import type { BenchSetupPacket } from '@/lib/types/benchstore'
 import { EntryCoachDialog } from './EntryCoachDialog'
 import HeroNav from './HeroNav'
 import HeroScene from './HeroScene'
@@ -68,13 +70,17 @@ export default function Hero() {
   const [deletingQuestId, setDeletingQuestId] = useState<string | null>(null)
   const [questError, setQuestError] = useState<string | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const [benchStoreOpen, setBenchStoreOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const [benchSetupPacket, setBenchSetupPacket] = useState<BenchSetupPacket | null>(null)
+  const [setupQuestId, setSetupQuestId] = useState<string | null>(null)
+  const [setupQuestCreating, setSetupQuestCreating] = useState(false)
   const [connectorAvailability, setConnectorAvailability] = useState<ConnectorAvailabilitySnapshot | null>(null)
   const [connectorAvailabilityResolved, setConnectorAvailabilityResolved] = useState(false)
   const [entryCoachDismissed, setEntryCoachDismissed] = useState(false)
   const currentVersion = useMemo(() => runtimeVersion(), [])
-  const landingModalOpen = questDialogOpen || createDialogOpen
+  const landingModalOpen = questDialogOpen || createDialogOpen || benchStoreOpen
 
   useEffect(() => {
     document.body.classList.add('font-project')
@@ -263,12 +269,70 @@ export default function Hero() {
         requested_baseline_ref: payload.requested_baseline_ref ?? undefined,
         startup_contract: payload.startup_contract ?? undefined,
       })
+      if (setupQuestId) {
+        try {
+          await client.deleteQuest(setupQuestId)
+        } catch {
+          // keep the main create flow resilient if setup quest cleanup fails
+        }
+      }
+      setSetupQuestId(null)
+      setBenchSetupPacket(null)
       setCreateDialogOpen(false)
       navigate(`/projects/${result.snapshot.quest_id}`)
     } catch (caught) {
       setCreateError(caught instanceof Error ? caught.message : 'Failed to create quest.')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const requestSetupAgent = async (payload: {
+    message: string
+    setupPacket?: BenchSetupPacket | null
+  }) => {
+    const message = payload.message.trim()
+    if (!message) {
+      return
+    }
+    if (setupQuestId) {
+      await client.sendChat(setupQuestId, message)
+      return
+    }
+    const startupContract =
+      payload.setupPacket?.launch_payload?.startup_contract &&
+      typeof payload.setupPacket.launch_payload.startup_contract === 'object'
+        ? (payload.setupPacket.launch_payload.startup_contract as Record<string, unknown>)
+        : {
+            start_setup_session: {
+              source: 'manual',
+              locale,
+            },
+          }
+    setSetupQuestCreating(true)
+    try {
+      const result = await client.createQuestWithOptions({
+        goal: message,
+        title: `${payload.setupPacket?.project_title || 'Start Setup'} Setup`,
+        source: 'web-react',
+        auto_start: true,
+        initial_message: message,
+        startup_contract: startupContract,
+      })
+      setSetupQuestId(result.snapshot.quest_id)
+    } finally {
+      setSetupQuestCreating(false)
+    }
+  }
+
+  const handleCreateDialogClose = () => {
+    setCreateDialogOpen(false)
+    setCreateError(null)
+    setBenchSetupPacket(null)
+    if (setupQuestId) {
+      const questId = setupQuestId
+      setSetupQuestId(null)
+      void client.deleteQuest(questId).catch(() => undefined)
     }
   }
 
@@ -367,6 +431,7 @@ export default function Hero() {
                           className="h-12 rounded-full bg-[#C7AD96] px-7 text-[#2D2A26] shadow-[0_12px_28px_-14px_rgba(45,42,38,0.55)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#D7C6AE]"
                           onClick={() => {
                             setCreateError(null)
+                            setBenchSetupPacket(null)
                             window.setTimeout(() => {
                               setCreateDialogOpen(true)
                             }, 120)
@@ -376,6 +441,16 @@ export default function Hero() {
                           {hero.copy.primaryCta}
                         </Button>
                       </GlareHover>
+                      <Button
+                        variant="outline"
+                        className="h-11 rounded-full border-black/15 bg-white/70 px-6 text-[#2D2A26] hover:bg-white"
+                        onClick={() => {
+                          setBenchStoreOpen(true)
+                        }}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        BenchStore
+                      </Button>
                       <Button
                         variant="outline"
                         className="h-11 rounded-full border-black/15 bg-white/70 px-6 text-[#2D2A26] hover:bg-white"
@@ -439,8 +514,32 @@ export default function Hero() {
         open={createDialogOpen}
         loading={creating}
         error={createError}
-        onClose={() => setCreateDialogOpen(false)}
+        setupPacket={benchSetupPacket}
+        setupQuestId={setupQuestId}
+        setupQuestCreating={setupQuestCreating}
+        onClose={handleCreateDialogClose}
         onCreate={createAndOpen}
+        onRequestSetupAgent={requestSetupAgent}
+      />
+
+      <BenchStoreDialog
+        open={benchStoreOpen}
+        locale={locale}
+        setupQuestId={setupQuestId}
+        setupQuestCreating={setupQuestCreating}
+        onClose={() => setBenchStoreOpen(false)}
+        onStartWithSetupPacket={(setupPacket) => {
+          setBenchSetupPacket(setupPacket)
+          setCreateError(null)
+          setBenchStoreOpen(false)
+          setCreateDialogOpen(true)
+        }}
+        onRequestSetupAgent={({ message, setupPacket }) =>
+          requestSetupAgent({
+            message,
+            setupPacket,
+          })
+        }
       />
 
       <OpenQuestDialog

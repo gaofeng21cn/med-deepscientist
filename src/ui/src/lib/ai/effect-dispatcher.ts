@@ -578,6 +578,9 @@ export function handleUIEffect(effect: Effect, context?: UIEffectContext) {
   const { name, data } = effect
 
   switch (name) {
+    case 'start_setup:patch':
+      dispatchCustomEvent('ds:start-setup:patch', data)
+      return
     case 'file:highlight':
       handleFileHighlight(data as FileEffectData)
       return
