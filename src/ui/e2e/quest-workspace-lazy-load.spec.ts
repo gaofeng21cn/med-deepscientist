@@ -20,6 +20,7 @@ test.describe('quest workspace lazy loading', () => {
     const questId = 'lazy-quest-001'
     const now = '2026-04-19T12:00:00Z'
     const requests = {
+      project: 0,
       session: 0,
       explorer: 0,
       layout: 0,
@@ -85,6 +86,16 @@ test.describe('quest workspace lazy loading', () => {
 
     await page.route('**/api/baselines', async (route) => {
       await route.fulfill(jsonResponse([]))
+    })
+
+    await page.route(`**/api/v1/projects/${questId}`, async (route) => {
+      requests.project += 1
+      await route.fulfill(
+        jsonResponse({
+          id: questId,
+          name: 'Unexpected Project Fetch',
+        })
+      )
     })
 
     await page.route(`**/api/quests/${questId}/session`, async (route) => {
@@ -238,15 +249,18 @@ test.describe('quest workspace lazy loading', () => {
     expect(requests.session).toBeGreaterThan(0)
     expect(requests.explorer).toBeGreaterThan(0)
     expect(requests.layout).toBeGreaterThan(0)
+    expect(requests.project).toBe(0)
+    expect(requests.branches).toBeGreaterThan(0)
     expect(requests.workflow).toBe(0)
     expect(requests.memory).toBe(0)
     expect(requests.documents).toBe(0)
 
+    const initialBranchRequests = requests.branches
     await page.locator('[data-onboarding-id="quest-workspace-tab-details"]').click()
 
     await expect.poll(() => requests.workflow > 0).toBe(true)
     await expect.poll(() => requests.memory > 0).toBe(true)
     await expect.poll(() => requests.documents > 0).toBe(true)
-    await expect.poll(() => requests.branches > 0).toBe(true)
+    await expect.poll(() => requests.branches > initialBranchRequests).toBe(true)
   })
 })
