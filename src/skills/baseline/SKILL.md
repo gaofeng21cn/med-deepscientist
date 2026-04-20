@@ -16,6 +16,31 @@ The target is one trustworthy baseline line, not an endless reproduction diary.
 - Hard execution rule: every terminal command in this stage must go through `bash_exec`; do not use any other terminal path for setup, reproduction, monitoring, verification, Git, Python, package-manager, or file-inspection commands.
 - Prefer `bash_exec` for setup, reproduction, monitoring, and verification commands so the baseline line stays durable and auditable.
 
+## Three-layer todo contract
+
+- keep quest-root `plan.md` as the quest-level research map for the whole loop
+- keep workspace `PLAN.md` or compatibility alias `analysis_plan.md` as the active baseline-node contract
+- keep workspace `CHECKLIST.md` or compatibility alias `REPRO_CHECKLIST.md` as the baseline execution frontier
+- update the smallest affected layer first instead of opening a new parallel plan surface
+
+## Research-map role
+
+- baseline is usually the first durable node of a research loop
+- once the baseline gate is durably resolved, update quest-root `plan.md` and push toward `idea`
+- if the baseline line is blocked, waived, or downgraded, record the next edge in quest-root `plan.md`
+
+## Comparator-first rule
+
+The baseline stage is comparator-first, not reproduction-first.
+For `comparison_ready`, the default question is:
+
+- what is the lightest trustworthy comparator?
+
+Unless the acceptance target explicitly requires a stronger package, prefer the lightest route that still makes the downstream comparison honest.
+Do not escalate from attach / import / verify-local-existing into full source reproduction unless the lighter route cannot support a fair comparison.
+A more complete baseline package is only the default when the acceptance target is explicitly `paper_repro_ready` or `registry_publishable`.
+For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction.
+
 ## Non-negotiable rules
 
 - no fabricated metrics, logs, run status, or success claims
@@ -48,7 +73,7 @@ These are control gates, not paperwork walls.
 ## Quick workflow
 
 1. Read the source paper and source repo first, or record exactly what is missing and why.
-2. Choose the lightest trustworthy route: attach, import, reproduce, or repair.
+2. Choose the lightest trustworthy route: attach, import, reproduce, or repair. For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction.
 3. Start with the fast path whenever the current baseline object, command path, and acceptance target are already clear enough to validate cheaply.
 4. Before substantial baseline setup, code edits, or a real baseline run, create `PLAN.md` and `CHECKLIST.md`; short-form files are enough for simple fast-path work.
 5. Keep one dominant phase visible: analysis -> setup -> execution -> verification.
@@ -75,6 +100,7 @@ Fast path means:
 - do not front-load a full codebase audit when the entrypoint is already concrete
 - use a minimal `PLAN.md`, a minimal `CHECKLIST.md`, one bounded smoke test when needed, and then one real validation or run
 - default to reuse-and-verify when runtime already attached a concrete baseline
+- if the acceptance target is `comparison_ready`, treat attach / import / verify-local-existing as the normal winning routes whenever they already satisfy the proof burden
 
 Escalate from fast path to fuller audit only when:
 
@@ -84,6 +110,33 @@ Escalate from fast path to fuller audit only when:
 - the contract spans multiple metrics, datasets, subtasks, or splits that still need interpretation
 - the same failure class reappears after one documented autonomous fix
 - the quest is trying to publish a reusable global baseline rather than only clear the current gate
+
+## Minimum proof package by route
+
+Each route should stop once its minimum proof package is satisfied for the current acceptance target.
+
+- `attach`
+  - baseline object is readable
+  - source identity is clear
+  - canonical metric contract is present or can be made explicit cleanly
+- `import`
+  - imported package is readable
+  - comparator path is clear
+  - canonical metric contract is present or can be reconstructed without guesswork
+- `verify_local_existing`
+  - the local code path or local service really exists
+  - the evaluation path is concrete enough to validate
+  - the metric contract is concrete enough to compare fairly
+- `reproduce_from_source`
+  - the real run or evaluator entrypoint is clear
+  - the environment route is clear enough to run credibly
+  - one real verification path exists, not just a hypothetical command sketch
+- `repair_existing_baseline`
+  - the existing baseline line is close enough to trust after bounded fixes
+  - the broken point is explicit
+  - the repair can be verified without silently changing the comparison contract
+
+If a lighter route already satisfies the current acceptance target, stop there.
 
 ## Use when
 
@@ -112,6 +165,7 @@ Operationally:
 - call `artifact.confirm_baseline(...)` once the accepted baseline root and trusted comparison contract are clear
 - call `artifact.waive_baseline(...)` when the quest must continue without a baseline
 - attach, import, or publish alone do not open the downstream gate
+- once one comparator clears the current acceptance target, baseline should usually end
 
 ## Required plan and checklist
 
@@ -119,10 +173,11 @@ Before substantial baseline setup, code edits, or a real baseline run, create a 
 
 - Use `references/baseline-plan-template.md` as the canonical structure for `PLAN.md`.
 - Use `references/baseline-checklist-template.md` as the canonical structure for `CHECKLIST.md`.
+- keep quest-root `plan.md` synced with the current baseline map node, its status, and its `on_success` / `on_failure` edges
 - `analysis_plan.md` and `REPRO_CHECKLIST.md` remain acceptable compatibility alias files when an older quest already depends on them.
 - For fast-path attach/import/prebound validation or a simple reproduce path with no expected code changes, short-form `PLAN.md` and `CHECKLIST.md` are enough.
 - The plan should put the user's explicit requirements and non-negotiable constraints first.
-- Then record the chosen route, source identity, command path, expected outputs, acceptance condition, safe efficiency levers, main risks, and fallback.
+- Then record the chosen route, source identity, command path, expected outputs, acceptance condition, main risks, and fallback.
 - If the route, commands, source package, fallback path, or trust judgment changes materially, revise `PLAN.md` before continuing.
 - Once the route is concrete, stop reshaping code and commands speculatively.
 

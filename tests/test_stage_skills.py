@@ -466,6 +466,26 @@ def test_analysis_campaign_skill_requires_one_slice_campaign_for_single_extra_ex
     assert "current workspace/result node" in text
 
 
+def test_research_stage_skills_document_three_layer_planning_and_launched_slice_artifacts() -> None:
+    root = repo_root() / "src" / "skills"
+    baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
+    experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
+    campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "## Three-layer todo contract" in baseline_text
+    assert "## Research-map role" in baseline_text
+    assert "quest-root `plan.md`" in baseline_text
+
+    assert "## Three-layer todo contract" in experiment_text
+    assert "## Research-map role" in experiment_text
+    assert "quest-root `plan.md`" in experiment_text
+
+    assert "## Hard artifact flow" in campaign_text
+    assert "Analysis-campaign has a hard artifact boundary." in campaign_text
+    assert "After each launched slice finishes, fails, becomes infeasible, or is superseded" in campaign_text
+    assert "Do not replace `artifact.record_analysis_slice(...)` with chat, memory, a local note, or a campaign summary" in campaign_text
+
+
 def test_review_and_rebuttal_skills_route_extra_evidence_into_shared_campaign_protocol() -> None:
     review_text = (repo_root() / "src" / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8")
     rebuttal_text = (repo_root() / "src" / "skills" / "rebuttal" / "SKILL.md").read_text(encoding="utf-8")

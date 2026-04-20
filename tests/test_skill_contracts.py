@@ -218,10 +218,14 @@ def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     text = _skill_text("baseline")
 
     assert "## Quick workflow" in text
+    assert "## Comparator-first rule" in text
     assert "## Fast-path first" in text
     assert "## Required plan and checklist" in text
     assert "source paper and source repo first" in text
     assert "`PLAN.md` and `CHECKLIST.md`" in text
+    assert "comparator-first, not reproduction-first" in text
+    assert "what is the lightest trustworthy comparator?" in text
+    assert "For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction." in text
     assert "short-form `PLAN.md` and `CHECKLIST.md`" in text
     assert "references/baseline-plan-template.md" in text
     assert "references/baseline-checklist-template.md" in text
@@ -236,6 +240,8 @@ def test_baseline_skill_requires_plan_checklist_and_source_reading() -> None:
     assert "flat top-level dictionary keyed by the paper-facing metric ids" in text
     assert "`Result/metric.md` is optional temporary scratch memory only" in text
     assert "same failure class" in text
+    assert "If a lighter route already satisfies the current acceptance target, stop there." in text
+    assert "baseline should usually end" in text
     assert "## Baseline id and variant rules" in text
     assert "## Multi-baseline policy" in text
     assert "references/artifact-payload-examples.md" in text
@@ -272,6 +278,10 @@ def test_experiment_skill_requires_incremental_seven_field_recording() -> None:
     assert "baseline_relation" in text
     assert "failure_mode" in text
     assert "next_action" in text
+    assert "## Three-layer todo contract" in text
+    assert "## Research-map role" in text
+    assert "keep quest-root `plan.md` as the quest-level research map and loop tracker" in text
+    assert "For `comparison_ready`, `verify-local-existing`, attach, or import should usually beat full reproduction." in text
     assert "maximize valid evidence per unit time and compute" in text
     assert "equivalence-preserving efficiency upgrades" in text
     assert "larger safe batch size" in text
@@ -647,6 +657,8 @@ def test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitorin
         assert "do not set `timeout_seconds` exactly equal to `N`" in text
         assert "prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command" in text
 
+    assert "if the same failure class appears again without a real route or evidence change" in experiment_text
+    assert "if the same failure class appears again without a real route or evidence change" in analysis_text
     assert "smoke test" in baseline_text
     assert "bash_exec(mode='detach', ...)" in baseline_text
     assert "tqdm" in experiment_text
