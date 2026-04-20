@@ -7,6 +7,7 @@ import { ProjectsAppBar } from '@/components/projects/ProjectsAppBar'
 import { BaselineSettingsPanel } from '@/components/settings/BaselineSettingsPanel'
 import { ConnectorSettingsForm } from '@/components/settings/ConnectorSettingsForm'
 import { DeepXivSettingsPanel } from '@/components/settings/DeepXivSettingsPanel'
+import { SettingsSystemPanel } from '@/components/settings/SettingsSystemPanel'
 import { connectorCatalog, type ConnectorName } from '@/components/settings/connectorCatalog'
 import { connectorConfigAutoEnabled } from '@/components/settings/connectorSettingsHelpers'
 import { RegistrySettingsForm } from '@/components/settings/RegistrySettingsForm'
@@ -27,8 +28,9 @@ import type {
 } from '@/types'
 
 export type ConfigDocumentName = 'config' | 'runners' | 'connectors' | 'baselines' | 'plugins' | 'mcp_servers'
+type SettingsSectionName = ConfigDocumentName | 'system'
 
-const CONFIG_ORDER: ConfigDocumentName[] = ['config', 'runners', 'connectors', 'baselines', 'plugins', 'mcp_servers']
+const CONFIG_ORDER: SettingsSectionName[] = ['config', 'runners', 'connectors', 'baselines', 'plugins', 'mcp_servers', 'system']
 
 const CONFIG_META = {
   config: {
@@ -61,7 +63,14 @@ const CONFIG_META = {
     label: { en: 'MCP', zh: 'MCP' },
     hint: { en: 'External MCP servers and access policy.', zh: '外部 MCP 服务与访问策略。' },
   },
-} satisfies Record<ConfigDocumentName, { label: Record<Locale, string>; hint: Record<Locale, string> }>
+  system: {
+    label: { en: 'System', zh: '系统' },
+    hint: {
+      en: 'Read-only operator visibility for runtime, logs, failures, hardware, charts, and search.',
+      zh: '只读 system/operator 可见性，覆盖 runtime、日志、故障、硬件、图表与搜索。',
+    },
+  },
+} satisfies Record<SettingsSectionName, { label: Record<Locale, string>; hint: Record<Locale, string> }>
 
 const copy = {
   en: {
@@ -113,11 +122,18 @@ const SYNTHETIC_BASELINE_FILE: ConfigFileEntry = {
   exists: true,
 }
 
-function compareConfig(a: ConfigFileEntry, b: ConfigFileEntry) {
-  return CONFIG_ORDER.indexOf(a.name as ConfigDocumentName) - CONFIG_ORDER.indexOf(b.name as ConfigDocumentName)
+const SYNTHETIC_SYSTEM_FILE: ConfigFileEntry = {
+  name: 'system',
+  path: '/api/system/*',
+  required: false,
+  exists: true,
 }
 
-function configLabel(name: ConfigDocumentName, locale: Locale) {
+function compareConfig(a: ConfigFileEntry, b: ConfigFileEntry) {
+  return CONFIG_ORDER.indexOf(a.name as SettingsSectionName) - CONFIG_ORDER.indexOf(b.name as SettingsSectionName)
+}
+
+function configLabel(name: SettingsSectionName, locale: Locale) {
   return CONFIG_META[name].label[locale]
 }
 
@@ -154,7 +170,7 @@ function connectorBindingTransitionMessage(transition: unknown, questId?: string
   return copy.en.connectorBindingSaved
 }
 
-function configHint(name: ConfigDocumentName, locale: Locale) {
+function configHint(name: SettingsSectionName, locale: Locale) {
   return CONFIG_META[name].hint[locale]
 }
 
@@ -164,9 +180,12 @@ function normalizeHashAnchor(value?: string | null) {
     .replace(/^#/, '')
 }
 
-function settingsConfigPath(name: ConfigDocumentName | null, connectorName?: ConnectorName | null) {
+function settingsConfigPath(name: SettingsSectionName | null, connectorName?: ConnectorName | null) {
   if (name === 'connectors') {
     return connectorName ? `/settings/connector/${connectorName}` : '/settings/connector'
+  }
+  if (name === 'system') {
+    return '/settings'
   }
   return name ? `/settings/${name}` : '/settings'
 }
@@ -233,7 +252,9 @@ export function SettingsPage({
   const [connectors, setConnectors] = useState<ConnectorSnapshot[]>([])
   const [baselineEntries, setBaselineEntries] = useState<BaselineRegistryEntry[]>([])
   const [quests, setQuests] = useState<QuestSummary[]>([])
-  const [selectedName, setSelectedName] = useState<ConfigDocumentName | null>(requestedConfigName || null)
+  const [selectedName, setSelectedName] = useState<SettingsSectionName | null>(
+    requestedConfigName || (normalizeHashAnchor(location.hash) === 'settings-system' ? 'system' : null)
+  )
   const [document, setDocument] = useState<OpenDocumentPayload | null>(null)
   const [structuredDraft, setStructuredDraft] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
@@ -266,11 +287,15 @@ export function SettingsPage({
           return
         }
         const sorted = [...filePayload].sort(compareConfig)
-        setFiles([...sorted, SYNTHETIC_BASELINE_FILE].sort(compareConfig))
+        setFiles([...sorted, SYNTHETIC_BASELINE_FILE, SYNTHETIC_SYSTEM_FILE].sort(compareConfig))
         setConnectors(connectorPayload)
         setBaselineEntries(baselinePayload)
         setQuests(questPayload)
-        const preferred = requestedConfigName || (sorted[0]?.name as ConfigDocumentName | undefined) || null
+        const preferred =
+          requestedConfigName ||
+          (normalizeHashAnchor(location.hash) === 'settings-system' ? 'system' : null) ||
+          (sorted[0]?.name as ConfigDocumentName | undefined) ||
+          null
         if (preferred) {
           setSelectedName(preferred)
         }
@@ -284,7 +309,7 @@ export function SettingsPage({
     return () => {
       mounted = false
     }
-  }, [requestedConfigName])
+  }, [location.hash, requestedConfigName])
 
   useEffect(() => {
     if (!selectedName) {
@@ -294,6 +319,15 @@ export function SettingsPage({
       return
     }
     if (selectedName === 'baselines') {
+      setDocument(null)
+      setStructuredDraft({})
+      setValidation(null)
+      setTestResult(null)
+      setSaveMessage('')
+      setDocumentLoading(false)
+      return
+    }
+    if (selectedName === 'system') {
       setDocument(null)
       setStructuredDraft({})
       setValidation(null)
@@ -334,16 +368,21 @@ export function SettingsPage({
   }, [selectedName])
 
   useEffect(() => {
+    if (normalizeHashAnchor(location.hash) === 'settings-system') {
+      setSelectedName('system')
+      return
+    }
     if (!requestedConfigName) {
       return
     }
     setSelectedName(requestedConfigName)
     onRequestedConfigConsumed?.()
-  }, [onRequestedConfigConsumed, requestedConfigName])
+  }, [location.hash, onRequestedConfigConsumed, requestedConfigName])
 
   const isPageLoading = loading || documentLoading
   const isConnectorDocument = selectedName === 'connectors'
   const isBaselineDocument = selectedName === 'baselines'
+  const isSystemDocument = selectedName === 'system'
   const visibleConnectorNames = useMemo(
     () => new Set(connectors.filter((item) => item.name !== 'local').map((item) => item.name as ConnectorName)),
     [connectors]
@@ -492,15 +531,19 @@ export function SettingsPage({
     )
   }, [isConnectorDocument, location.hash, navigate, selectedConnectorName, visibleConnectorNames])
 
-  const handleSelectName = (name: ConfigDocumentName) => {
+  const handleSelectName = (name: SettingsSectionName) => {
     setSelectedName(name)
     setSaveMessage('')
     navigate(
       {
         pathname: settingsConfigPath(name),
-        hash: '',
+        hash: name === 'system' ? '#settings-system' : '',
       },
-      { replace: location.pathname === settingsConfigPath(name) }
+      {
+        replace:
+          location.pathname === settingsConfigPath(name) &&
+          (name !== 'system' || normalizeHashAnchor(location.hash) === 'settings-system'),
+      }
     )
   }
 
@@ -510,7 +553,7 @@ export function SettingsPage({
       return files
     }
     return files.filter((item) => {
-      const name = item.name as ConfigDocumentName
+      const name = item.name as SettingsSectionName
       return `${item.name} ${item.path} ${configLabel(name, locale)} ${configHint(name, locale)}`
         .toLowerCase()
         .includes(keyword)
@@ -572,7 +615,7 @@ export function SettingsPage({
     if (!selectedName) {
       return
     }
-    if (selectedName === 'baselines') {
+    if (selectedName === 'baselines' || selectedName === 'system') {
       setBaselineEntries(await client.baselines())
       return
     }
@@ -780,7 +823,7 @@ export function SettingsPage({
 
             <div className="mt-5">
               {filteredFiles.map((file, index) => {
-                const name = file.name as ConfigDocumentName
+                const name = file.name as SettingsSectionName
                 return (
                   <button
                     key={file.name}
@@ -883,7 +926,7 @@ export function SettingsPage({
 
                 {saveMessage ? <div className="mt-3 text-sm text-emerald-700 dark:text-emerald-300">{saveMessage}</div> : null}
 
-                {helpMarkdown && !isConnectorDocument && !isBaselineDocument ? (
+                {helpMarkdown && !isConnectorDocument && !isBaselineDocument && !isSystemDocument ? (
                   <section className="border-b border-black/[0.08] py-6 dark:border-white/[0.08]">
                     <div className="mb-3 text-sm font-medium">{t.reference}</div>
                     <MarkdownDocument
@@ -941,7 +984,11 @@ export function SettingsPage({
                   </div>
                 ) : null}
 
-                {document && !isConnectorDocument && !isBaselineDocument ? (
+                {isSystemDocument ? (
+                  <SettingsSystemPanel locale={locale} />
+                ) : null}
+
+                {document && !isConnectorDocument && !isBaselineDocument && !isSystemDocument ? (
                   <div className="pt-6">
                     {selectedName === 'config' ? (
                       <div className="pb-6">

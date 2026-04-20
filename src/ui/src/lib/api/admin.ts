@@ -1,57 +1,98 @@
-import { api } from '@/lib/api'
+import { apiRequestJson } from '@/lib/api/request'
 import type {
-  SystemChartCatalogPayload,
-  SystemChartPayload,
-  SystemFailureListPayload,
-  SystemHardwarePayload,
-  SystemLogSourcesPayload,
-  SystemLogTailPayload,
-  SystemOverviewPayload,
-  SystemQuestListPayload,
-  SystemQuestSummaryPayload,
-  SystemRuntimeSessionsPayload,
-  SystemRuntimeToolsPayload,
-  SystemSearchPayload,
-  SystemStatsSummaryPayload,
+  SystemChartCatalogResponse,
+  SystemChartResponse,
+  SystemFailureListResponse,
+  SystemHardwareResponse,
+  SystemLogSourceListResponse,
+  SystemLogTailResponse,
+  SystemOverviewResponse,
+  SystemQuestListResponse,
+  SystemQuestSummaryResponse,
+  SystemRuntimeSessionListResponse,
+  SystemRuntimeToolListResponse,
+  SystemSearchResponse,
+  SystemStatsSummaryResponse,
 } from '@/lib/types/admin'
 
-export const adminClient = {
-  systemOverview: () => api<SystemOverviewPayload>('/api/system/overview'),
-  systemQuests: (params?: { status?: string; q?: string; limit?: number }) => {
-    const searchParams = new URLSearchParams()
-    if (params?.status) searchParams.set('status', params.status)
-    if (params?.q) searchParams.set('q', params.q)
-    if (params?.limit) searchParams.set('limit', String(params.limit))
-    const suffix = searchParams.toString()
-    return api<SystemQuestListPayload>(`/api/system/quests${suffix ? `?${suffix}` : ''}`)
-  },
-  systemQuestSummary: (questId: string) =>
-    api<SystemQuestSummaryPayload>(`/api/system/quests/${encodeURIComponent(questId)}/summary`),
-  systemRuntimeSessions: (limit?: number) =>
-    api<SystemRuntimeSessionsPayload>(`/api/system/runtime/sessions${limit ? `?limit=${limit}` : ''}`),
-  systemLogSources: () => api<SystemLogSourcesPayload>('/api/system/logs/sources'),
-  systemLogTail: (sourceId: string, limit = 200) =>
-    api<SystemLogTailPayload>(`/api/system/logs/${encodeURIComponent(sourceId)}/tail?limit=${limit}`),
-  systemFailures: (params?: { q?: string; severity?: string; limit?: number }) => {
-    const searchParams = new URLSearchParams()
-    if (params?.q) searchParams.set('q', params.q)
-    if (params?.severity) searchParams.set('severity', params.severity)
-    if (params?.limit) searchParams.set('limit', String(params.limit))
-    const suffix = searchParams.toString()
-    return api<SystemFailureListPayload>(`/api/system/failures${suffix ? `?${suffix}` : ''}`)
-  },
-  systemRuntimeTools: () => api<SystemRuntimeToolsPayload>('/api/system/runtime-tools'),
-  systemHardware: () => api<SystemHardwarePayload>('/api/system/hardware'),
-  systemCharts: () => api<SystemChartCatalogPayload>('/api/system/charts'),
-  systemChart: (chartId: string) => api<SystemChartPayload>(`/api/system/charts/${encodeURIComponent(chartId)}`),
-  systemStatsSummary: () => api<SystemStatsSummaryPayload>('/api/system/stats/summary'),
-  systemSearch: (query: string, params?: { scope?: string; limit?: number }) => {
-    const searchParams = new URLSearchParams()
-    searchParams.set('q', query)
-    if (params?.scope) searchParams.set('scope', params.scope)
-    if (params?.limit) searchParams.set('limit', String(params.limit))
-    return api<SystemSearchPayload>(`/api/system/search?${searchParams.toString()}`)
-  },
+const ADMIN_REQUEST_OPTIONS = {
+  toastOnError: true,
+  errorTitle: 'Unable to load system visibility data',
 }
 
-export default adminClient
+function withQuery(path: string, query?: Record<string, string | number | null | undefined>) {
+  const params = new URLSearchParams()
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value === null || value === undefined || value === '') {
+      return
+    }
+    params.set(key, String(value))
+  })
+  const suffix = params.toString()
+  return suffix ? `${path}?${suffix}` : path
+}
+
+export const adminApi = {
+  getOverview: () =>
+    apiRequestJson<SystemOverviewResponse>('/api/system/overview', {}, ADMIN_REQUEST_OPTIONS),
+  getQuests: () =>
+    apiRequestJson<SystemQuestListResponse>('/api/system/quests', {}, ADMIN_REQUEST_OPTIONS),
+  getQuestSummary: (questId: string) =>
+    apiRequestJson<SystemQuestSummaryResponse>(
+      `/api/system/quests/${encodeURIComponent(questId)}/summary`,
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getRuntimeSessions: () =>
+    apiRequestJson<SystemRuntimeSessionListResponse>(
+      '/api/system/runtime/sessions',
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getLogSources: () =>
+    apiRequestJson<SystemLogSourceListResponse>(
+      '/api/system/logs/sources',
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getLogTail: (sourceId: string, limit = 200) =>
+    apiRequestJson<SystemLogTailResponse>(
+      withQuery(`/api/system/logs/${encodeURIComponent(sourceId)}/tail`, { limit }),
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getFailures: () =>
+    apiRequestJson<SystemFailureListResponse>('/api/system/failures', {}, ADMIN_REQUEST_OPTIONS),
+  getRuntimeTools: () =>
+    apiRequestJson<SystemRuntimeToolListResponse>(
+      '/api/system/runtime-tools',
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getHardware: () =>
+    apiRequestJson<SystemHardwareResponse>('/api/system/hardware', {}, ADMIN_REQUEST_OPTIONS),
+  getCharts: () =>
+    apiRequestJson<SystemChartCatalogResponse>('/api/system/charts', {}, ADMIN_REQUEST_OPTIONS),
+  getChart: (chartId: string, query?: { window?: string; since?: string; until?: string }) =>
+    apiRequestJson<SystemChartResponse>(
+      withQuery(`/api/system/charts/${encodeURIComponent(chartId)}`, query),
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  getStatsSummary: () =>
+    apiRequestJson<SystemStatsSummaryResponse>(
+      '/api/system/stats/summary',
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+  search: (query: string, options?: { limit?: number; scope?: string }) =>
+    apiRequestJson<SystemSearchResponse>(
+      withQuery('/api/system/search', {
+        q: query,
+        limit: options?.limit,
+        scope: options?.scope,
+      }),
+      {},
+      ADMIN_REQUEST_OPTIONS
+    ),
+}
