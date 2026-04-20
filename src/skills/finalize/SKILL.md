@@ -6,6 +6,7 @@ description: Use when the quest is ready to consolidate final claims, limitation
 # Finalize
 
 Use this skill to close or pause a quest responsibly.
+The goal is to leave a stable stopping point and a clean resume path, not to keep rediscovering work that is already done.
 
 ## Interaction discipline
 
@@ -289,9 +290,32 @@ Write to memory only when the lesson is reusable across quests, such as:
 - robust baseline lessons
 - durable writing or evaluation lessons
 
+If later continuation remains plausible, also write or refresh one compact checkpoint-style quest memory card that mirrors the live resume packet.
+That checkpoint-style memory should usually state:
+
+- current route
+- current active node such as the live paper line, accepted bundle pair, or active continue-later checkpoint
+- node history: which earlier node(s), report/decision pairs, or closure paths were superseded
+- strongest retained result or blocker
+- what not to reopen by default
+- next resume step
+- first files to read
+- reopen conditions
+
+Preferred tags usually include:
+
+- `stage:finalize`
+- `type:checkpoint-memory`
+- `type:status-clarification`
+- `route:<current_route>`
+- `node:<current_active_node>` when the node label is stable enough to reuse
+
+Use `references/checkpoint-memory-template.md` when helpful so the current node history stays explicit.
+
 Stage-end requirement:
 
 - if finalize produced a durable cross-quest lesson worth reusing later, write at least one `memory.write(...)` before leaving the stage
+- if the quest is stopping at continue-later / pause-ready rather than true completion, write or refresh one checkpoint-style quest memory card before leaving the stage
 
 Quest-specific closure state belongs in files and artifacts first, not only memory.
 
@@ -332,6 +356,7 @@ Use these references when you need a denser closure checklist:
 
 - `references/finalization-checklist.md`
 - `references/resume-packet-template.md`
+- `references/checkpoint-memory-template.md`
 
 ## Exit criteria
 
@@ -342,3 +367,5 @@ Exit the finalize stage once one of the following is durably true:
 - the limitations and recommendation are explicit
 - the stopping point is recorded through artifact
 - the claim ledger and package inventory are clear enough for later resumption or publication handoff
+
+A good finalize pass leaves the quest easier to reopen correctly than it was before finalization began.

@@ -286,6 +286,26 @@ def test_experiment_and_decision_skills_document_activate_branch_and_analysis_co
     assert "extra resource cost" in decision_text
 
 
+def test_decision_and_finalize_skills_document_checkpoint_memory_handoff() -> None:
+    root = repo_root() / "src" / "skills"
+    decision_text = (root / "decision" / "SKILL.md").read_text(encoding="utf-8")
+    finalize_text = (root / "finalize" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "no new durable evidence" in decision_text
+    assert "what is genuinely new since the last route judgment" in decision_text
+    assert "references/checkpoint-memory-template.md" in decision_text
+    assert "checkpoint-style quest memory card" in decision_text
+    assert "continue-later / pause-ready" in finalize_text
+    assert "references/checkpoint-memory-template.md" in finalize_text
+    assert "stable stopping point and a clean resume path" in finalize_text
+
+    assert (root / "decision" / "references" / "checkpoint-memory-template.md").exists()
+    assert (root / "finalize" / "references" / "checkpoint-memory-template.md").exists()
+    resume_packet_text = (root / "finalize" / "references" / "resume-packet-template.md").read_text(encoding="utf-8")
+    assert "### 1A. Current node history" in resume_packet_text
+    assert "authoritative resume point" in resume_packet_text
+
+
 def test_prompt_builder_skill_paths_only_reference_existing_files(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

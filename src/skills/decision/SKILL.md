@@ -6,6 +6,7 @@ description: Use when the quest needs an explicit go, stop, branch, reuse-baseli
 # Decision
 
 Use this skill whenever continuation is non-trivial.
+Use it to make one route judgment from durable evidence and then get the quest moving again.
 
 ## Interaction discipline
 
@@ -14,6 +15,7 @@ Use this skill whenever continuation is non-trivial.
 - Message templates are references only. Adapt to context and vary wording so updates feel natural and non-robotic.
 - If the runtime starts an auto-continue turn with no new user message, continue from the active requirements and durable quest state instead of replaying the previous user turn.
 - If `startup_contract.decision_policy = autonomous`, do not emit ordinary `artifact.interact(kind='decision_request', ...)` calls; decide the route yourself, record the reason, and continue.
+- If there is no new durable evidence, no blocker change, and no new user instruction since the last route judgment, do not restate the same decision again; continue the current action or remain waiting/blocked instead.
 - Use `reply_mode='blocking'` for the actual decision request only when the user must choose before safe continuation and the quest contract still allows a user-gated decision.
 - If a threaded user reply arrives, interpret it relative to the latest decision or progress interaction before assuming the task changed completely.
 - Quest completion is a special terminal decision: first ask for explicit completion approval with `artifact.interact(kind='decision_request', reply_mode='blocking', reply_schema={'decision_type': 'quest_completion_approval'}, ...)`, and only after an explicit approval reply should you call `artifact.complete_quest(...)`.
@@ -149,6 +151,7 @@ Summarize only the decision-relevant evidence:
 - strongest contradiction
 - missing dependency
 - known cost or risk
+- what is genuinely new since the last route judgment
 
 ### 3. Choose verdict and action
 
@@ -379,8 +382,38 @@ Write to memory only when the lesson is reusable across future decisions, such a
 - a reliable stop condition
 - a useful branching heuristic
 
+When a decision materially changes what later turns should resume from, also write one compact checkpoint-style quest memory card.
+Typical cases:
+
+- route fixed to continue-later rather than reopen
+- old completion / baseline / experiment path explicitly superseded
+- one blocker becomes the dominant resume gate
+
+That checkpoint-style memory card should usually state:
+
+- current route
+- current active node such as the live branch, run node, paper line, or accepted report/decision pair
+- node history: which earlier node(s) or route(s) led here or were superseded
+- strongest retained result or blocker
+- what not to reopen by default
+- next resume step
+- first files to read
+- reopen condition when one exists
+
+Preferred tags usually include:
+
+- `stage:decision`
+- `type:checkpoint-memory`
+- `type:route-decision`
+- `route:<current_route>`
+- `node:<current_active_node>` when the node label is stable enough to reuse
+
+Use `references/checkpoint-memory-template.md` when helpful so the node history stays legible instead of collapsing into vague prose.
+
 The canonical record of the decision itself belongs in `artifact`.
 
 ## Exit criteria
 
 Exit once the decision is durably recorded and the next stage or action is explicit.
+
+A good decision pass changes the route once; it does not keep re-explaining the same route without new evidence.

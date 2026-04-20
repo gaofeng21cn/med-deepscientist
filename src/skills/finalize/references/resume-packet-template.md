@@ -10,6 +10,13 @@ Use this when the quest is pausing rather than ending permanently.
 - present stage
 - final recommendation at pause time
 
+### 1A. Current node history
+
+- current active node
+- predecessor node(s)
+- superseded node(s) or closure paths
+- why the current node is the authoritative resume point
+
 ### 2. Accepted baseline
 
 - baseline id or path

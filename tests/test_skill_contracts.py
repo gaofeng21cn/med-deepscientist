@@ -546,6 +546,20 @@ def test_finalize_and_decision_skills_require_bundle_and_outline_actions() -> No
     assert "artifact.interact(kind='milestone'" in decision_text
 
 
+def test_finalize_and_decision_skills_require_checkpoint_memory_contract() -> None:
+    finalize_text = _skill_text("finalize")
+    decision_text = _skill_text("decision")
+
+    assert "Use it to make one route judgment from durable evidence and then get the quest moving again." in decision_text
+    assert "do not restate the same decision again" in decision_text
+    assert "type:checkpoint-memory" in decision_text
+    assert "A good decision pass changes the route once" in decision_text
+    assert "stable stopping point and a clean resume path" in finalize_text
+    assert "type:checkpoint-memory" in finalize_text
+    assert "continue-later / pause-ready" in finalize_text
+    assert "A good finalize pass leaves the quest easier to reopen correctly" in finalize_text
+
+
 def test_intake_audit_skill_requires_state_normalization_and_route_handoff() -> None:
     text = _skill_text("intake-audit")
 
