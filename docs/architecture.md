@@ -55,6 +55,18 @@
 
 这层是宿主与发布形态，不是 runtime contract 的权威来源。
 
+### 5. Read-only catalog surface
+
+- `src/deepscientist/benchstore/`
+
+这层当前只承载只读 BenchStore registry surface：
+
+- catalog entry schema 正常化
+- catalog 列出 / 单项读取
+- 基于核心字段的基础筛选与查询
+
+当前明确停在只读 contract，不扩到 `BenchStoreDialog`、`start_setup_patch`、setup quest 状态链或其他产品级 setup UI。
+
 ## 稳定边界
 
 - 稳定协议以 `docs/policies/runtime_protocol.md` 为准。

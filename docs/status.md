@@ -13,6 +13,7 @@
 - 稳定协议入口：`docs/policies/runtime_protocol.md`
 - 核心工作方式入口：根 `AGENTS.md`
 - 当前文档骨架：`project / architecture / invariants / decisions / status`
+- BenchStore 当前只开放只读 registry/catalog surface；`BenchStoreDialog`、`start_setup_patch` 与 setup 状态链继续留在 scope 外
 
 ## 当前执行链
 
