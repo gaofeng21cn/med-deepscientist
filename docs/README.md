@@ -18,6 +18,8 @@
 6. [最小稳定 runtime protocol](policies/runtime_protocol.md)
 7. [English docs index](en/README.md)
 8. [中文文档索引](zh/README.md)
+9. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+10. [Windows WSL2 部署指南](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
 
 ## 文档角色
 
@@ -37,6 +39,8 @@
 
 - [docs/en/README.md](en/README.md)
 - [docs/zh/README.md](zh/README.md)
+- [docs/en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+- [docs/zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
 
 ### 参考 / 审计材料
 

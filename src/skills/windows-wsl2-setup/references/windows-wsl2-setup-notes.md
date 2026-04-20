@@ -5,6 +5,7 @@ Use this note after the main skill triggers.
 ## Source-of-truth docs
 
 - `README.md`
+- `docs/en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md`
 - `docs/en/00_QUICK_START.md`
 - `docs/en/15_CODEX_PROVIDER_SETUP.md`
 - `docs/en/09_DOCTOR.md`

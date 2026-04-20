@@ -13,7 +13,7 @@ You will do four things:
 
 The screenshots in this guide use the current live web UI at `deepscientist.cc:20999` as an example. Your local UI at `127.0.0.1:20999` should look the same or very close.
 
-Current platform support: DeepScientist fully supports Linux and macOS. Native Windows support is currently experimental; WSL2 remains the most battle-tested option when you need the closest Linux-like terminal behavior.
+Current platform support: DeepScientist fully supports Linux and macOS. Native Windows support is currently experimental; WSL2 remains the most battle-tested option when you need the closest Linux-like terminal behavior. If you are starting from a Windows machine, follow the dedicated [22 Windows WSL2 Deployment Guide](./22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md).
 
 ## Safety First: Isolate Before You Start
 

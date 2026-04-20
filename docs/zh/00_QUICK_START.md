@@ -13,7 +13,7 @@
 
 本文中的截图直接使用当前在线页面 `deepscientist.cc:20999` 作为示例。你本地运行后的页面 `127.0.0.1:20999` 通常会与它保持一致或非常接近。
 
-当前平台支持：DeepScientist 目前完整支持 Linux 和 macOS。原生 Windows 支持目前仍处于实验阶段；如果你希望获得最接近 Linux 的终端行为，仍然建议优先使用 WSL2。
+当前平台支持：DeepScientist 目前完整支持 Linux 和 macOS。原生 Windows 支持目前仍处于实验阶段；如果你希望获得最接近 Linux 的终端行为，仍然建议优先使用 WSL2。Windows 机器上的首次落地请直接参考专门的 [22 Windows WSL2 部署指南](./22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)。
 
 ## 安全建议：先隔离，再启动
 

@@ -1,248 +1,180 @@
-# 22 Windows + WSL2 Deployment Guide
+# 22 Windows WSL2 Deployment Guide
 
-Use this guide when the operator machine is Windows 10/11 and the runtime should stay Linux-side inside WSL2.
+This guide is the stable Windows operator path for the current MedDeepScientist fork. The recommended shape is simple: run `ds` inside WSL2, keep the runtime toolchain on the Linux side, verify Codex before the first launch, then open the local UI from the Windows browser.
 
-MedDeepScientist keeps the compatibility launcher and package names from the inherited runtime:
+## Truth sources
 
-- npm package: `@researai/deepscientist`
-- launcher: `ds`
-- default home inside WSL: `~/DeepScientist`
+Use these repo docs in this order when you need to confirm behavior:
 
-If an AI coding agent should execute the install or repair flow directly, point it at [`src/skills/windows-wsl2-setup/SKILL.md`](../../src/skills/windows-wsl2-setup/SKILL.md) in the current repo. This document is the human-readable deployment lane; the skill is the executable lane for agents.
+1. `README.md`
+2. [00 Quick Start](./00_QUICK_START.md)
+3. [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md)
+4. [09 Doctor](./09_DOCTOR.md)
+5. [`src/skills/windows-wsl2-setup/SKILL.md`](../../src/skills/windows-wsl2-setup/SKILL.md)
+
+This guide turns those repo truths into one Windows-specific workflow. The docs above remain authoritative when command details move.
 
 ## What success looks like
 
-Run these checks inside WSL:
+Treat the setup as complete only when all checks below pass in order:
 
-```bash
-command -v node npm git uv codex ds
-codex exec --skip-git-repo-check "Print exactly OK and exit."
-ds doctor
-```
+1. `wsl -l -v`, `wsl --status`, and `wsl -d <distro> -- echo hello` succeed from Windows.
+2. Inside WSL, `command -v node npm git uv codex ds` all resolve to Linux paths.
+3. `codex exec --skip-git-repo-check "Print exactly OK and exit."` succeeds inside WSL.
+4. `ds doctor` reports a healthy Codex path.
+5. `ds` starts inside WSL and the Windows browser opens `http://127.0.0.1:20999`.
 
-Then start the runtime:
+## 1. Prepare Windows and WSL2 first
 
-```bash
-ds --here
-```
+Use a dedicated Ubuntu WSL2 distro when you want the cleanest lane.
 
-Open the printed URL from the Windows browser. The default local URL is:
-
-```text
-http://127.0.0.1:20999
-```
-
-## 1. Prepare Windows and WSL2
-
-In Windows PowerShell as Administrator:
+Run in Windows PowerShell:
 
 ```powershell
-wsl --install -d Ubuntu
-wsl --set-default-version 2
 wsl -l -v
+wsl --status
+wsl -d Ubuntu -- echo hello
 ```
 
-If WSL was already installed earlier, still verify `wsl --status` and `wsl -l -v` before touching the Linux side.
+If the distro does not boot cleanly, fix that first. `HCS_E_CONNECTION_TIMEOUT`, pending Windows updates, or Hyper-V startup issues belong at the Windows layer.
 
-If your machine keeps large Linux images on a secondary drive, move the distro with the standard export/import flow before installing tools inside it.
+## 2. Keep runtime binaries on the Linux side
 
-## 2. Keep Linux tools Linux-side
-
-Enter the distro:
-
-```powershell
-wsl -d Ubuntu
-```
-
-Inside WSL, install the baseline packages and keep Windows binaries out of the execution path:
+Inside WSL, disable Windows PATH injection before you trust binary resolution:
 
 ```bash
-sudo apt update
-sudo apt install -y build-essential curl git ca-certificates
-sudo tee /etc/wsl.conf >/dev/null <<'EOF'
-[interop]
-appendWindowsPath=false
-EOF
-exit
+printf '[interop]\nappendWindowsPath=false\n' | sudo tee /etc/wsl.conf
 ```
 
-Back in Windows PowerShell:
+Then terminate and re-enter the distro from PowerShell:
 
 ```powershell
 wsl --terminate Ubuntu
-wsl -d Ubuntu
 ```
 
-That restart makes `appendWindowsPath=false` take effect. After you re-enter WSL, every tool check should resolve to Linux paths.
-
-## 3. Install Node.js and configure global npm writes
-
-Inside WSL:
+Back in WSL, install baseline packages, a current Node LTS, and user-local npm prefixes:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-mkdir -p ~/.npm-global
-npm config set prefix '~/.npm-global'
-grep -qxF 'export PATH="$HOME/.npm-global/bin:$PATH"' ~/.bashrc || echo 'export PATH="$HOME/.npm-global/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-node --version
-npm --version
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg git sudo build-essential python3-venv python3-pip
+
+mkdir -p "$HOME/.npm-global" "$HOME/.local/bin"
+npm config set prefix "$HOME/.npm-global"
+printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> "$HOME/.bashrc"
+printf '\nexport PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"\n' >> "$HOME/.profile"
+source "$HOME/.bashrc"
 ```
 
-Any current Node LTS that satisfies the repo minimum also works. The important part is that `node` and `npm` resolve inside WSL and global npm installs do not require `sudo`.
-
-## 4. Install `ds`, `codex`, and `uv`
-
-Install the runtime package first:
-
-```bash
-npm install -g @researai/deepscientist
-```
-
-DeepScientist usually finds the bundled Codex dependency from that install. Verify it:
-
-```bash
-command -v codex
-command -v ds
-ds --version
-```
-
-If `codex` is still missing, repair it explicitly:
-
-```bash
-npm install -g @openai/codex
-```
-
-Install `uv`:
+Install the runtime toolchain in WSL:
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-uv --version
+npm install -g @openai/codex
+npm install -g @researai/deepscientist
 ```
 
-## 5. Finish Codex setup before the first `ds`
+If your environment already depends on a provider-compatible Codex version or wrapper, keep that version choice in [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md). This guide stays version-agnostic on purpose.
 
-Use one of the supported paths.
+## 3. Configure Codex before `ds`
 
-### 5.1 Default OpenAI login path
+Pick one working Codex path and verify it in WSL before you open `ds`:
+
+### Default login path
 
 ```bash
 codex --login
 ```
 
-If your local Codex build opens interactive setup through `codex` itself, use that entry instead.
+If your CLI does not expose `--login`, run `codex` and finish the interactive login there.
 
-### 5.2 Provider-backed profile path
-
-If you already use a named profile such as `m27`, `glm`, `ark`, or `bailian`, verify it first:
+### Provider-backed profile path
 
 ```bash
-codex --profile m27
+codex --profile <profile-name>
 ```
 
-Then keep the same profile for DeepScientist:
+Later, start DeepScientist with the same profile:
 
 ```bash
-ds doctor --codex-profile m27
-ds --codex-profile m27
+ds --codex-profile <profile-name>
 ```
 
-Provider-specific details stay in [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md).
+The current fork keeps model and reasoning selection inherited from your local Codex defaults unless you explicitly override them. `--codex-profile` selects a profile for one launch. `--codex` selects a specific Codex executable for one launch.
 
-## 6. Run diagnostics and start the runtime
+## 4. Validate in order
 
-Inside WSL:
+Run these checks inside WSL:
 
 ```bash
+whoami
+command -v node npm git uv codex ds
+codex exec --skip-git-repo-check "Print exactly OK and exit."
 ds doctor
+```
+
+If you use a provider-backed profile, include it in the doctor step:
+
+```bash
+ds doctor --codex-profile <profile-name>
+```
+
+Only continue after `codex exec` and `ds doctor` are both healthy.
+
+## 5. Start the runtime and open it from Windows
+
+Start from a working directory inside WSL:
+
+```bash
+mkdir -p ~/deepscientist-work
+cd ~/deepscientist-work
+ds --here
 ```
 
 If you use a provider-backed profile:
 
 ```bash
-ds doctor --codex-profile m27
+ds --here --codex-profile <profile-name>
 ```
 
-For a project-local home:
+The stable local browser address is:
+
+```text
+http://127.0.0.1:20999
+```
+
+`--host 0.0.0.0` is valid when you want the daemon to bind on all interfaces. The local browser entry still stays on `127.0.0.1`. `--ip` remains a deprecated launcher alias; `--host` is the current flag.
+
+## 6. Proxy and networking notes
+
+Test direct connectivity from WSL before you persist proxy variables:
 
 ```bash
-mkdir -p ~/projects/ds-demo
-cd ~/projects/ds-demo
-ds --here
+curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://chatgpt.com/
+curl -s --max-time 10 -o /dev/null -w '%{http_code}' https://github.com/
 ```
 
-For the default home:
+When you really need a Windows-side proxy, inspect candidate listeners from PowerShell:
 
-```bash
-ds
+```powershell
+pwsh -File scripts/find-wsl-proxy.ps1
 ```
 
-## 7. Browser access and launcher notes
+Then test the WSL gateway route before you export proxy variables permanently.
 
-Open the printed local URL from Chrome, Edge, or another Windows browser.
+## 7. Common repair paths
 
-When you need to bind the daemon explicitly, use `--host`:
+| Symptom | What to check |
+|---|---|
+| `command -v codex` or `ds` points into `/mnt/c/...` | Re-check `/etc/wsl.conf`, terminate the distro, then verify again |
+| `codex exec` fails | Fix login, profile, or provider config before opening `ds` |
+| `ds doctor` fails during uv bootstrap or sync | Read the original uv error first, then check `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, `PYTHONHOME`, `PIP_*`, `UV_INDEX_URL`, `UV_EXTRA_INDEX_URL`, `HTTP(S)_PROXY`, `SSL_CERT_FILE`, and `REQUESTS_CA_BUNDLE` |
+| uv sync fails from a source checkout after Python dependency changes | Run `uv lock`, then retry |
+| uv sync fails from the npm package install | Focus on local Python, proxy, certificate, or package-index configuration; the npm package already includes the locked `uv.lock` |
+| Windows browser cannot reach `127.0.0.1:20999` | Keep `ds` running inside WSL, then check firewall, proxy, and WSL networking state |
 
-```bash
-ds --host 0.0.0.0 --port 20999
-```
-
-Legacy scripts that still pass `--ip` keep working. The launcher prints a deprecation note and maps `--ip` to `--host`. Local browser access still uses `127.0.0.1` even when the bind host is `0.0.0.0`.
-
-## 8. Common failure patterns
-
-### WSL does not boot cleanly
-
-- Run `wsl --status` and `wsl -l -v` in PowerShell.
-- If you hit `HCS_E_CONNECTION_TIMEOUT` or Hyper-V startup errors, finish pending Windows updates and reboot before retrying.
-
-### `codex` works in one shell but `ds doctor` fails
-
-- Re-run the exact same profile inside the same WSL shell.
-- If the working `codex` binary is outside `PATH`, pass it explicitly with `--codex /absolute/path/to/codex`.
-- Re-check [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md) for the profile-specific env vars and endpoint shape.
-
-### `uv` runtime sync fails
-
-The `uv` error text above the launcher guidance is the primary truth source. The common local causes are:
-
-- an active Python environment such as `VIRTUAL_ENV`, `CONDA_PREFIX`, `PYTHONPATH`, or `PYTHONHOME`
-- custom package index settings such as `PIP_*`, `UV_INDEX_URL`, or `UV_EXTRA_INDEX_URL`
-- proxy or certificate overrides such as `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `SSL_CERT_FILE`, or `REQUESTS_CA_BUNDLE`
-
-The fastest repair path is:
-
-```bash
-deactivate 2>/dev/null || true
-conda deactivate 2>/dev/null || true
-env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u CONDA_PREFIX ds doctor
-```
-
-Then rerun `ds`. Source checkouts may also need:
-
-```bash
-uv lock
-```
-
-### Port `20999` is busy
-
-```bash
-ds --status
-ds --stop
-```
-
-Or launch on another port:
-
-```bash
-ds --port 21000
-```
-
-## 9. Related docs
+## Related docs
 
 - [00 Quick Start](./00_QUICK_START.md)
 - [09 Doctor](./09_DOCTOR.md)
 - [15 Codex Provider Setup](./15_CODEX_PROVIDER_SETUP.md)
-- [Windows WSL2 setup skill](../../src/skills/windows-wsl2-setup/SKILL.md)
+- [`src/skills/windows-wsl2-setup/SKILL.md`](../../src/skills/windows-wsl2-setup/SKILL.md)

@@ -28,6 +28,7 @@ Use these in order before changing anything:
 6. [`references/windows-wsl2-setup-notes.md`](references/windows-wsl2-setup-notes.md)
 
 Treat the repo docs as the command truth.
+Treat the deployment guide as the stable Windows install, validation, and startup path.
 Treat the reference note as Windows-specific operating guidance, auth options, proxy or NAT repair flow, and failure triage.
 
 ## End state
