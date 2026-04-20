@@ -3115,6 +3115,21 @@ def test_repair_paper_live_paths_rewrites_legacy_source_paths_per_root(temp_home
                 "source_paths": [legacy_score_path, legacy_note_path],
             }
         ],
+        "claims": [
+            {
+                "claim_id": "C1",
+                "claim_text": "Repair legacy paper source paths.",
+                "status": "supported",
+                "paper_role": "main_text",
+                "evidence_items": [
+                    {
+                        "item_id": "RUN-001",
+                        "summary": "Legacy source repair",
+                        "source_paths": [legacy_score_path, legacy_note_path],
+                    }
+                ],
+            }
+        ],
         "updated_at": "2026-04-04T00:00:00+00:00",
     }
     claim_map_payload = {
@@ -3172,6 +3187,8 @@ def test_repair_paper_live_paths_rewrites_legacy_source_paths_per_root(temp_home
     worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
     assert canonical_ledger["items"][0]["source_paths"] == expected_quest_paths
     assert worktree_ledger["items"][0]["source_paths"] == expected_worktree_paths
+    assert canonical_ledger["claims"][0]["evidence_items"][0]["source_paths"] == expected_quest_paths
+    assert worktree_ledger["claims"][0]["evidence_items"][0]["source_paths"] == expected_worktree_paths
     worktree_ledger_markdown = (paper_root / "evidence_ledger.md").read_text(encoding="utf-8")
     assert expected_worktree_paths[0] in worktree_ledger_markdown
     assert legacy_score_path not in worktree_ledger_markdown
@@ -3180,6 +3197,96 @@ def test_repair_paper_live_paths_rewrites_legacy_source_paths_per_root(temp_home
     worktree_claim_map = read_json(paper_root / "claim_evidence_map.json", {})
     assert canonical_claim_map["claims"][0]["evidence_items"][0]["source_paths"] == expected_quest_paths
     assert worktree_claim_map["claims"][0]["evidence_items"][0]["source_paths"] == expected_worktree_paths
+
+
+def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper evidence ledger backfill quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Backfill Outline",
+        detailed_outline={
+            "title": "Backfill Outline",
+            "research_questions": ["RQ-backfill"],
+            "experimental_designs": ["Exp-backfill"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for evidence-ledger backfill.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    assert paper_workspace != quest_root
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    claim_map_payload = {
+        "schema_version": 1,
+        "claims": [
+            {
+                "claim_id": "C1",
+                "claim_text": "The simple score supports interpretable follow-up stratification.",
+                "statement": "The simple score supports interpretable follow-up stratification.",
+                "status": "supported",
+                "paper_role": "main_text",
+                "display_bindings": ["F2", "T3"],
+                "sections": ["Results: Risk gradient across the simple score"],
+                "evidence_items": [
+                    {
+                        "item_id": "RUN1-SCORE-001",
+                        "summary": "Grouped risk strata preserve a monotonic outcome gradient.",
+                        "support_level": "primary",
+                        "source_paths": ["paper/grouped_risk_event_summary_table.json"],
+                    }
+                ],
+                "risks": [
+                    "Keep the claim inside postoperative follow-up stratification rather than broader endocrine outcomes language."
+                ],
+            }
+        ],
+        "updated_at": "2026-04-20T10:00:00+00:00",
+    }
+    stale_ledger_payload = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "items": [],
+        "updated_at": "2026-04-20T10:01:00+00:00",
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "claim_evidence_map.json", claim_map_payload)
+        write_json(root / "evidence_ledger.json", stale_ledger_payload)
+        (root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+
+    repaired = artifact.repair_paper_live_paths(
+        quest_root,
+        workspace_root=paper_workspace,
+        current_workspace_root=paper_workspace,
+    )
+
+    assert repaired["ok"] is True
+
+    canonical_ledger = read_json(canonical_paper_root / "evidence_ledger.json", {})
+    worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
+    for payload in (canonical_ledger, worktree_ledger):
+        assert payload["claims"][0]["claim_id"] == "C1"
+        assert payload["claims"][0]["submission_scope"] == "main_text"
+        assert payload["claims"][0]["evidence"][0]["evidence_id"] == "RUN1-SCORE-001"
+        assert payload["claims"][0]["gaps"][0]["gap_id"] == "C1-gap-1"
+        assert payload["claims"][0]["recommended_actions"][0]["action_id"] == "C1-action-1"
+        assert payload["claims"][0]["recommended_actions"][0]["priority"] == "required"
+    worktree_ledger_markdown = (paper_root / "evidence_ledger.md").read_text(encoding="utf-8")
+    assert "C1" in worktree_ledger_markdown
+    assert "main_text" in worktree_ledger_markdown
 
 
 def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home: Path) -> None:

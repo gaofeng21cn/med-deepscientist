@@ -1120,6 +1120,17 @@ class ArtifactService:
                     current_workspace_root=current_workspace_root,
                     legacy_workspace_roots=legacy_workspace_roots,
                 )
+            evidence_entries = claim.get("evidence") if isinstance(claim.get("evidence"), list) else []
+            for item in evidence_entries:
+                if not isinstance(item, dict):
+                    continue
+                item["source_paths"] = self._normalize_paper_live_path_list(
+                    item.get("source_paths"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
         return normalized
 
     def _normalize_claim_evidence_map_payload(
@@ -3287,15 +3298,18 @@ class ArtifactService:
                 "schema_version": 1,
                 "selected_outline_ref": None,
                 "items": [],
+                "claims": [],
                 "updated_at": utc_now(),
             }
         candidates.sort(key=lambda item: item[0])
         payload = candidates[-1][1]
         items = [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)]
+        claims = copy.deepcopy([dict(item) for item in (payload.get("claims") or []) if isinstance(item, dict)])
         return {
             "schema_version": 1,
             "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
             "items": items,
+            "claims": claims,
             "updated_at": str(payload.get("updated_at") or payload.get("created_at") or "").strip() or utc_now(),
         }
 
@@ -3347,13 +3361,117 @@ class ArtifactService:
             )
         return "; ".join(parts) if parts else None
 
+    @staticmethod
+    def _paper_claim_submission_scope(paper_role: Any) -> str:
+        role = str(paper_role or "").strip()
+        if role in {"main_text", "appendix", "reference_only"}:
+            return role
+        return "main_text"
+
+    @staticmethod
+    def _paper_claim_evidence_kind(source_paths: list[str], support_level: str) -> str:
+        joined_paths = " ".join(source_paths).lower()
+        if "literature" in joined_paths or "pubmed" in joined_paths or "evidence_tables" in joined_paths:
+            return "literature"
+        if any(token in joined_paths for token in ("figure", "table", "curve", "calibration", "decision")):
+            return "display"
+        if support_level == "boundary":
+            return "boundary_analysis"
+        return "result"
+
+    def _backfill_paper_evidence_ledger_claims(
+        self,
+        ledger_payload: dict[str, Any],
+        claim_map_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(ledger_payload if isinstance(ledger_payload, dict) else {})
+        existing_claims = [dict(claim) for claim in (normalized.get("claims") or []) if isinstance(claim, dict)]
+        if existing_claims:
+            return normalized
+        claim_map_claims = claim_map_payload.get("claims") if isinstance(claim_map_payload, dict) else None
+        if not isinstance(claim_map_claims, list):
+            return normalized
+
+        backfilled_claims: list[dict[str, Any]] = []
+        for raw_claim in claim_map_claims:
+            if not isinstance(raw_claim, dict):
+                continue
+            claim_id = str(raw_claim.get("claim_id") or "").strip()
+            statement = str(raw_claim.get("statement") or raw_claim.get("claim_text") or "").strip()
+            if not claim_id or not statement:
+                continue
+            paper_role = str(raw_claim.get("paper_role") or "").strip() or "main_text"
+            submission_scope = self._paper_claim_submission_scope(paper_role)
+            evidence_items = raw_claim.get("evidence_items") if isinstance(raw_claim.get("evidence_items"), list) else []
+            evidence_entries: list[dict[str, Any]] = []
+            for index, evidence_item in enumerate(evidence_items, start=1):
+                if not isinstance(evidence_item, dict):
+                    continue
+                source_paths = [str(path).strip() for path in (evidence_item.get("source_paths") or []) if str(path).strip()]
+                support_level = str(evidence_item.get("support_level") or "").strip() or "primary"
+                evidence_entries.append(
+                    {
+                        "evidence_id": str(evidence_item.get("item_id") or f"{claim_id}-evidence-{index}").strip() or f"{claim_id}-evidence-{index}",
+                        "kind": self._paper_claim_evidence_kind(source_paths, support_level),
+                        "source_paths": source_paths,
+                        "support_level": support_level,
+                        "summary": str(evidence_item.get("summary") or statement).strip() or statement,
+                    }
+                )
+            if not evidence_entries:
+                continue
+            risks = [
+                str(item).strip()
+                for item in (raw_claim.get("risks") or raw_claim.get("limitations") or [])
+                if str(item).strip()
+            ]
+            gaps = [
+                {
+                    "gap_id": f"{claim_id}-gap-{index}",
+                    "description": risk,
+                    "submission_impact": "Keep the submission-facing claim inside the current evidence boundary.",
+                }
+                for index, risk in enumerate(risks, start=1)
+            ]
+            if not gaps:
+                gaps = [
+                    {
+                        "gap_id": f"{claim_id}-gap-1",
+                        "description": "This claim should remain bounded to the currently mapped evidence surface.",
+                        "submission_impact": "Avoid extending the claim beyond the mapped cohort, displays, and current validation scope.",
+                    }
+                ]
+            backfilled_claims.append(
+                {
+                    **copy.deepcopy(raw_claim),
+                    "claim_id": claim_id,
+                    "statement": statement,
+                    "status": str(raw_claim.get("status") or "").strip() or "supported",
+                    "submission_scope": submission_scope,
+                    "evidence": evidence_entries,
+                    "gaps": gaps,
+                    "recommended_actions": [
+                        {
+                            "action_id": f"{claim_id}-action-1",
+                            "priority": "required" if submission_scope == "main_text" else "recommended",
+                            "description": "Keep the manuscript wording aligned with the mapped evidence and current interpretation boundary.",
+                        }
+                    ],
+                }
+            )
+        if backfilled_claims:
+            normalized["claims"] = backfilled_claims
+        return normalized
+
     def _render_paper_evidence_ledger_markdown(self, payload: dict[str, Any]) -> str:
         items = [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)]
+        claims = [dict(claim) for claim in (payload.get("claims") or []) if isinstance(claim, dict)]
         lines = [
             "# Paper Evidence Ledger",
             "",
             f"- Selected outline: `{str(payload.get('selected_outline_ref') or 'none').strip() or 'none'}`",
             f"- Item count: `{len(items)}`",
+            f"- Claim count: `{len(claims)}`",
             f"- Updated at: `{str(payload.get('updated_at') or utc_now()).strip() or utc_now()}`",
             "",
             "| Item | Kind | Section | Role | Status | Metrics | Source |",
@@ -3413,6 +3531,86 @@ class ArtifactService:
             else:
                 lines.append("- None recorded.")
             lines.append("")
+        if claims:
+            lines.extend(
+                [
+                    "## Claim Summary",
+                    "",
+                    "| Claim | Scope | Status | Evidence | Gaps | Actions |",
+                    "|---|---|---|---|---|---|",
+                ]
+            )
+            for claim in claims:
+                evidence_count = len([item for item in (claim.get("evidence") or []) if isinstance(item, dict)])
+                gap_count = len([item for item in (claim.get("gaps") or []) if isinstance(item, dict)])
+                action_count = len([item for item in (claim.get("recommended_actions") or []) if isinstance(item, dict)])
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            f"`{str(claim.get('claim_id') or 'unknown').strip() or 'unknown'}`",
+                            str(claim.get("submission_scope") or claim.get("paper_role") or "-"),
+                            str(claim.get("status") or "-"),
+                            str(evidence_count),
+                            str(gap_count),
+                            str(action_count),
+                        ]
+                    )
+                    + " |"
+                )
+            lines.append("")
+            for claim in claims:
+                lines.extend(
+                    [
+                        f"### Claim {str(claim.get('claim_id') or 'unknown').strip() or 'unknown'}",
+                        "",
+                        f"- Statement: {str(claim.get('statement') or claim.get('claim_text') or 'Not recorded.').strip() or 'Not recorded.'}",
+                        f"- Scope: `{str(claim.get('submission_scope') or claim.get('paper_role') or 'unknown').strip() or 'unknown'}`",
+                        f"- Status: `{str(claim.get('status') or 'unknown').strip() or 'unknown'}`",
+                        "",
+                        "#### Evidence",
+                        "",
+                    ]
+                )
+                evidence_entries = [dict(item) for item in (claim.get("evidence") or []) if isinstance(item, dict)]
+                if evidence_entries:
+                    for evidence in evidence_entries:
+                        source_paths = [str(path).strip() for path in (evidence.get("source_paths") or []) if str(path).strip()]
+                        lines.append(
+                            "- "
+                            + f"`{str(evidence.get('evidence_id') or 'unknown').strip() or 'unknown'}`"
+                            + f" ({str(evidence.get('kind') or 'unknown').strip() or 'unknown'}, "
+                            + f"{str(evidence.get('support_level') or 'unknown').strip() or 'unknown'}): "
+                            + f"{str(evidence.get('summary') or 'Not recorded.').strip() or 'Not recorded.'}"
+                        )
+                        if source_paths:
+                            lines.extend([f"  - `{path}`" for path in source_paths])
+                else:
+                    lines.append("- None recorded.")
+                lines.extend(["", "#### Gaps", ""])
+                gaps = [dict(item) for item in (claim.get("gaps") or []) if isinstance(item, dict)]
+                if gaps:
+                    for gap in gaps:
+                        lines.append(
+                            "- "
+                            + f"`{str(gap.get('gap_id') or 'unknown').strip() or 'unknown'}`: "
+                            + f"{str(gap.get('description') or 'Not recorded.').strip() or 'Not recorded.'}"
+                        )
+                else:
+                    lines.append("- None recorded.")
+                lines.extend(["", "#### Recommended Actions", ""])
+                actions = [dict(item) for item in (claim.get("recommended_actions") or []) if isinstance(item, dict)]
+                if actions:
+                    for action in actions:
+                        lines.append(
+                            "- "
+                            + f"`{str(action.get('action_id') or 'unknown').strip() or 'unknown'}`"
+                            + f" [{str(action.get('priority') or 'unknown').strip() or 'unknown'}]: "
+                            + f"{str(action.get('description') or 'Not recorded.').strip() or 'Not recorded.'}"
+                        )
+                else:
+                    lines.append("- None recorded.")
+                lines.append("")
         return "\n".join(lines).rstrip() + "\n"
 
     def _write_paper_evidence_ledger(
@@ -3609,13 +3807,33 @@ class ArtifactService:
                 write_json(path, normalized)
                 repaired_files.append(str(path))
 
+        claim_map_source_path, claim_map_source_payload = self._resolve_paper_json_override(
+            claim_evidence_map_override
+        )
+        if not claim_map_source_payload:
+            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
+                default_paper_roots,
+                "claim_evidence_map.json",
+            )
+        if not claim_map_source_payload:
+            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
+                target_paper_roots,
+                "claim_evidence_map.json",
+            )
+
         ledger_source_path, ledger_source_payload = self._resolve_paper_json_override(evidence_ledger_override)
         if not ledger_source_payload:
             ledger_source_path, ledger_source_payload = self._read_latest_paper_json_payload(
                 default_paper_roots,
                 "evidence_ledger.json",
             )
+        if not ledger_source_payload and claim_map_source_payload:
+            ledger_source_payload = {"schema_version": 1, "selected_outline_ref": None, "items": []}
         if ledger_source_payload:
+            ledger_source_payload = self._backfill_paper_evidence_ledger_claims(
+                ledger_source_payload,
+                claim_map_source_payload,
+            )
             ledger_source_root = (
                 ledger_source_path.parent.parent.resolve(strict=False) if ledger_source_path is not None else active_workspace_root
             )
@@ -3635,19 +3853,6 @@ class ArtifactService:
                     ]
                 )
 
-        claim_map_source_path, claim_map_source_payload = self._resolve_paper_json_override(
-            claim_evidence_map_override
-        )
-        if not claim_map_source_payload:
-            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
-                default_paper_roots,
-                "claim_evidence_map.json",
-            )
-        if not claim_map_source_payload:
-            claim_map_source_path, claim_map_source_payload = self._read_latest_paper_json_payload(
-                target_paper_roots,
-                "claim_evidence_map.json",
-            )
         if claim_map_source_payload:
             claim_map_source_root = (
                 claim_map_source_path.parent.parent.resolve(strict=False) if claim_map_source_path is not None else active_workspace_root
@@ -3875,6 +4080,7 @@ class ArtifactService:
             {
                 "selected_outline_ref": item.get("selected_outline_ref") or ledger.get("selected_outline_ref"),
                 "items": merged_items,
+                "claims": [dict(claim) for claim in (ledger.get("claims") or []) if isinstance(claim, dict)],
             },
             workspace_root=workspace_root,
         )
