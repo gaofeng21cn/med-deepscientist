@@ -530,4 +530,17 @@ export const client = {
       method: 'POST',
       body: JSON.stringify({ name, ...input }),
     }),
+  deepxivTest: (structured: Record<string, unknown>) =>
+    api<{
+      ok: boolean
+      summary?: string
+      warnings?: string[]
+      errors?: string[]
+      details?: Record<string, unknown>
+      results?: Array<Record<string, unknown>>
+      preview?: string
+    }>('/api/config/deepxiv/test', {
+      method: 'POST',
+      body: JSON.stringify({ structured }),
+    }),
 }

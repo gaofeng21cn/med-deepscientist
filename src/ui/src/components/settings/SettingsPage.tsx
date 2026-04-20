@@ -6,6 +6,7 @@ import { MarkdownDocument } from '@/components/plugins/MarkdownDocument'
 import { ProjectsAppBar } from '@/components/projects/ProjectsAppBar'
 import { BaselineSettingsPanel } from '@/components/settings/BaselineSettingsPanel'
 import { ConnectorSettingsForm } from '@/components/settings/ConnectorSettingsForm'
+import { DeepXivSettingsPanel } from '@/components/settings/DeepXivSettingsPanel'
 import { connectorCatalog, type ConnectorName } from '@/components/settings/connectorCatalog'
 import { connectorConfigAutoEnabled } from '@/components/settings/connectorSettingsHelpers'
 import { RegistrySettingsForm } from '@/components/settings/RegistrySettingsForm'
@@ -650,6 +651,30 @@ export function SettingsPage({
     setConnectors(await client.connectors())
   }
 
+  const handleDeepXivConfigSaved = ({
+    structured,
+    revision,
+  }: {
+    structured: Record<string, unknown>
+    revision?: string
+  }) => {
+    setDocument((current) => {
+      if (!current) {
+        return current
+      }
+      return {
+        ...current,
+        revision: revision || current.revision,
+        meta: {
+          ...(current.meta || {}),
+          structured_config: structured,
+        },
+      }
+    })
+    setStructuredDraft(structured)
+    setSaveMessage(t.saved)
+  }
+
   const handleDeleteConnectorProfile = async (connectorName: ConnectorName, profileId: string) => {
     setDeletingProfileKey(`${connectorName}:${profileId}`)
     try {
@@ -918,6 +943,11 @@ export function SettingsPage({
 
                 {document && !isConnectorDocument && !isBaselineDocument ? (
                   <div className="pt-6">
+                    {selectedName === 'config' ? (
+                      <div className="pb-6">
+                        <DeepXivSettingsPanel locale={locale} onSaved={handleDeepXivConfigSaved} />
+                      </div>
+                    ) : null}
                     <RegistrySettingsForm
                       documentName={selectedName as Exclude<ConfigDocumentName, 'connectors' | 'baselines'>}
                       locale={locale}
