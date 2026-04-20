@@ -320,20 +320,6 @@ This is the main public knob for round depth.
 - `user_gated`
   - the agent may raise a blocking decision only when continuation truly depends on the user
 
-**Advanced startup-contract field: `publishability_gate_mode`**
-
-This is an optional paper-mode policy field for users who create or edit startup contracts directly.
-It is not currently exposed as a first-class dialog control.
-
-- `off`
-  - disable the default explicit publishability-gate requirement
-- `warn`
-  - keep publishability judgment visible before paper routing, but treat it as advisory
-- `enforce`
-  - require an explicit publishability gate before paper-facing writing continues
-
-If omitted, DeepScientist follows the default runtime paper-delivery policy.
-
 ### Launch mode
 
 **`launch_mode`**
@@ -579,7 +565,7 @@ Custom launch behavior is explicit:
 ## Operational implications
 
 - The startup contract is durable project state, not only UI state.
-- Prompt building later reads `launch_mode`, `custom_profile`, `publishability_gate_mode`, `review_followup_policy`, `baseline_execution_policy`, `manuscript_edit_mode`, `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` again.
+- Prompt building later reads `launch_mode`, `custom_profile`, `review_followup_policy`, `baseline_execution_policy`, `manuscript_edit_mode`, `entry_state_summary`, `review_summary`, `review_materials`, and `custom_brief` again.
 - This means `Start Research` shapes not just the first turn, but later routing decisions too.
 
 ## Validation checklist

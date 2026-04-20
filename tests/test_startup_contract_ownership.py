@@ -36,7 +36,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "schema_version": 4,
         "user_language": "zh",
         "need_research_paper": True,
-        "publishability_gate_mode": "warn",
+        "publishability_gate_mode": " warn ",
         "decision_policy": "autonomous",
         "control_mode": "copilot",
         "launch_mode": "custom",
@@ -53,7 +53,6 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "schema_version": 4,
         "user_language": "zh",
         "need_research_paper": True,
-        "publishability_gate_mode": "warn",
         "decision_policy": "autonomous",
         "control_mode": "copilot",
         "launch_mode": "custom",
@@ -63,6 +62,7 @@ def test_normalize_startup_contract_preserves_runtime_owned_subset_and_extension
         "manuscript_edit_mode": "latex_required",
     }
     assert module.startup_contract_extensions(payload) == {
+        "publishability_gate_mode": " warn ",
         "scope": "full_research",
         "entry_state_summary": "Study root: /tmp/studies/001-risk",
         "startup_boundary_gate": {"allow_compute_stage": False},
@@ -108,6 +108,10 @@ def test_quest_create_persists_normalized_runtime_owned_subset_and_extensions(te
     assert startup_contract["entry_state_summary"] == "Study root: /tmp/studies/001-risk"
     assert startup_contract["startup_boundary_gate"] == {"allow_compute_stage": False}
 
+    module = importlib.import_module("deepscientist.startup_contract")
+    assert "publishability_gate_mode" not in module.runtime_owned_startup_contract(startup_contract)
+    assert module.startup_contract_extensions(startup_contract)["publishability_gate_mode"] == "enforce"
+
 
 def test_quest_startup_context_patch_roundtrips_controller_owned_extensions(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
@@ -147,11 +151,14 @@ def test_normalize_startup_contract_rejects_invalid_runtime_owned_type() -> None
         module.normalize_startup_contract({"need_research_paper": "yes"})
 
 
-def test_normalize_startup_contract_rejects_invalid_publishability_gate_mode() -> None:
+def test_normalize_startup_contract_keeps_legacy_publishability_gate_mode_as_extension() -> None:
     module = importlib.import_module("deepscientist.startup_contract")
 
-    with pytest.raises(TypeError, match="startup_contract.publishability_gate_mode"):
-        module.normalize_startup_contract({"publishability_gate_mode": "maybe"})
+    normalized = module.normalize_startup_contract({"publishability_gate_mode": "maybe"})
+
+    assert normalized == {"publishability_gate_mode": "maybe"}
+    assert module.runtime_owned_startup_contract(normalized) == {}
+    assert module.startup_contract_extensions(normalized) == {"publishability_gate_mode": "maybe"}
 
 
 def test_normalize_startup_contract_rejects_invalid_control_mode() -> None:

@@ -7,7 +7,6 @@ RUNTIME_OWNED_STARTUP_CONTRACT_KEYS: tuple[str, ...] = (
     "schema_version",
     "user_language",
     "need_research_paper",
-    "publishability_gate_mode",
     "decision_policy",
     "control_mode",
     "launch_mode",
@@ -57,7 +56,6 @@ _OPTIONAL_STRING_RUNTIME_KEYS = {
     "manuscript_edit_mode",
 }
 
-_PUBLISHABILITY_GATE_MODES = {"off", "warn", "enforce"}
 _CONTROL_MODES = {"autonomous", "copilot"}
 
 CONTROL_MODE_COPILOT_CONTINUATION_REASON = "control_mode_copilot"
@@ -73,15 +71,6 @@ def _normalize_runtime_owned_value(*, key: str, value: object) -> Any:
         if not isinstance(value, bool):
             raise TypeError("startup_contract.need_research_paper must be a boolean")
         return value
-    if key == "publishability_gate_mode":
-        if value is None:
-            return None
-        if not isinstance(value, str) or not value.strip():
-            raise TypeError("startup_contract.publishability_gate_mode must be one of off, warn, enforce, or null")
-        normalized = value.strip().lower()
-        if normalized not in _PUBLISHABILITY_GATE_MODES:
-            raise TypeError("startup_contract.publishability_gate_mode must be one of off, warn, enforce, or null")
-        return normalized
     if key == "control_mode":
         if value is None:
             return None

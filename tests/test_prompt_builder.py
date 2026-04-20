@@ -642,8 +642,8 @@ def test_prompt_builder_mentions_long_horizon_no_early_stop_rule(temp_home: Path
         model="gpt-5.4",
     )
 
-    assert "keep advancing until either a credible paper-like deliverable exists" in prompt
-    assert "publishability-gate decision concludes that the current line should stop or branch" in prompt
+    assert "keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope" in prompt
+    assert "publishability-gate decision concludes that the current line should stop or branch" not in prompt
     assert "do not self-stop after one stage or one launched detached run" in prompt
     assert "any new message or `/resume` will continue from the same quest" in prompt
     assert "standby_prefix_rule:" in prompt
@@ -702,15 +702,16 @@ def test_prompt_builder_mentions_algorithm_first_mode_when_paper_disabled(temp_h
     assert "do not self-route into paper work by default" in prompt
 
 
-def test_prompt_builder_can_disable_publishability_gate_rules(temp_home: Path) -> None:
+@pytest.mark.parametrize("legacy_gate_mode", ["off", "warn", "enforce"])
+def test_prompt_builder_ignores_legacy_publishability_gate_mode(temp_home: Path, legacy_gate_mode: str) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
     snapshot = service.create(
-        "paper quest without explicit publishability-gate enforcement",
+        "paper quest with legacy publishability gate mode",
         startup_contract={
             "need_research_paper": True,
-            "publishability_gate_mode": "off",
+            "publishability_gate_mode": legacy_gate_mode,
         },
     )
     builder = PromptBuilder(repo_root(), temp_home)
@@ -722,36 +723,11 @@ def test_prompt_builder_can_disable_publishability_gate_rules(temp_home: Path) -
         model="gpt-5.4",
     )
 
-    assert "publishability_gate_mode: off" in prompt
+    assert "publishability_gate_mode:" not in prompt
     assert "publishability_gate_rule:" not in prompt
     assert "paper_branch_admission_rule:" not in prompt
+    assert "publishability_gate_advisory_rule:" not in prompt
     assert "keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope" in prompt
-
-
-def test_prompt_builder_warn_mode_keeps_gate_advisory(temp_home: Path) -> None:
-    ensure_home_layout(temp_home)
-    ConfigManager(temp_home).ensure_files()
-    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
-    snapshot = service.create(
-        "paper quest with advisory publishability gate",
-        startup_contract={
-            "need_research_paper": True,
-            "publishability_gate_mode": "warn",
-        },
-    )
-    builder = PromptBuilder(repo_root(), temp_home)
-
-    prompt = builder.build(
-        quest_id=snapshot["quest_id"],
-        skill_id="decision",
-        user_message="Decide the next step for this paper quest.",
-        model="gpt-5.4",
-    )
-
-    assert "publishability_gate_mode: warn" in prompt
-    assert "publishability_gate_rule:" in prompt
-    assert "paper_branch_admission_rule:" not in prompt
-    assert "publishability_gate_advisory_rule:" in prompt
 
 
 def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) -> None:
@@ -764,14 +740,16 @@ def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) 
         model="gpt-5.4",
     )
 
-    assert "publishability_gate_mode: enforce" in prompt
-    assert "paper_branch_admission_rule:" in prompt
+    assert "publishability_gate_mode:" not in prompt
+    assert "publishability_gate_rule:" not in prompt
+    assert "paper_branch_admission_rule:" not in prompt
+    assert "review_gate_rule:" in prompt
 
     english_guide = (repo_root() / "docs" / "en" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
     chinese_guide = (repo_root() / "docs" / "zh" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
 
-    assert "Prompt building later reads `launch_mode`, `custom_profile`, `publishability_gate_mode`" in english_guide
-    assert "后续 prompt builder 还会继续读取 `launch_mode`、`custom_profile`、`publishability_gate_mode`" in chinese_guide
+    assert "publishability_gate_mode" not in english_guide
+    assert "publishability_gate_mode" not in chinese_guide
 
 
 def test_prompt_builder_strengthens_standard_optimization_entry_guidance(temp_home: Path) -> None:
