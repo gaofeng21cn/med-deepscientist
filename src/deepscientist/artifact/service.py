@@ -4385,6 +4385,10 @@ class ArtifactService:
             continuation_reason=payload.get("continuation_reason"),
             workspace_root=workspace_root,
         )
+        payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
+        completion_payload = dict(payload)
+        completion_payload["blocking_reasons"] = list(payload.get("completion_blocking_reasons") or [])
+        payload["completion_blocking_reasons"] = self._paper_line_display_blockers(completion_payload)
         for paper_sync_root in self._paper_active_sync_roots(quest_root, workspace_root=workspace_root):
             write_json(paper_sync_root / "paper_line_state.json", payload)
         self._write_paper_line_sync_documents(quest_root, payload, workspace_root=workspace_root)
@@ -10946,6 +10950,7 @@ class ArtifactService:
         startup_contract = self._startup_contract(quest_root)
         raw_need_research_paper = startup_contract.get("need_research_paper")
         need_research_paper = raw_need_research_paper if isinstance(raw_need_research_paper, bool) else True
+        paper_line_branch = str(manifest.get("paper_line_branch") or "").strip() or None
         base_research_state = self.quest_service.update_research_state(
             quest_root,
             active_idea_id=restored_idea_id,
@@ -10964,12 +10969,29 @@ class ArtifactService:
         writing_workspace: dict[str, Any] | None = None
         if need_research_paper:
             try:
-                writing_workspace = self._ensure_active_paper_workspace(
-                    quest_root,
-                    source_branch=parent_branch,
-                    source_run_id=str(manifest.get("parent_run_id") or "").strip() or None,
-                    source_idea_id=restored_idea_id,
-                )
+                if paper_line_branch:
+                    try:
+                        writing_workspace = self.activate_branch(
+                            quest_root,
+                            branch=paper_line_branch,
+                            anchor="write",
+                            promote_to_head=False,
+                            create_worktree_if_missing=True,
+                        )
+                    except Exception:
+                        writing_workspace = self._ensure_active_paper_workspace(
+                            quest_root,
+                            source_branch=parent_branch,
+                            source_run_id=str(manifest.get("parent_run_id") or "").strip() or None,
+                            source_idea_id=restored_idea_id,
+                        )
+                else:
+                    writing_workspace = self._ensure_active_paper_workspace(
+                        quest_root,
+                        source_branch=parent_branch,
+                        source_run_id=str(manifest.get("parent_run_id") or "").strip() or None,
+                        source_idea_id=restored_idea_id,
+                    )
             except Exception:
                 writing_workspace = None
 

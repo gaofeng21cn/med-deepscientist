@@ -1003,6 +1003,84 @@ def test_artifact_managed_git_flow_updates_research_state_and_mirrors_analysis(t
     assert campaign_event["details"]["slice_count"] == 2
 
 
+def test_analysis_campaign_completion_restores_manifest_paper_line_when_parent_is_main(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("analysis campaign main-parent paper restore quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    _confirm_local_baseline(artifact, quest_root)
+
+    custom_paper = artifact.prepare_branch(
+        quest_root,
+        branch="paper/maintenance-sync",
+        branch_kind="paper",
+        start_point="main",
+    )
+    custom_paper_root = Path(custom_paper["worktree_root"])
+    assert custom_paper_root.exists()
+
+    campaign = artifact.create_analysis_campaign(
+        quest_root,
+        campaign_title="Main parent follow-up",
+        campaign_goal="Check that closeout restores the manifest paper line.",
+        selected_outline_ref="outline-001",
+        research_questions=["Can the main-branch follow-up preserve the intended paper line?"],
+        experimental_designs=["Run one comparable sanity check and restore the saved paper line."],
+        todo_items=[
+            {
+                "slice_id": "sanity-check",
+                "title": "Sanity check",
+                "section_id": "main-branch-follow-up",
+                "item_id": "AN-MAIN-BRANCH-001",
+                "paper_role": "supplementary",
+                "claim_links": ["C-main-branch"],
+            }
+        ],
+        slices=[
+            {
+                "slice_id": "sanity-check",
+                "title": "Sanity check",
+                "goal": "Run one small follow-up from the main branch context.",
+                "required_changes": "Keep the parent branch unchanged.",
+                "metric_contract": "Report one comparable metric.",
+            }
+        ],
+    )
+    assert campaign["manifest"]["parent_branch"] == "main"
+
+    manifest = dict(campaign["manifest"])
+    manifest["paper_line_id"] = "paper-line-maintenance-sync"
+    manifest["paper_line_branch"] = custom_paper["branch"]
+    manifest["paper_line_root"] = str(custom_paper_root)
+    artifact._write_analysis_manifest(quest_root, campaign["campaign_id"], manifest)
+
+    completed = artifact.record_analysis_slice(
+        quest_root,
+        campaign_id=campaign["campaign_id"],
+        slice_id="sanity-check",
+        setup="Keep the parent branch fixed.",
+        execution="Ran one comparable follow-up.",
+        results="The closeout should return to the manifest paper line.",
+        metric_rows=[{"metric_id": "acc", "value": 0.81, "direction": "higher_better"}],
+    )
+
+    assert completed["ok"] is True
+    assert completed["completed"] is True
+    assert completed["returned_to_branch"] == "main"
+    assert completed["writing_branch"] == custom_paper["branch"]
+    assert completed["writing_worktree_root"] == str(custom_paper_root)
+
+    final_state = quest_service.read_research_state(quest_root)
+    assert final_state["current_workspace_branch"] == custom_paper["branch"]
+    assert final_state["current_workspace_root"] == str(custom_paper_root)
+    assert quest_service.snapshot(quest["quest_id"])["active_anchor"] == "write"
+
+
 def test_submit_idea_candidate_mode_records_branchless_candidate_then_allows_promotion(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -6388,6 +6466,130 @@ def test_render_paper_line_status_and_summary_surface_metadata_only_blocker_deta
     assert "- The title-page and declaration packet still needs externally confirmed final author order, affiliation numbering/map, corresponding-author contact details, and paste-ready wording for funding, conflicts of interest, authors' contributions, ethics approval plus identifier, consent / waiver, and data availability." in summary_text
 
 
+def test_write_paper_line_state_normalizes_metadata_only_blocking_reasons(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    artifact = ArtifactService(temp_home)
+    quest_root = temp_home / "quests" / "paper-line-write-state"
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n", encoding="utf-8")
+    write_json(paper_root / "paper_bundle_manifest.json", {"status": "present"})
+    selected_outline_path = paper_root / "selected_outline.json"
+    write_json(
+        selected_outline_path,
+        {
+            "outline_id": "outline-001",
+            "title": "Route Sync Outline",
+            "sections": [],
+        },
+    )
+
+    detailed_blocker = (
+        "The title-page and declaration packet still needs externally confirmed final author order, "
+        "affiliation numbering/map, corresponding-author contact details, and paste-ready wording for "
+        "funding, conflicts of interest, authors' contributions, ethics approval plus identifier, "
+        "consent / waiver, and data availability."
+    )
+
+    monkeypatch.setattr(artifact.quest_service, "read_research_state", lambda _quest_root: {})
+    monkeypatch.setattr(
+        artifact.quest_service,
+        "snapshot",
+        lambda _quest_id: {
+            "active_anchor": "write",
+            "continuation_policy": "auto",
+            "continuation_anchor": "write",
+            "continuation_reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        artifact,
+        "_read_selected_outline_for_sync",
+        lambda _quest_root, workspace_root=None: (
+            selected_outline_path,
+            {
+                "outline_id": "outline-001",
+                "title": "Route Sync Outline",
+                "sections": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(artifact, "_normalize_outline_sections", lambda sections, experimental_designs=None: [])
+    monkeypatch.setattr(artifact, "_read_paper_evidence_ledger", lambda _quest_root: {})
+    monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda _quest_root, workspace_root=None: None)
+    monkeypatch.setattr(
+        artifact,
+        "_paper_contract_health_payload",
+        lambda *args, **kwargs: {
+            "contract_ok": True,
+            "writing_ready": True,
+            "audit_package_ready": True,
+            "finalize_ready": False,
+            "closure_state": "audit_ready_with_blockers",
+            "delivery_state": "audit_ready",
+            "keep_bundle_fixed_by_default": False,
+            "unresolved_required_count": 0,
+            "unmapped_completed_count": 0,
+            "blocking_reasons": ["submission packaging checklist still has 1 blocking item(s)"],
+            "completion_blocking_reasons": ["submission packaging checklist still has 1 blocking item(s)"],
+            "submission_blocking_items": [detailed_blocker],
+            "submission_blocking_item_details": [
+                {
+                    "item_id": "CHK-011",
+                    "title": (
+                        "Title page, manuscript Declarations, authorship metadata, affiliations, and final "
+                        "submission declarations still require the externally confirmed packet"
+                    ),
+                    "status": "open_blocker",
+                    "next_action": "Fill the metadata confirmation template.",
+                }
+            ],
+            "metadata_closeout": {
+                "status": "external_metadata_blocker_only",
+                "field_status_summary": {
+                    "total_open_fields": 15,
+                    "external_confirmation_required": 11,
+                    "local_candidate_needs_external_confirmation": 2,
+                    "optional_external_confirmation": 2,
+                },
+            },
+            "recommended_next_stage": "write",
+            "recommended_action": "finish_proofing_and_submission_checks",
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "managed_publication_gate_clear": True,
+            "managed_publication_gate_gap_summaries": [],
+            "reference_materialization_ready": True,
+            "bibliography_ready": True,
+            "bibliography_entry_count": 32,
+            "references_path": str(paper_root / "references.bib"),
+            "literature_ready": True,
+            "literature_record_count": 32,
+            "literature_record_counts": {"pubmed": 32, "imported": 0},
+            "literature_record_paths": [],
+            "human_milestone": {
+                "milestone_label_zh": "已达成",
+                "status_summary_zh": "内容里程碑已达成。",
+            },
+            "status_narration_contract": {},
+        },
+    )
+
+    payload = artifact._write_paper_line_state(quest_root)
+    written_payload = read_json(paper_root / "paper_line_state.json", {})
+
+    assert payload["blocking_reasons"] == [detailed_blocker]
+    assert payload["completion_blocking_reasons"] == [detailed_blocker]
+    assert written_payload["blocking_reasons"] == [detailed_blocker]
+    assert written_payload["completion_blocking_reasons"] == [detailed_blocker]
+    assert "submission packaging checklist still has 1 blocking item(s)" not in " ".join(payload["blocking_reasons"])
+
+
 def test_read_quest_documents_accepts_single_string_without_comma_splitting(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -7207,6 +7409,9 @@ def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checkl
     joined = " ".join(health["blocking_reasons"])
     assert "Ethics declaration is still missing." in joined
     assert "submission packaging checklist still has 1 blocking item(s)" not in joined
+    narrated_blockers = " ".join(health["status_narration_contract"]["current_blockers"])
+    assert "Ethics declaration is still missing." in narrated_blockers
+    assert "submission packaging checklist still has 1 blocking item(s)" not in narrated_blockers
 
 
 def test_get_paper_contract_health_accepts_schema_v1_submission_checklist_surface(temp_home: Path) -> None:

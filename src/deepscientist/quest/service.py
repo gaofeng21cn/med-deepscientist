@@ -4147,10 +4147,15 @@ class QuestService:
                 "(`paper/review/submission_checklist.json`)"
             )
         elif submission_blocking_item_count > 0:
-            blocking_reasons.append(
-                "submission packaging checklist still has "
-                f"{submission_blocking_item_count} blocking item(s)"
-            )
+            if submission_blocking_items:
+                blocking_reasons.extend(
+                    item for item in submission_blocking_items if item not in blocking_reasons
+                )
+            else:
+                blocking_reasons.append(
+                    "submission packaging checklist still has "
+                    f"{submission_blocking_item_count} blocking item(s)"
+                )
         elif not submission_checklist_handoff_ready:
             status_bits = [item for item in (submission_checklist_status, submission_checklist_package_status) if item]
             if nonfinal_write_review_maintenance_only:
