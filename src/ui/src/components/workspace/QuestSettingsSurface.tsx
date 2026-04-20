@@ -29,6 +29,8 @@ type RunnerEnvRow = {
   value: string
 }
 
+type ControlMode = 'copilot' | 'autonomous'
+
 const DEFAULT_CODEX_ENV_KEYS = ['OPENAI_BASE_URL', 'OPENAI_API_KEY'] as const
 
 function normalizeRunnerEnvRows(raw: unknown): RunnerEnvRow[] {
@@ -62,6 +64,10 @@ function runnerEnvRowsToPayload(rows: RunnerEnvRow[]): Record<string, string> {
     payload[key] = value
   }
   return payload
+}
+
+function normalizeControlMode(value: unknown): ControlMode {
+  return String(value || '').trim().toLowerCase() === 'copilot' ? 'copilot' : 'autonomous'
 }
 
 function connectorLabel(connector: ConnectorSnapshot, fallbackConnectorLabel: string) {
@@ -174,6 +180,13 @@ export function QuestSettingsSurface({
   const [savedRunnerEnvRows, setSavedRunnerEnvRows] = React.useState<RunnerEnvRow[]>(() =>
     normalizeRunnerEnvRows({})
   )
+  const [controlMode, setControlMode] = React.useState<ControlMode>(() =>
+    normalizeControlMode((snapshot?.startup_contract as Record<string, unknown> | null | undefined)?.control_mode)
+  )
+  const [savedControlMode, setSavedControlMode] = React.useState<ControlMode>(() =>
+    normalizeControlMode((snapshot?.startup_contract as Record<string, unknown> | null | undefined)?.control_mode)
+  )
+  const [controlModeSaving, setControlModeSaving] = React.useState(false)
 
   const theme = useThemeStore((state) => state.theme)
   const setTheme = useThemeStore((state) => state.setTheme)
@@ -217,6 +230,16 @@ export function QuestSettingsSurface({
   React.useEffect(() => {
     void reloadRunnerEnv()
   }, [reloadRunnerEnv])
+
+  React.useEffect(() => {
+    const startupContract =
+      snapshot?.startup_contract && typeof snapshot.startup_contract === 'object'
+        ? (snapshot.startup_contract as Record<string, unknown>)
+        : {}
+    const nextMode = normalizeControlMode(startupContract.control_mode)
+    setControlMode(nextMode)
+    setSavedControlMode(nextMode)
+  }, [questId, snapshot?.startup_contract])
 
   React.useEffect(() => {
     if (!connectors.length) {
@@ -400,6 +423,49 @@ export function QuestSettingsSurface({
     ],
     []
   )
+  const controlModeItems = React.useMemo(
+    () => [
+      { value: 'copilot' as ControlMode, label: t('quest_settings_mode_copilot') },
+      { value: 'autonomous' as ControlMode, label: t('quest_settings_mode_autonomous') },
+    ],
+    [t]
+  )
+
+  const saveControlMode = React.useCallback(async () => {
+    const startupContract =
+      snapshot?.startup_contract && typeof snapshot.startup_contract === 'object'
+        ? ({ ...(snapshot.startup_contract as Record<string, unknown>) } as Record<string, unknown>)
+        : {}
+    setControlModeSaving(true)
+    try {
+      const result = await client.updateQuestStartupContext(questId, {
+        startup_contract: {
+          ...startupContract,
+          control_mode: controlMode,
+        },
+      })
+      setSavedControlMode(controlMode)
+      await onRefresh()
+      toast({
+        title: t('quest_settings_mode_saved_title'),
+        description:
+          controlMode === 'copilot'
+            ? t('quest_settings_mode_saved_desc_copilot')
+            : t('quest_settings_mode_saved_desc_autonomous'),
+      })
+      if (!result.ok) {
+        return
+      }
+    } catch (error) {
+      toast({
+        title: 'Save failed',
+        description: error instanceof Error ? error.message : 'Unable to update control mode.',
+        variant: 'destructive',
+      })
+    } finally {
+      setControlModeSaving(false)
+    }
+  }, [controlMode, onRefresh, questId, snapshot?.startup_contract, t, toast])
 
   const saveRunnerEnv = React.useCallback(async () => {
     setRunnerEnvSaving(true)
@@ -441,6 +507,7 @@ export function QuestSettingsSurface({
     () => JSON.stringify(runnerEnvRows) !== JSON.stringify(savedRunnerEnvRows),
     [runnerEnvRows, savedRunnerEnvRows]
   )
+  const controlModeDirty = controlMode !== savedControlMode
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden p-4 sm:p-5">
@@ -484,6 +551,44 @@ export function QuestSettingsSurface({
               <div className="text-xs text-muted-foreground">
                 This setting applies to the whole web workspace (not just this project).
               </div>
+            </div>
+          </EnhancedCard>
+
+          <EnhancedCard
+            enableSpotlight={false}
+            className="border border-border/60 bg-[var(--ds-panel-elevated)]/70 backdrop-blur-xl shadow-[var(--ds-shadow-md)]"
+          >
+            <div className="p-4 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-foreground">{t('quest_settings_mode_title')}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{t('quest_settings_mode_desc')}</div>
+                  {controlModeDirty ? (
+                    <div className="mt-2 text-xs font-medium text-[var(--ds-brand)]">
+                      {t('quest_settings_mode_unsaved')}
+                    </div>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void saveControlMode()}
+                  disabled={controlModeSaving || !controlModeDirty}
+                >
+                  <Link2 className="mr-2 h-4 w-4" />
+                  {t('quest_settings_mode_save')}
+                </Button>
+              </div>
+
+              <Separator className="bg-border/50" />
+
+              <SegmentedControl
+                value={controlMode}
+                onValueChange={(value) => setControlMode(normalizeControlMode(value))}
+                items={controlModeItems}
+                size="sm"
+                ariaLabel={t('quest_settings_mode_title')}
+              />
             </div>
           </EnhancedCard>
 

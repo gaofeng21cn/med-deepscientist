@@ -24,3 +24,29 @@ def test_ui_safe_json_contracts_are_wired_into_workspace_surfaces() -> None:
     assert "safeJsonStringify(value)" in lab_source
     assert "safeStableStringify(a.customData) === safeStableStringify(b.customData)" in tabs_source
     assert "sanitizeJsonRecord(tab.context.customData)" in tabs_source
+
+
+def test_deepxiv_setup_dialog_uses_live_draft_for_test_and_save() -> None:
+    dialog_source = _read("src/ui/src/components/settings/DeepXivSetupDialog.tsx")
+
+    assert "const nextStructuredDraft = mergeDraft(document, draft)" in dialog_source
+    assert "const result = await client.deepxivTest(nextStructuredDraft)" in dialog_source
+    assert "structured: nextStructuredDraft" in dialog_source
+    assert "setDocument((current) =>" in dialog_source
+    assert "structured_config: nextStructuredDraft" in dialog_source
+
+
+def test_quest_settings_surface_routes_control_mode_through_startup_context() -> None:
+    surface_source = _read("src/ui/src/components/workspace/QuestSettingsSurface.tsx")
+    api_source = _read("src/ui/src/lib/api.ts")
+    messages_source = _read("src/ui/src/lib/i18n/messages/workspace.ts")
+
+    assert "type ControlMode = 'copilot' | 'autonomous'" in surface_source
+    assert "client.updateQuestStartupContext" in surface_source
+    assert "control_mode: controlMode" in surface_source
+    assert "quest_settings_mode_title" in messages_source
+    assert "quest_settings_mode_save" in messages_source
+    assert "quest_settings_mode_saved_desc_copilot" in messages_source
+    assert "quest_settings_mode_saved_desc_autonomous" in messages_source
+    assert "updateQuestStartupContext" in api_source
+    assert "`/api/quests/${questId}/startup-context`" in api_source or "/api/quests/${questId}/startup-context" in api_source

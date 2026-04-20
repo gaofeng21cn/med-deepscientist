@@ -145,6 +145,17 @@ export const client = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
+  updateQuestStartupContext: (
+    questId: string,
+    payload: {
+      requested_baseline_ref?: { baseline_id: string; variant_id?: string | null } | null
+      startup_contract?: Record<string, unknown> | null
+    }
+  ) =>
+    api<{ ok: boolean; quest_id: string; snapshot: QuestSummary }>(`/api/quests/${questId}/startup-context`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
   updateQuestBindings: async (
     questId: string,
     payload: {

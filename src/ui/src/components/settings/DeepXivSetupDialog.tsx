@@ -294,6 +294,18 @@ export function DeepXivSetupDialog({
         setError(result.message || '')
         return
       }
+      setDocument((current) =>
+        current
+          ? {
+              ...current,
+              revision: result.revision || current.revision,
+              meta: {
+                ...(current.meta || {}),
+                structured_config: nextStructuredDraft,
+              },
+            }
+          : current
+      )
       onSaved?.({ structured: nextStructuredDraft, revision: result.revision || document.revision })
       onClose()
     } catch (saveError) {
