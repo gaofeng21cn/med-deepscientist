@@ -1,8 +1,8 @@
 # MedDeepScientist Docs
 
-MedDeepScientist (`med-deepscientist` 仓库) is the controlled runtime fork that `MedAutoScience` uses as its execution engine.
+MedDeepScientist (`med-deepscientist` repo) is the stable runtime substrate that `MedAutoScience` uses as its execution engine.
 
-This repository is framed as a purpose-driven, semi-independent runtime layer: it keeps `MedAutoScience` running on a known-good baseline while avoiding the high compatibility costs that come with every upstream prompt, skill, or workflow change. When valuable upstream work fits our compatibility contract, it joins this fork through the audited intake flow so the runtime keeps evolving without forcing downstream workspaces to chase every update.
+This repository began as a controlled runtime fork and now serves a clearer long-line role: it preserves a known-good execution seam, narrows the runtime contract, and absorbs selected upstream improvements through audited intake so `MedAutoScience` can keep moving without repeated compatibility churn.
 
 This docs index is for the runtime repository itself. Most medical users should start from `MedAutoScience`. This repository matters when you need to understand:
 
@@ -73,6 +73,6 @@ These documents still describe the underlying runtime behavior that this fork cu
 
 ## Note On Scope
 
-This repository is deliberately narrower than upstream `DeepScientist`.
+This repository stays narrower than upstream `DeepScientist`.
 
-Its job is not to become a separate medical orchestration product. Its job is to provide a stable, auditable runtime layer so `MedAutoScience` does not have to continuously re-adapt to upstream compatibility drift. The adoption plan keeps MedAutoScience at the front, while MedDeepScientist (`med-deepscientist` 仓库) focuses on runtime guardianship and letting the medical orchestration layer absorb any remaining upstream improvements.
+Its role is stable runtime guardianship, contract convergence, and audited capability intake. The long-line target is a family runtime surface with lower adapter cost and clearer ownership boundaries, while `MedAutoScience` continues to own orchestration and medical product entry.

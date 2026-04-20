@@ -2,8 +2,9 @@
 
 ## 当前定位
 
-- 仓库角色：`MedAutoScience` 的受控 runtime 分支
+- 仓库角色：`MedAutoScience` 的稳定 runtime substrate，当前通过受控 fork 形态维护
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
+- 长线方向：把 runtime surface 收敛成 family 级稳定合同，repo 边界保持可演进
 - 当前执行真相：最底层 AI 执行继续通过 `CodexRunner -> codex exec autonomous agent loop` 落地；默认 `model / reasoning` 继承本机 `Codex` 默认配置，而不是 repo-local pin 固定型号
 - 当前 opt-in proof lane：显式 `executor_kind = hermes_native_proof` 时，可路由到 `HermesNativeProofRunner -> run_agent.AIAgent.run_conversation`；它只接受真实 full agent loop proof，不接受 chat-only relay
 - 当前 `claude` / `opencode` 只保留为 reserved experimental runner ids；当前 release 只维护 config / doc / test contract，不开放真实 runner 产品面
@@ -49,6 +50,7 @@
 2. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
 3. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
 4. 让 upstream intake 继续通过审计与验证推进，而不是零散吸收。
+5. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
 
 ## 默认验证
 

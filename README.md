@@ -1,128 +1,110 @@
 # MedDeepScientist
 
-MedDeepScientist (`med-deepscientist` repo) is a controlled runtime fork of [DeepScientist](https://github.com/ResearAI/DeepScientist).
+MedDeepScientist (`med-deepscientist` repo) is the stable runtime substrate that `MedAutoScience` uses for long-running autonomous medical research execution.
 
-It exists to preserve the long-running autonomous runtime that `MedAutoScience` depends on, because upstream changes in prompts, skills, workflow defaults, or runtime surfaces tend to trigger expensive compatibility work for medical workspaces. Freezing a known-good baseline and accepting only audited intake keeps that runtime truth stable while MedAutoScience converges on a narrower runtime protocol.
+The repository started from a controlled DeepScientist fork. Today it serves a broader and clearer role: it is the audited runtime surface where we preserve durable quest execution, tighten the `MedAutoScience -> MedDeepScientist` contract, and selectively absorb upstream improvements that carry clear runtime value.
 
-The primary engineering priority is not to follow upstream continuously. The primary engineering priority is to make `MedDeepScientist` a cleaner, narrower, and more stable runtime for `MedAutoScience`, so the medical stack can reduce adapter debt and rely on an explicit runtime protocol.
+The long-line target is a family runtime surface with lower compatibility cost, clearer ownership boundaries, and less adapter debt. This repository remains the current delivery vehicle for that work.
 
-This repository is not a hostile rewrite of DeepScientist. It is a thin, audited fork that:
+## What It Is Now
 
-- freezes a known-good upstream baseline
-- records every absorbed patch in machine-readable and human-readable audit surfaces
-- accepts upstream changes only through a controlled intake workflow
-- keeps the runtime behavior stable while `MedAutoScience` converges on a narrower runtime protocol
+MedDeepScientist currently carries four responsibilities:
 
+- provide the stable quest / daemon / durable workspace runtime that `MedAutoScience` depends on
+- preserve the long-horizon execution loop inherited from DeepScientist
+- narrow the runtime protocol and document it as an explicit compatibility contract
+- absorb useful upstream changes through audited intake, focused regression, and fast closeout
 
-## Why this fork exists
+## Why It Exists
 
-Upstream DeepScientist is strong at exactly the capability we want to keep:
+Upstream DeepScientist moves quickly across prompts, skills, workflows, connectors, and product surfaces. `MedAutoScience` needs a steadier runtime seam so medical workspaces can keep running without paying a migration cost every time the upstream product shifts.
 
-- long-running autonomous execution
-- bounded-task persistence with little human intervention
-- quest/worktree based durable state
-- a real runtime instead of a stateless chat wrapper
+MedDeepScientist gives the stack a place to:
 
-But upstream DeepScientist is optimized as a fast-moving product for frontier AI research workflows, not as a high-compatibility downstream runtime contract.
+- keep runtime truth durable and inspectable
+- retire implicit adapter assumptions with tests and policy docs
+- preserve useful upstream capabilities without sweeping in broad product churn
+- make every absorbed change auditable and reversible
 
-For a medical research operating layer, that creates unnecessary cost:
+## Stack Relationship
 
-- prompt changes can alter manuscript-facing behavior
-- skill changes can break downstream overlays or policy assumptions
-- runtime/layout changes can invalidate controller expectations
-- undocumented workflow drift can turn a normal upgrade into a migration project
+- `DeepScientist`: upstream capability source
+- `MedDeepScientist`: runtime substrate and audited intake surface
+- `MedAutoScience`: orchestration, policy, controller, and medical entrypoint
 
-MedDeepScientist exists to cap that cost.
-
-## Relationship to the rest of the stack
-
-- `DeepScientist`: upstream source of runtime capability and future improvements
-- `MedDeepScientist`: controlled runtime fork used as the stable execution engine
-- `MedAutoScience`: medical orchestration layer, policy layer, controller layer, and public entrypoint
-
-For medical workflows, humans and agents should enter through `MedAutoScience`, not through legacy DeepScientist entrypoints directly.
-
-The intended stack is:
+Medical users should enter through `MedAutoScience`. This repository is the runtime and compatibility layer underneath.
 
 ```text
 human / automation
         ->
 MedAutoScience
         ->
-runtime_protocol / runtime_transport
+runtime protocol / runtime transport
         ->
-MedDeepScientist (`med-deepscientist` repo)
+MedDeepScientist
         ->
-quest runtime / daemon / worktrees
+quest runtime / daemon / worktrees / artifact surfaces
 ```
 
-## What is stable here
+## Current Execution Truth
 
-The minimal stable runtime surface is defined by [`docs/policies/runtime_protocol.md`](docs/policies/runtime_protocol.md). When this README conflicts with implementation details, treat that protocol spec as authoritative for `MedAutoScience` adapter compatibility.
+The current default execution chain is:
 
-This repository is responsible for keeping these boundaries explicit and auditable:
+`daemon API -> RunRequest -> CodexRunner -> codex exec autonomous agent loop`
 
-- upstream freeze baseline
+Current runtime facts:
+
+- default runner: `codex`
+- default model / reasoning: inherit from the local Codex configuration
+- opt-in proof lane: `hermes_native_proof`
+- reserved experimental runner ids: `claude`, `opencode`
+- stable compatibility spec: [`docs/policies/runtime_protocol.md`](docs/policies/runtime_protocol.md)
+
+This means the repo tracks a stable runtime contract first, then selected execution surfaces that fit that contract.
+
+## What This Repo Owns
+
+The repository is responsible for keeping these surfaces explicit and auditable:
+
 - runtime identity and fork metadata
-- daemon API shape expected by `MedAutoScience`
-- quest layout and worktree layout
-- quest-owned native runtime truth (`artifacts/reports/runtime_events/latest.json`)
-- controlled intake process for upstream absorption
+- daemon API shape used by `MedAutoScience`
+- quest layout and durable workspace layout
+- runtime-owned artifact truth
+- runner metadata and executor contract boundaries
+- controlled upstream intake workflow
 
-It is intentionally not trying to become a second full product strategy on top of upstream.
+## Long-Line Direction
 
-## Sustained evolution
+The long-line target is more specific than “keep a frozen fork alive”.
 
-MedAutoScience and MedDeepScientist evolve together:
+We are converging toward:
 
-- the runtime stays restrained by compatibility contracts and documented intake so that every patch carries verifiable value
-- the medical orchestration layer iterates on controllers, overlays, policies, and runtime protocol while keeping the runtime view clear
-- the main line of work is improving `MedAutoScience -> MedDeepScientist` compatibility and removing unnecessary adapter assumptions
-- valuable upstream improvements continue to flow in when they pass intake, regression, and audit checks rather than being swept in wholesale
+- a narrow and explicit family runtime protocol
+- fewer repo-local adapter assumptions in `MedAutoScience`
+- clearer ownership split: runtime truth stays here, orchestration and product behavior live higher in the stack
+- compatibility shells that can retire on evidence instead of guesswork
+- a flexible repo boundary: this repository can remain the audited runtime surface, or later fold into a family mainline when that creates a cleaner operational model
 
-This dual track lets us keep improving the runtime while still absorbing useful upstream work without forcing downstream teams to constantly requalify their workspaces.
+The engineering goal is steady contract convergence, lower maintenance cost, and selective capability absorption.
 
-## Naming and compatibility policy
+## Upstream Intake
 
-The public project name is now `MedDeepScientist` (repository `med-deepscientist`).
+We continue to absorb valuable upstream work.
 
-To avoid breaking active integrations too early, several internal compatibility shells remain in place for now:
+The intake rule is simple:
 
-- Python package/import namespace: `deepscientist`
-- launcher command: `ds`
-- default runtime home: `~/DeepScientist`
+1. inspect the upstream delta against current `MedAutoScience` needs
+2. absorb only the bounded slice that has clear runtime value
+3. run focused fork-local regression
+4. run compatibility verification against the final merged state
+5. update audit surfaces and close the worktree quickly
 
-Those legacy names are treated as compatibility surfaces, not as the long-term public project identity.
+Useful intake candidates usually fall into these buckets:
 
-## Upstream intake policy
-
-We still want useful upstream improvements.
-
-The rule is not "never sync upstream". The rule is "never sync upstream blindly".
-
-It is also not "inspect every upstream commit one by one".
-
-Most upstream commits do not deserve immediate engineering time in this fork. Intake is a periodic, trigger-based maintenance action, not the main delivery stream.
-
-When upstream ships a change that is actually valuable, we try to absorb it through the documented intake flow:
-
-1. inspect the upstream delta from `MedAutoScience`
-2. absorb only selected commits or a clearly bounded change set
-3. run fork-local regression
-4. run `MedAutoScience` compatibility regression
-5. update the audit surfaces
-6. only then let the change return to the stable line
-
-In practice, we prefer to spend time on:
-
-- runtime compatibility with `MedAutoScience`
-- runtime protocol convergence
-- adapter retirement and boundary cleanup
 - deterministic runtime correctness fixes
-
-We only start a new intake round when there is a bounded upstream change set with clear runtime value, or when we intentionally run a periodic upstream review.
-
-That means we keep benefiting from upstream progress without forcing every downstream medical workspace to act like a canary.
+- packaging and operator reliability fixes
+- narrow daemon / runner / durable-layout improvements
+- documentation or contract clarifications that remove ambiguity
 
 See:
 
@@ -130,25 +112,16 @@ See:
 - [docs/medical_fork_baseline.md](docs/medical_fork_baseline.md)
 - [MEDICAL_FORK_MANIFEST.json](MEDICAL_FORK_MANIFEST.json)
 
-## Current roadmap
+## Compatibility Names
 
-### Phase 1
+Public identity and compatibility shells currently coexist:
 
-- freeze a usable upstream baseline
-- carry only audited bugfixes and compatibility fixes
-- expose controlled-fork metadata to `MedAutoScience`
+- public project name: `MedDeepScientist`
+- Python package/import namespace: `deepscientist`
+- launcher command: `ds`
+- default runtime home: `~/DeepScientist`
 
-### Phase 2
-
-- converge `MedAutoScience` onto a narrow runtime protocol
-- reduce implicit assumptions about upstream skill precedence and adapter behavior
-- keep runtime truth stable while controller truth moves upward
-
-### Phase 3
-
-- retire unnecessary legacy coupling
-- make the public identity fully consistent with MedDeepScientist
-- keep upstream intake sustainable instead of ad hoc
+These names stay in place while the runtime contract and family entrypoints continue to converge.
 
 ## Documentation
 
@@ -158,23 +131,19 @@ See:
 - [Architecture](docs/architecture.md)
 - [Invariants](docs/invariants.md)
 - [Decisions](docs/decisions.md)
-- [Minimal stable runtime protocol](docs/policies/runtime_protocol.md)
+- [Stable runtime protocol](docs/policies/runtime_protocol.md)
+- [Runner contract](docs/policies/runner_contract.md)
+- [System visibility contract](docs/policies/system_visibility_contract.md)
 - [Windows + WSL2 deployment guide](docs/en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
-- [Windows WSL2 setup skill for AI agents](src/skills/windows-wsl2-setup/SKILL.md)
 - [English docs index](docs/en/README.md)
 - [Chinese docs index](docs/zh/README.md)
-- [External controller guide](docs/en/19_EXTERNAL_CONTROLLER_GUIDE.md)
-- [Upstream intake workflow](docs/upstream_intake.md)
-- [Fork baseline and audit log](docs/medical_fork_baseline.md)
-- [Maintainer architecture reference](docs/en/90_ARCHITECTURE.md)
-- [Maintainer development guide](docs/en/91_DEVELOPMENT.md)
 
-## If you are here to use the medical stack
+## If You Are Here To Use The Medical Stack
 
 Start from `MedAutoScience`.
 
-This repository is the runtime layer under it, not the recommended top-level medical entrypoint.
+MedDeepScientist is the runtime substrate and maintainer-facing compatibility surface under it.
 
-## License and attribution
+## License and Attribution
 
-This repository remains an Apache-2.0 project and builds on the upstream DeepScientist open-source codebase.
+This repository remains Apache-2.0 and builds on the DeepScientist open-source codebase.
