@@ -14,6 +14,22 @@ def _read(path: str) -> str:
 
 def test_backend_routes_cover_shared_web_and_tui_surface() -> None:
     expected_routes = [
+        ("GET", "/api/system/overview", "system_overview"),
+        ("GET", "/api/system/quests", "system_quests"),
+        ("GET", "/api/system/quests/q-001/summary", "system_quest_summary"),
+        ("GET", "/api/system/runtime/sessions", "system_runtime_sessions"),
+        ("GET", "/api/system/logs/sources", "system_log_sources"),
+        ("GET", "/api/system/logs/daemon/tail", "system_log_tail"),
+        ("GET", "/api/system/failures", "system_failures"),
+        ("GET", "/api/system/runtime-tools", "system_runtime_tools"),
+        ("GET", "/api/system/hardware", "system_hardware"),
+        ("GET", "/api/system/charts", "system_chart_catalog"),
+        ("GET", "/api/system/charts/quest_status_counts", "system_chart_query"),
+        ("GET", "/api/system/stats/summary", "system_stats_summary"),
+        ("GET", "/api/system/search", "system_search"),
+        ("GET", "/api/admin/system/overview", "system_overview"),
+        ("GET", "/api/admin/log-sources", "system_log_sources"),
+        ("GET", "/api/admin/logs/daemon/tail", "system_log_tail"),
         ("GET", "/api/system/update", "system_update"),
         ("POST", "/api/system/update", "system_update_action"),
         ("GET", "/api/baselines", "baselines"),
@@ -100,6 +116,7 @@ def test_backend_routes_cover_shared_web_and_tui_surface() -> None:
 
 def test_web_client_uses_acp_and_git_surface_expected_by_backend() -> None:
     source = _read("src/ui/src/lib/api.ts")
+    admin_source = _read("src/ui/src/lib/api/admin.ts")
     bash_source = _read("src/ui/src/lib/api/bash.ts")
     arxiv_source = _read("src/ui/src/lib/api/arxiv.ts")
     lab_source = _read("src/ui/src/lib/api/lab.ts")
@@ -151,6 +168,24 @@ def test_web_client_uses_acp_and_git_surface_expected_by_backend() -> None:
 
     for fragment in expected_fragments:
         assert fragment in source, f"Web API client is missing contract fragment: {fragment}"
+
+    admin_fragments = [
+        "/api/system/overview",
+        "/api/system/quests",
+        "/api/system/runtime/sessions",
+        "/api/system/logs/sources",
+        "/api/system/logs/${encodeURIComponent(sourceId)}/tail",
+        "/api/system/failures",
+        "/api/system/runtime-tools",
+        "/api/system/hardware",
+        "/api/system/charts",
+        "/api/system/charts/${encodeURIComponent(chartId)}",
+        "/api/system/stats/summary",
+        "/api/system/search",
+    ]
+
+    for fragment in admin_fragments:
+        assert fragment in admin_source, f"Admin system API client is missing contract fragment: {fragment}"
 
     bash_fragments = [
         "/api/quests/${projectId}/bash/sessions",

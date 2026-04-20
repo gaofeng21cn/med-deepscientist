@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 
+from ...admin import ReadOnlySystemService
 from ...acp import OptionalACPBridge, build_session_descriptor, build_session_update, get_acp_bridge_status
 from ...bash_exec.service import DEFAULT_TERMINAL_SESSION_ID
 from ... import __version__ as DEEPSCIENTIST_VERSION
@@ -60,6 +61,18 @@ class ApiHandlers:
 
     def _fresh_memory_service(self) -> MemoryService:
         return MemoryService(self.app.home)
+
+    def _system_service(self) -> ReadOnlySystemService:
+        return ReadOnlySystemService(self.app)
+
+    @staticmethod
+    def _query_limit(query: dict[str, list[str]], *, default: int, key: str = "limit", maximum: int = 500) -> int:
+        raw = ((query.get(key) or [str(default)])[0] or str(default)).strip()
+        try:
+            resolved = int(raw)
+        except ValueError:
+            return default
+        return max(1, min(resolved, maximum))
 
     def root(self) -> tuple[int, dict, str]:
         dist_root = self._ui_dist_root()
@@ -200,6 +213,71 @@ npm --prefix src/ui run build</pre>
             "pid": os.getpid(),
             "sessions": self.app.sessions.snapshot(),
         }
+
+    def system_overview(self) -> dict:
+        return self._system_service().overview()
+
+    def system_quests(self, path: str) -> dict:
+        query = self.parse_query(path)
+        return self._system_service().quests(
+            status=((query.get("status") or [""])[0] or "").strip() or None,
+            query=((query.get("q") or [""])[0] or "").strip() or None,
+            limit=self._query_limit(query, default=200),
+        )
+
+    def system_quest_summary(self, quest_id: str) -> dict:
+        return self._system_service().quest_summary(quest_id)
+
+    def system_runtime_sessions(self, path: str) -> dict:
+        query = self.parse_query(path)
+        return self._system_service().runtime_sessions(limit=self._query_limit(query, default=200))
+
+    def system_log_sources(self) -> dict:
+        return self._system_service().log_sources()
+
+    def system_log_tail(self, source_id: str, path: str) -> dict | tuple[int, dict]:
+        query = self.parse_query(path)
+        try:
+            return self._system_service().log_tail(
+                unquote(source_id),
+                limit=self._query_limit(query, default=200),
+            )
+        except KeyError as exc:
+            return 404, {"ok": False, "message": str(exc)}
+
+    def system_failures(self, path: str) -> dict:
+        query = self.parse_query(path)
+        return self._system_service().failures(
+            limit=self._query_limit(query, default=100),
+            severity=((query.get("severity") or [""])[0] or "").strip() or None,
+            query=((query.get("q") or [""])[0] or "").strip() or None,
+        )
+
+    def system_runtime_tools(self) -> dict:
+        return self._system_service().runtime_tools()
+
+    def system_hardware(self) -> dict:
+        return self._system_service().hardware()
+
+    def system_chart_catalog(self) -> dict:
+        return self._system_service().chart_catalog()
+
+    def system_chart_query(self, chart_id: str, path: str) -> dict | tuple[int, dict]:
+        try:
+            return self._system_service().chart_query(chart_id)
+        except KeyError as exc:
+            return 404, {"ok": False, "message": str(exc)}
+
+    def system_stats_summary(self) -> dict:
+        return self._system_service().stats_summary()
+
+    def system_search(self, path: str) -> dict:
+        query = self.parse_query(path)
+        return self._system_service().search(
+            ((query.get("q") or [""])[0] or "").strip(),
+            scope=((query.get("scope") or [""])[0] or "").strip() or None,
+            limit=self._query_limit(query, default=50),
+        )
 
     def system_update(self) -> dict:
         return self.app.system_update_status()

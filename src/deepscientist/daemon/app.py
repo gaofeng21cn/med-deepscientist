@@ -7708,6 +7708,12 @@ class DaemonApp:
                         return
                     if route_name in {
                         "quest_events",
+                        "system_quests",
+                        "system_runtime_sessions",
+                        "system_log_tail",
+                        "system_failures",
+                        "system_chart_query",
+                        "system_search",
                         "bash_sessions",
                         "bash_logs",
                         "git_log",

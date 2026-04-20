@@ -34,6 +34,7 @@
 ### 稳定规则
 
 - [policies/runtime_protocol.md](policies/runtime_protocol.md)
+- [policies/system_visibility_contract.md](policies/system_visibility_contract.md)
 
 ### 公开用户文档
 
