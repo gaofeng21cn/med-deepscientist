@@ -1105,6 +1105,21 @@ class ArtifactService:
                 current_workspace_root=current_workspace_root,
                 legacy_workspace_roots=legacy_workspace_roots,
             )
+        claims = normalized.get("claims") if isinstance(normalized.get("claims"), list) else []
+        for claim in claims:
+            if not isinstance(claim, dict):
+                continue
+            evidence_items = claim.get("evidence_items") if isinstance(claim.get("evidence_items"), list) else []
+            for item in evidence_items:
+                if not isinstance(item, dict):
+                    continue
+                item["source_paths"] = self._normalize_paper_live_path_list(
+                    item.get("source_paths"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
         return normalized
 
     def _normalize_claim_evidence_map_payload(
@@ -3414,6 +3429,9 @@ class ArtifactService:
             "schema_version": 1,
             "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
             "items": [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)],
+            "claims": copy.deepcopy(
+                [dict(claim) for claim in (payload.get("claims") or []) if isinstance(claim, dict)]
+            ),
             "updated_at": utc_now(),
         }
         normalized_source_root = source_root or workspace_root or quest_root

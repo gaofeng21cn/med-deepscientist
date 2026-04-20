@@ -2167,6 +2167,32 @@ def test_supplementary_experiment_protocol_supports_runtime_ref_queries_and_unif
     assert outlines["selected_outline_ref"] == "outline-001"
     assert any(item["outline_id"] == "outline-001" for item in outlines["outlines"])
 
+    seed_claims = [
+        {
+            "claim_id": "C-review",
+            "claim_text": "The reviewer-linked concern remains addressed by durable evidence.",
+            "status": "supported",
+            "paper_role": "main_text",
+            "evidence_items": [
+                {
+                    "item_id": "main-supp-001",
+                    "summary": "Seed main-run evidence that should survive slice recording.",
+                    "source_paths": ["experiments/main/main-supp-001/RESULT.json"],
+                }
+            ],
+        }
+    ]
+    for paper_root in artifact._paper_sync_roots(quest_root):
+        ledger_path = paper_root / "evidence_ledger.json"
+        ledger_payload = read_json(ledger_path, {})
+        write_json(
+            ledger_path,
+            {
+                **ledger_payload,
+                "claims": seed_claims,
+            },
+        )
+
     completed = artifact.record_analysis_slice(
         quest_root,
         campaign_id=campaign["campaign_id"],
@@ -2192,6 +2218,8 @@ def test_supplementary_experiment_protocol_supports_runtime_ref_queries_and_unif
     evidence_ledger = read_json(quest_root / "paper" / "evidence_ledger.json", {})
     ledger_item = next(item for item in evidence_ledger["items"] if item["item_id"] == "AN-R1-C1")
     assert ledger_item["section_id"] == "reviewer-response"
+    assert evidence_ledger["claims"][0]["claim_id"] == "C-review"
+    assert evidence_ledger["claims"][0]["evidence_items"][0]["item_id"] == "main-supp-001"
     selected_outline = read_json(quest_root / "paper" / "selected_outline.json", {})
     reviewer_section = next(item for item in selected_outline["sections"] if item["section_id"] == "reviewer-response")
     assert reviewer_section["status"] == "ready"
