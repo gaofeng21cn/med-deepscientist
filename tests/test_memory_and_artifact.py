@@ -3289,6 +3289,131 @@ def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home
     assert "main_text" in worktree_ledger_markdown
 
 
+def test_upsert_paper_evidence_item_ignores_legacy_item_only_ledgers(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper evidence ledger legacy isolation quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Legacy Isolation Outline",
+        detailed_outline={
+            "title": "Legacy Isolation Outline",
+            "research_questions": ["RQ-ledger"],
+            "experimental_designs": ["Exp-ledger"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for ledger-isolation regression coverage.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    claim_map_payload = {
+        "schema_version": 1,
+        "claims": [
+            {
+                "claim_id": "C1",
+                "claim_text": "The active paper line should preserve claim-linked evidence.",
+                "statement": "The active paper line should preserve claim-linked evidence.",
+                "status": "supported",
+                "paper_role": "main_text",
+                "display_bindings": ["F1"],
+                "sections": ["Results"],
+                "evidence_items": [
+                    {
+                        "item_id": "CURRENT-1",
+                        "summary": "Current paper-line evidence item.",
+                        "support_level": "primary",
+                        "source_paths": ["paper/current-1.json"],
+                    }
+                ],
+            }
+        ],
+        "updated_at": "2026-04-20T10:00:00+00:00",
+    }
+    current_line_item_only_ledger = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "items": [
+            {
+                "item_id": "CURRENT-1",
+                "title": "Current item",
+                "kind": "main_experiment",
+                "status": "completed",
+                "paper_role": "main_text",
+                "section_id": "results",
+                "claim_links": ["C1"],
+                "source_paths": ["paper/current-1.json"],
+            }
+        ],
+        "updated_at": "2026-04-20T10:01:00+00:00",
+    }
+    legacy_item_only_ledger = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "items": [
+            {
+                "item_id": "LEGACY-ONLY",
+                "title": "Legacy-only item",
+                "kind": "analysis_slice",
+                "status": "completed",
+                "paper_role": "appendix",
+                "section_id": "legacy",
+                "source_paths": ["paper/legacy-only.json"],
+            }
+        ],
+        "updated_at": "2026-04-20T11:00:00+00:00",
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "claim_evidence_map.json", claim_map_payload)
+        write_json(root / "evidence_ledger.json", current_line_item_only_ledger)
+        (root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+
+    legacy_paper_root = quest_root / ".ds" / "worktrees" / "analysis-legacy-ledger" / "paper"
+    legacy_paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(legacy_paper_root / "claim_evidence_map.json", claim_map_payload)
+    write_json(legacy_paper_root / "evidence_ledger.json", legacy_item_only_ledger)
+    (legacy_paper_root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+
+    artifact._upsert_paper_evidence_item(
+        quest_root,
+        {
+            "item_id": "NEW-ITEM",
+            "title": "Fresh current-line item",
+            "kind": "analysis_slice",
+            "status": "completed",
+            "paper_role": "main_text",
+            "section_id": "results",
+            "claim_links": ["C1"],
+            "result_summary": "Fresh current-line evidence should not inherit legacy paper surfaces.",
+            "source_paths": ["paper/new-item.json"],
+            "selected_outline_ref": "outline-001",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    canonical_ledger = read_json(canonical_paper_root / "evidence_ledger.json", {})
+    worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
+    for payload in (canonical_ledger, worktree_ledger):
+        item_ids = [str(item.get("item_id") or "") for item in payload["items"]]
+        assert "CURRENT-1" in item_ids
+        assert "NEW-ITEM" in item_ids
+        assert "LEGACY-ONLY" not in item_ids
+        assert payload["claims"][0]["claim_id"] == "C1"
+        assert payload["claims"][0]["evidence"][0]["evidence_id"] == "CURRENT-1"
+
+
 def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -6654,7 +6779,11 @@ def test_write_paper_line_state_normalizes_metadata_only_blocking_reasons(
         ),
     )
     monkeypatch.setattr(artifact, "_normalize_outline_sections", lambda sections, experimental_designs=None: [])
-    monkeypatch.setattr(artifact, "_read_paper_evidence_ledger", lambda _quest_root: {})
+    monkeypatch.setattr(
+        artifact,
+        "_read_paper_evidence_ledger",
+        lambda _quest_root, workspace_root=None: {},
+    )
     monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda _quest_root, workspace_root=None: None)
     monkeypatch.setattr(
         artifact,

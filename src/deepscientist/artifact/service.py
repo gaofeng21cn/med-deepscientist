@@ -3275,31 +3275,57 @@ class ArtifactService:
     ) -> dict[str, Any]:
         return self._read_outline_folder_to_record(quest_root, workspace_root=workspace_root)
 
-    def _read_paper_evidence_ledger(self, quest_root: Path) -> dict[str, Any]:
+    def _read_paper_evidence_ledger(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        paper_roots = (
+            self._paper_active_sync_roots(quest_root, workspace_root=workspace_root)
+            if workspace_root is not None
+            else self._paper_sync_roots(quest_root)
+        )
+        _, claim_map_payload = self._read_latest_paper_json_payload(
+            paper_roots,
+            "claim_evidence_map.json",
+        )
         candidates: list[tuple[tuple[str, float], dict[str, Any]]] = []
-        for paper_root in self._paper_sync_roots(quest_root):
+        for paper_root in paper_roots:
             path = paper_root / "evidence_ledger.json"
             if not path.exists():
                 continue
             payload = read_json(path, {})
             if not isinstance(payload, dict) or not payload:
                 continue
+            normalized_payload = self._backfill_paper_evidence_ledger_claims(
+                payload,
+                claim_map_payload,
+            )
             candidates.append(
                 (
                     (
-                        str(payload.get("updated_at") or payload.get("created_at") or ""),
+                        str(normalized_payload.get("updated_at") or normalized_payload.get("created_at") or ""),
                         path.stat().st_mtime if path.exists() else 0.0,
                     ),
-                    payload,
+                    normalized_payload,
                 )
             )
+        default_payload = {
+            "schema_version": 1,
+            "selected_outline_ref": None,
+            "items": [],
+            "claims": [],
+            "updated_at": utc_now(),
+        }
         if not candidates:
+            payload = self._backfill_paper_evidence_ledger_claims(default_payload, claim_map_payload)
             return {
                 "schema_version": 1,
-                "selected_outline_ref": None,
-                "items": [],
-                "claims": [],
-                "updated_at": utc_now(),
+                "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
+                "items": [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)],
+                "claims": copy.deepcopy([dict(item) for item in (payload.get("claims") or []) if isinstance(item, dict)]),
+                "updated_at": str(payload.get("updated_at") or payload.get("created_at") or "").strip() or utc_now(),
             }
         candidates.sort(key=lambda item: item[0])
         payload = candidates[-1][1]
@@ -4049,7 +4075,7 @@ class ArtifactService:
         *,
         workspace_root: Path | None = None,
     ) -> dict[str, Any]:
-        ledger = self._read_paper_evidence_ledger(quest_root)
+        ledger = self._read_paper_evidence_ledger(quest_root, workspace_root=workspace_root)
         items = [dict(entry) for entry in (ledger.get("items") or []) if isinstance(entry, dict)]
         key = self._paper_evidence_item_key(item)
         merged_items: list[dict[str, Any]] = []
@@ -4504,7 +4530,7 @@ class ArtifactService:
         )
         paper_root = self._paper_root(quest_root, workspace_root=workspace_root, create=True)
         paper_branch = current_branch(paper_root.parent)
-        ledger = self._read_paper_evidence_ledger(quest_root)
+        ledger = self._read_paper_evidence_ledger(quest_root, workspace_root=workspace_root)
         draft_path = paper_root / "draft.md"
         bundle_path = paper_root / "paper_bundle_manifest.json"
         pending_slices = 0

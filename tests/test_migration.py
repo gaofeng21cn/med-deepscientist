@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -158,6 +159,27 @@ def test_repair_deepscientist_root_paths_rewrites_moved_workspace_paths_and_repa
             "workspace_mode": "paper",
         },
     )
+    write_json(
+        quest_root / "paper" / "medical_analysis_contract.json",
+        {
+            "study_root": str(source_study_root.resolve()),
+            "source_ref": str((source_study_root / "artifacts" / "controller" / "study_charter.json").resolve()),
+        },
+    )
+    artifact_index = quest_root / "artifacts" / "_index.jsonl"
+    artifact_index.parent.mkdir(parents=True, exist_ok=True)
+    artifact_index.write_text(
+        json.dumps(
+            {
+                "artifact_id": "report-001",
+                "path": str((quest_root / "artifacts" / "reports" / "report-001.json").resolve()),
+                "summary": f"Study root: {source_study_root.resolve()}",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     target_workspace = tmp_path / "LinZM" / "as_biologics_workspace"
     shutil.copytree(source_workspace, target_workspace)
@@ -201,6 +223,17 @@ def test_repair_deepscientist_root_paths_rewrites_moved_workspace_paths_and_repa
     assert research_state["active_idea_md_path"] == str(
         (target_worktree_root / "memory" / "ideas" / "idea-001" / "idea.md").resolve()
     )
+
+    medical_analysis_contract = read_json(target_quest_root / "paper" / "medical_analysis_contract.json", {})
+    assert medical_analysis_contract["study_root"] == str(target_study_root.resolve())
+    assert medical_analysis_contract["source_ref"] == str(
+        (target_study_root / "artifacts" / "controller" / "study_charter.json").resolve()
+    )
+
+    artifact_index_lines = (target_quest_root / "artifacts" / "_index.jsonl").read_text(encoding="utf-8").splitlines()
+    artifact_index_payload = json.loads(artifact_index_lines[0])
+    assert artifact_index_payload["path"] == str((target_quest_root / "artifacts" / "reports" / "report-001.json").resolve())
+    assert artifact_index_payload["summary"] == f"Study root: {target_study_root.resolve()}"
 
     gitdir_line = (target_worktree_root / ".git").read_text(encoding="utf-8").strip()
     assert gitdir_line.startswith("gitdir: ")

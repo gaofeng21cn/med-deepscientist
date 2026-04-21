@@ -17,7 +17,7 @@ from .daemon import DaemonApp
 from .doctor import render_doctor_report, run_doctor
 from .home import default_home, ensure_home_layout, repo_root
 from .memory import MemoryService
-from .migration import migrate_deepscientist_root
+from .migration import migrate_deepscientist_root, repair_deepscientist_root_paths
 from .network import configure_runtime_proxy, urlopen_with_proxy as urlopen
 from .prompts import PromptBuilder
 from .quest import QuestService
@@ -120,6 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     repair_parser = subparsers.add_parser("repair")
     repair_subparsers = repair_parser.add_subparsers(dest="repair_command", required=True)
+    repair_moved_home = repair_subparsers.add_parser("moved-home")
+    repair_moved_home.add_argument("--source-home", default=None)
     repair_paper_paths = repair_subparsers.add_parser("paper-live-paths")
     repair_paper_paths.add_argument("--quest-id", required=True)
     repair_paper_paths.add_argument("--workspace-root", default=None)
@@ -512,6 +514,15 @@ def migrate_command(home: Path, target: str) -> int:
     return 0
 
 
+def repair_moved_home_command(home: Path, *, source_home: str | None) -> int:
+    payload = repair_deepscientist_root_paths(
+        home,
+        source_home=Path(source_home).expanduser() if source_home else None,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def repair_paper_live_paths_command(
     home: Path,
     *,
@@ -543,6 +554,9 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["DEEPSCIENTIST_CODEX_BINARY"] = str(args.codex)
     configure_runtime_proxy(args.proxy)
     home = resolve_home(args)
+
+    if home.exists() and not (args.command == "migrate" or (args.command == "repair" and args.repair_command == "moved-home")):
+        repair_deepscientist_root_paths(home)
 
     if args.command == "init":
         return init_command(home)
@@ -588,6 +602,8 @@ def main(argv: list[str] | None = None) -> int:
         return config_validate_command(home)
     if args.command == "migrate":
         return migrate_command(home, args.target)
+    if args.command == "repair" and args.repair_command == "moved-home":
+        return repair_moved_home_command(home, source_home=args.source_home)
     if args.command == "repair" and args.repair_command == "paper-live-paths":
         return repair_paper_live_paths_command(
             home,

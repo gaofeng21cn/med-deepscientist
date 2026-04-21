@@ -3842,6 +3842,21 @@ async function readConfiguredUiAddress(home, runtimePython, fallbackHost, fallba
   }
 }
 
+function readConfiguredHomeFromFile(home) {
+  const configPath = path.join(home, 'config', 'config.yaml');
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+  try {
+    const text = fs.readFileSync(configPath, 'utf8');
+    const homeMatch = text.match(/^\s*home:\s*["']?([^"'\n]+)["']?\s*$/m);
+    const configuredHome = homeMatch ? homeMatch[1].trim() : '';
+    return configuredHome ? normalizeHomePath(configuredHome) : null;
+  } catch {
+    return null;
+  }
+}
+
 function readConfiguredUiAddressFromFile(home, fallbackHost, fallbackPort) {
   const configPath = path.join(home, 'config', 'config.yaml');
   if (!fs.existsSync(configPath)) {
@@ -3872,6 +3887,78 @@ function readConfiguredUiAddressFromFile(home, fallbackHost, fallbackPort) {
       autoOpenBrowser: true,
     };
   }
+}
+
+async function maybeRepairMovedHome(home, runtimePython) {
+  const expectedHome = normalizeHomePath(home);
+  const configuredHome = readConfiguredHomeFromFile(home);
+  const daemonState = readDaemonState(home);
+  const daemonHome = typeof daemonState?.home === 'string' && daemonState.home
+    ? normalizeHomePath(daemonState.home)
+    : null;
+  const sourceHome = [configuredHome, daemonHome].find((candidate) => candidate && candidate !== expectedHome) || null;
+  if (!sourceHome) {
+    return { repaired: false, sourceHome: null, stoppedForeignDaemon: false, payload: null };
+  }
+
+  const configured = readConfiguredUiAddressFromFile(home);
+  const url = browserUiUrl(configured.host, configured.port);
+  const foreignHealth = await fetchHealth(url);
+  let stoppedForeignDaemon = false;
+  if (healthMatchesHome({ health: foreignHealth, home: sourceHome })) {
+    await requestDaemonShutdown(url, typeof foreignHealth?.daemon_id === 'string' ? foreignHealth.daemon_id : null);
+    stoppedForeignDaemon = await waitForDaemonStop({
+      url,
+      pid: foreignHealth?.pid || null,
+      attempts: 20,
+      delayMs: 200,
+    });
+    const postStopHealth = await fetchHealth(url);
+    if (!stoppedForeignDaemon && healthMatchesHome({ health: postStopHealth, home: sourceHome })) {
+      console.error(
+        [
+          `Detected a daemon still bound to the previous DeepScientist home: ${sourceHome}`,
+          `Launcher home: ${expectedHome}`,
+          'Automatic shutdown failed; stop the old daemon and retry.',
+        ].join('\n')
+      );
+      process.exit(1);
+    }
+  }
+
+  const result = runPythonCli(
+    runtimePython,
+    ['--home', home, 'repair', 'moved-home', '--source-home', sourceHome],
+    { capture: true, allowFailure: true }
+  );
+  let payload = null;
+  try {
+    payload = JSON.parse(String(result.stdout || '{}'));
+  } catch {
+    payload = null;
+  }
+  if (result.status !== 0 || !payload || payload.ok !== true) {
+    if (result.stdout) {
+      process.stdout.write(result.stdout);
+      if (!String(result.stdout).endsWith('\n')) {
+        process.stdout.write('\n');
+      }
+    }
+    if (result.stderr) {
+      process.stderr.write(result.stderr);
+      if (!String(result.stderr).endsWith('\n')) {
+        process.stderr.write('\n');
+      }
+    }
+    console.error('DeepScientist detected a moved home but could not repair its recorded paths.');
+    process.exit(result.status ?? 1);
+  }
+  return {
+    repaired: Boolean(payload.repaired),
+    sourceHome,
+    stoppedForeignDaemon,
+    payload,
+  };
 }
 
 async function startDaemon(home, runtimePython, host, port, proxy = null, envOverrides = {}) {
@@ -4361,6 +4448,7 @@ async function launcherMain(rawArgs, warnings = []) {
     profile: options.codexProfile,
     binary: options.codexBinary,
   });
+  await maybeRepairMovedHome(home, runtimePython);
   ensureInitialized(home, runtimePython);
   if (await maybeHandleStartupUpdate(home, rawArgs, options)) {
     return true;
@@ -4439,6 +4527,7 @@ async function main() {
     const home = resolveHome(args);
     const pythonRuntime = ensurePythonRuntime(home);
     const runtimePython = pythonRuntime.runtimePython;
+    await maybeRepairMovedHome(home, runtimePython);
     const codexOverrideEnv = buildCodexOverrideEnv({
       yolo: resolveYoloFlag(args, true),
       profile: readOptionValue(args, '--codex-profile'),

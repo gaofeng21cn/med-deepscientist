@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import uuid
@@ -19,6 +20,9 @@ HOME_SIGNATURES = (
     "cache",
     "cli",
 )
+
+_QUEST_TEXT_REWRITE_SUFFIXES = {".json", ".yaml", ".yml", ".md", ".txt", ".bib"}
+_SKIPPED_REWRITE_DIR_NAMES = {".git", "bash_exec", "codex_history", "codex_homes"}
 
 
 def looks_like_deepscientist_root(path: Path) -> bool:
@@ -158,6 +162,75 @@ def _rewrite_json_file(
     return True
 
 
+def _rewrite_text_file(path: Path, rewrite_pairs: list[tuple[str, str]]) -> bool:
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8")
+    rewritten = original
+    for old_prefix, new_prefix in rewrite_pairs:
+        rewritten = rewritten.replace(old_prefix, new_prefix)
+    if rewritten == original:
+        return False
+    path.write_text(rewritten, encoding="utf-8")
+    return True
+
+
+def _rewrite_jsonl_file(path: Path, rewrite_pairs: list[tuple[str, str]]) -> bool:
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8")
+    changed = False
+    rewritten_lines: list[str] = []
+    for raw_line in original.splitlines():
+        line = raw_line.strip()
+        if not line:
+            rewritten_lines.append(raw_line)
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            rewritten_lines.append(raw_line)
+            continue
+        rewritten_payload = _rewrite_nested_strings(payload, rewrite_pairs)
+        if rewritten_payload != payload:
+            changed = True
+        rewritten_lines.append(json.dumps(rewritten_payload, ensure_ascii=False))
+    if not changed:
+        return False
+    path.write_text("\n".join(rewritten_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+    return True
+
+
+def _should_skip_quest_rewrite(path: Path) -> bool:
+    return any(part in _SKIPPED_REWRITE_DIR_NAMES for part in path.parts)
+
+
+def _rewrite_quest_tree(quest_root: Path, rewrite_pairs: list[tuple[str, str]]) -> list[str]:
+    rewritten_files: list[str] = []
+    for path in sorted(quest_root.rglob("*")):
+        if not path.is_file():
+            continue
+        if _should_skip_quest_rewrite(path.relative_to(quest_root)):
+            continue
+        suffix = path.suffix.lower()
+        if suffix == ".jsonl" and path.name == "_index.jsonl":
+            if _rewrite_jsonl_file(path, rewrite_pairs):
+                rewritten_files.append(str(path))
+            continue
+        if suffix not in _QUEST_TEXT_REWRITE_SUFFIXES:
+            continue
+        changed = False
+        if suffix in {".json"}:
+            changed = _rewrite_json_file(path, rewrite_pairs)
+        elif suffix in {".yaml", ".yml"}:
+            changed = _rewrite_yaml_file(path, rewrite_pairs)
+        else:
+            changed = _rewrite_text_file(path, rewrite_pairs)
+        if changed:
+            rewritten_files.append(str(path))
+    return rewritten_files
+
+
 def _repair_git_worktree_links(quest_root: Path) -> dict[str, Any] | None:
     if not (quest_root / ".git").exists():
         return None
@@ -232,12 +305,7 @@ def repair_deepscientist_root_paths(
 
     quests_root = resolved_target_home / "quests"
     for quest_root in sorted(path for path in quests_root.iterdir() if path.is_dir()) if quests_root.exists() else []:
-        quest_yaml_path = quest_root / "quest.yaml"
-        if _rewrite_yaml_file(quest_yaml_path, rewrite_pairs):
-            rewritten_files.append(str(quest_yaml_path))
-        research_state_path = quest_root / ".ds" / "research_state.json"
-        if _rewrite_json_file(research_state_path, rewrite_pairs):
-            rewritten_files.append(str(research_state_path))
+        rewritten_files.extend(_rewrite_quest_tree(quest_root, rewrite_pairs))
 
     git_repair_results: list[dict[str, Any]] = []
     for quest_root in sorted(path for path in quests_root.iterdir() if path.is_dir()) if quests_root.exists() else []:
