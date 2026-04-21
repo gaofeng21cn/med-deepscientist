@@ -3314,6 +3314,7 @@ class ArtifactService:
         default_payload = {
             "schema_version": 1,
             "selected_outline_ref": None,
+            "charter_expectation_closures": [],
             "items": [],
             "claims": [],
             "updated_at": utc_now(),
@@ -3323,6 +3324,7 @@ class ArtifactService:
             return {
                 "schema_version": 1,
                 "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
+                "charter_expectation_closures": self._paper_charter_expectation_closures(payload),
                 "items": [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)],
                 "claims": copy.deepcopy([dict(item) for item in (payload.get("claims") or []) if isinstance(item, dict)]),
                 "updated_at": str(payload.get("updated_at") or payload.get("created_at") or "").strip() or utc_now(),
@@ -3334,6 +3336,7 @@ class ArtifactService:
         return {
             "schema_version": 1,
             "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
+            "charter_expectation_closures": self._paper_charter_expectation_closures(payload),
             "items": items,
             "claims": claims,
             "updated_at": str(payload.get("updated_at") or payload.get("created_at") or "").strip() or utc_now(),
@@ -3386,6 +3389,28 @@ class ArtifactService:
                 f"{metric_id}={self._format_metric_value(item.get('value'), item.get('decimals'))}"
             )
         return "; ".join(parts) if parts else None
+
+    @staticmethod
+    def _paper_charter_expectation_closures(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+        records: list[dict[str, Any]] = []
+        for raw_record in ((payload or {}).get("charter_expectation_closures") or []):
+            if not isinstance(raw_record, dict):
+                continue
+            expectation_key = str(raw_record.get("expectation_key") or "").strip()
+            expectation_text = str(raw_record.get("expectation_text") or "").strip()
+            status = str(raw_record.get("status") or "").strip().lower()
+            if not expectation_key or not expectation_text or not status:
+                continue
+            records.append(
+                {
+                    "expectation_key": expectation_key,
+                    "expectation_text": expectation_text,
+                    "status": status,
+                    "closed_at": str(raw_record.get("closed_at") or "").strip() or None,
+                    "note": str(raw_record.get("note") or "").strip() or None,
+                }
+            )
+        return records
 
     @staticmethod
     def _paper_claim_submission_scope(paper_role: Any) -> str:
@@ -3492,6 +3517,7 @@ class ArtifactService:
     def _render_paper_evidence_ledger_markdown(self, payload: dict[str, Any]) -> str:
         items = [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)]
         claims = [dict(claim) for claim in (payload.get("claims") or []) if isinstance(claim, dict)]
+        closures = self._paper_charter_expectation_closures(payload)
         lines = [
             "# Paper Evidence Ledger",
             "",
@@ -3500,9 +3526,36 @@ class ArtifactService:
             f"- Claim count: `{len(claims)}`",
             f"- Updated at: `{str(payload.get('updated_at') or utc_now()).strip() or utc_now()}`",
             "",
-            "| Item | Kind | Section | Role | Status | Metrics | Source |",
-            "|---|---|---|---|---|---|---|",
         ]
+        if closures:
+            lines.extend(
+                [
+                    "## Charter Expectation Closures",
+                    "",
+                    "| Expectation | Key | Status | Closed At |",
+                    "|---|---|---|---|",
+                ]
+            )
+            for closure in closures:
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        [
+                            f"`{str(closure.get('expectation_text') or 'unknown').strip() or 'unknown'}`",
+                            f"`{str(closure.get('expectation_key') or 'unknown').strip() or 'unknown'}`",
+                            f"`{str(closure.get('status') or 'unknown').strip() or 'unknown'}`",
+                            f"`{str(closure.get('closed_at') or '-').strip() or '-'}`",
+                        ]
+                    )
+                    + " |"
+                )
+            lines.append("")
+        lines.extend(
+            [
+                "| Item | Kind | Section | Role | Status | Metrics | Source |",
+                "|---|---|---|---|---|---|---|",
+            ]
+        )
         for item in items:
             metrics_text = self._paper_metric_summary_text(
                 [dict(metric) for metric in (item.get("key_metrics") or []) if isinstance(metric, dict)]
@@ -3652,6 +3705,7 @@ class ArtifactService:
         normalized = {
             "schema_version": 1,
             "selected_outline_ref": str(payload.get("selected_outline_ref") or "").strip() or None,
+            "charter_expectation_closures": self._paper_charter_expectation_closures(payload),
             "items": [dict(item) for item in (payload.get("items") or []) if isinstance(item, dict)],
             "claims": copy.deepcopy(
                 [dict(claim) for claim in (payload.get("claims") or []) if isinstance(claim, dict)]
@@ -4105,6 +4159,11 @@ class ArtifactService:
             quest_root,
             {
                 "selected_outline_ref": item.get("selected_outline_ref") or ledger.get("selected_outline_ref"),
+                "charter_expectation_closures": [
+                    dict(record)
+                    for record in (ledger.get("charter_expectation_closures") or [])
+                    if isinstance(record, dict)
+                ],
                 "items": merged_items,
                 "claims": [dict(claim) for claim in (ledger.get("claims") or []) if isinstance(claim, dict)],
             },

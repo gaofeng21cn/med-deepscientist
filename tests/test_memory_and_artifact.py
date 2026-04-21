@@ -3289,6 +3289,145 @@ def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home
     assert "main_text" in worktree_ledger_markdown
 
 
+def test_repair_paper_live_paths_preserves_charter_expectation_closures(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper evidence ledger charter closure quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Charter Closure Outline",
+        detailed_outline={
+            "title": "Charter Closure Outline",
+            "research_questions": ["RQ-charter"],
+            "experimental_designs": ["Exp-charter"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for charter closure regression coverage.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    ledger_payload = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "charter_expectation_closures": [
+            {
+                "expectation_key": "minimum_sci_ready_evidence_package",
+                "expectation_text": "paper/draft.md",
+                "status": "closed",
+                "closed_at": "2026-04-21T02:06:37Z",
+                "note": "The study-charter evidence expectation is durably closed on the paper line.",
+            }
+        ],
+        "items": [],
+        "updated_at": "2026-04-21T02:06:37Z",
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "evidence_ledger.json", ledger_payload)
+        (root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+
+    repaired = artifact.repair_paper_live_paths(
+        quest_root,
+        workspace_root=paper_workspace,
+        current_workspace_root=paper_workspace,
+    )
+
+    assert repaired["ok"] is True
+
+    canonical_ledger = read_json(canonical_paper_root / "evidence_ledger.json", {})
+    worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
+    for payload in (canonical_ledger, worktree_ledger):
+        assert payload["charter_expectation_closures"] == ledger_payload["charter_expectation_closures"]
+    worktree_ledger_markdown = (paper_root / "evidence_ledger.md").read_text(encoding="utf-8")
+    assert "Charter Expectation Closures" in worktree_ledger_markdown
+    assert "paper/draft.md" in worktree_ledger_markdown
+
+
+def test_upsert_paper_evidence_item_preserves_charter_expectation_closures(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper evidence ledger upsert closure preservation quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Upsert Closure Outline",
+        detailed_outline={
+            "title": "Upsert Closure Outline",
+            "research_questions": ["RQ-upsert-closure"],
+            "experimental_designs": ["Exp-upsert-closure"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for upsert closure preservation coverage.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    ledger_payload = {
+        "schema_version": 1,
+        "selected_outline_ref": "outline-001",
+        "charter_expectation_closures": [
+            {
+                "expectation_key": "minimum_sci_ready_evidence_package",
+                "expectation_text": "observed_rate_gap_decomposition_block",
+                "status": "closed",
+                "closed_at": "2026-04-21T02:06:37Z",
+                "note": "The current paper line already closed this charter expectation.",
+            }
+        ],
+        "items": [],
+        "claims": [],
+        "updated_at": "2026-04-21T02:06:37Z",
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "evidence_ledger.json", ledger_payload)
+        (root / "evidence_ledger.md").write_text("legacy\n", encoding="utf-8")
+
+    artifact._upsert_paper_evidence_item(
+        quest_root,
+        {
+            "item_id": "UPSERT-1",
+            "title": "Fresh paper evidence item",
+            "kind": "analysis_slice",
+            "status": "completed",
+            "paper_role": "main_text",
+            "section_id": "results",
+            "result_summary": "Upserting a new evidence item should not erase charter closures.",
+            "source_paths": ["paper/upsert-1.json"],
+            "selected_outline_ref": "outline-001",
+        },
+        workspace_root=paper_workspace,
+    )
+
+    canonical_ledger = read_json(canonical_paper_root / "evidence_ledger.json", {})
+    worktree_ledger = read_json(paper_root / "evidence_ledger.json", {})
+    for payload in (canonical_ledger, worktree_ledger):
+        assert payload["charter_expectation_closures"] == ledger_payload["charter_expectation_closures"]
+        assert any(str(item.get("item_id") or "") == "UPSERT-1" for item in payload["items"])
+
+
 def test_upsert_paper_evidence_item_ignores_legacy_item_only_ledgers(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
