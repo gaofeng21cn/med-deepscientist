@@ -5926,6 +5926,53 @@ def test_stalled_live_turn_recovery_pending_respects_later_control_action(
     assert state.get("stop_requested") is True
     assert state.get("pending") is False
     assert runner.requests == []
+
+
+def test_submit_user_message_records_latest_user_requirement_in_runtime_state(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("latest user requirement truth")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_anchor="decision",
+        continuation_reason="decision:decision-continue-001",
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.submit_user_message(
+        quest_id,
+        text="Please prioritize the new multicenter subgroup analyses.",
+        source="web-react",
+    )
+
+    assert payload["started"] is True
+    assert scheduled == [(quest_id, "user_message")]
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["continuation_anchor"] == "decision"
+    assert runtime_state["continuation_reason"] == f"latest_user_requirement:{payload['message']['id']}"
+
+
 def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_message(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

@@ -5511,6 +5511,9 @@ class QuestService:
                 quest_root,
                 latest_requirement=record,
             )
+            latest_user_requirement_reason = None
+            if resolved_reply_to_interaction_id is None and not record.get("decision_response"):
+                latest_user_requirement_reason = f"latest_user_requirement:{record['id']}"
             quest_data = read_yaml(quest_root / "quest.yaml", {})
             runtime_state = self._read_runtime_state(quest_root)
             status = str(runtime_state.get("status") or quest_data.get("status") or "")
@@ -5523,16 +5526,22 @@ class QuestService:
             elif status in {"stopped", "paused", "completed"}:
                 next_status = "active"
             if next_status != status:
-                self.update_runtime_state(
-                    quest_root=quest_root,
-                    status=next_status,
-                    stop_reason=None,
-                )
+                updates: dict[str, Any] = {
+                    "quest_root": quest_root,
+                    "status": next_status,
+                    "stop_reason": None,
+                }
+                if latest_user_requirement_reason is not None:
+                    updates["continuation_reason"] = latest_user_requirement_reason
+                self.update_runtime_state(**updates)
             else:
-                self.update_runtime_state(
-                    quest_root=quest_root,
-                    pending_user_message_count=len((self._read_message_queue(quest_root).get("pending") or [])),
-                )
+                updates = {
+                    "quest_root": quest_root,
+                    "pending_user_message_count": len((self._read_message_queue(quest_root).get("pending") or [])),
+                }
+                if latest_user_requirement_reason is not None:
+                    updates["continuation_reason"] = latest_user_requirement_reason
+                self.update_runtime_state(**updates)
         else:
             quest_data = read_yaml(quest_root / "quest.yaml", {})
             quest_data["updated_at"] = timestamp
