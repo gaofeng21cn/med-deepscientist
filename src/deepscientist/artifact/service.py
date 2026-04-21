@@ -1160,6 +1160,42 @@ class ArtifactService:
                 )
         return normalized
 
+    def _normalize_display_catalog_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        collection_key: str,
+        source_root: Path,
+        target_root: Path,
+        current_workspace_root: Path | None = None,
+        legacy_workspace_roots: list[Path] | None = None,
+    ) -> dict[str, Any]:
+        normalized = copy.deepcopy(payload if isinstance(payload, dict) else {})
+        entries = normalized.get(collection_key) if isinstance(normalized.get(collection_key), list) else []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            for field_name in ("source_paths", "asset_paths", "export_paths"):
+                if field_name not in entry:
+                    continue
+                entry[field_name] = self._normalize_paper_live_path_list(
+                    entry.get(field_name),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+            qc_result = entry.get("qc_result")
+            if isinstance(qc_result, dict) and "layout_sidecar_path" in qc_result:
+                qc_result["layout_sidecar_path"] = self._normalize_paper_live_path(
+                    qc_result.get("layout_sidecar_path"),
+                    source_root=source_root,
+                    target_root=target_root,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_workspace_roots,
+                )
+        return normalized
+
     def _normalize_paper_baseline_inventory_payload(
         self,
         payload: dict[str, Any],
@@ -3944,6 +3980,43 @@ class ArtifactService:
                 normalized = self._normalize_claim_evidence_map_payload(
                     claim_map_source_payload,
                     source_root=claim_map_source_root,
+                    target_root=paper_root.parent,
+                    current_workspace_root=current_workspace_root,
+                    legacy_workspace_roots=legacy_roots,
+                )
+                write_json(path, normalized)
+                repaired_files.append(str(path))
+
+        for relative_path, collection_key in (
+            ("figures/figure_catalog.json", "figures"),
+            ("figure_catalog.json", "figures"),
+            ("tables/table_catalog.json", "tables"),
+            ("table_catalog.json", "tables"),
+        ):
+            catalog_source_path, catalog_source_payload = self._read_latest_paper_json_payload(
+                default_paper_roots,
+                relative_path,
+            )
+            if not catalog_source_payload:
+                catalog_source_path, catalog_source_payload = self._read_latest_paper_json_payload(
+                    target_paper_roots,
+                    relative_path,
+                )
+            if not catalog_source_payload:
+                continue
+            catalog_source_root = (
+                catalog_source_path.parent.parent.resolve(strict=False)
+                if catalog_source_path is not None
+                else active_workspace_root
+            )
+            for paper_root in target_paper_roots:
+                path = paper_root / relative_path
+                if paper_root not in default_paper_roots and not path.exists():
+                    continue
+                normalized = self._normalize_display_catalog_payload(
+                    catalog_source_payload,
+                    collection_key=collection_key,
+                    source_root=catalog_source_root,
                     target_root=paper_root.parent,
                     current_workspace_root=current_workspace_root,
                     legacy_workspace_roots=legacy_roots,

@@ -3199,6 +3199,143 @@ def test_repair_paper_live_paths_rewrites_legacy_source_paths_per_root(temp_home
     assert worktree_claim_map["claims"][0]["evidence_items"][0]["source_paths"] == expected_worktree_paths
 
 
+def test_repair_paper_live_paths_normalizes_display_catalog_paths_per_root(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper display catalog repair quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Display Catalog Repair Outline",
+        detailed_outline={
+            "title": "Display Catalog Repair Outline",
+            "research_questions": ["RQ-display-repair"],
+            "experimental_designs": ["Exp-display-repair"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for display-catalog live-path repair.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    assert paper_workspace != quest_root
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    current_workspace_root = temp_home / "workspace"
+    legacy_workspace_root = Path("/legacy/workspace")
+    figure_png = current_workspace_root / "paper_assets" / "figures" / "F1.png"
+    figure_layout = current_workspace_root / "paper_assets" / "figures" / "F1.layout.json"
+    figure_note = current_workspace_root / "paper_assets" / "figures" / "F1.source.md"
+    table_csv = current_workspace_root / "paper_assets" / "tables" / "T1.csv"
+    table_md = current_workspace_root / "paper_assets" / "tables" / "T1.md"
+    table_shell = current_workspace_root / "paper_assets" / "tables" / "T1.shell.json"
+    for path, content in (
+        (figure_png, "png"),
+        (figure_layout, "{}"),
+        (figure_note, "# figure"),
+        (table_csv, "col\nvalue\n"),
+        (table_md, "# table\n"),
+        (table_shell, "{}"),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    legacy_figure_png = str(legacy_workspace_root / figure_png.relative_to(current_workspace_root))
+    legacy_figure_layout = str(legacy_workspace_root / figure_layout.relative_to(current_workspace_root))
+    legacy_figure_note = str(legacy_workspace_root / figure_note.relative_to(current_workspace_root))
+    legacy_table_csv = str(legacy_workspace_root / table_csv.relative_to(current_workspace_root))
+    legacy_table_md = str(legacy_workspace_root / table_md.relative_to(current_workspace_root))
+    legacy_table_shell = str(legacy_workspace_root / table_shell.relative_to(current_workspace_root))
+
+    figure_catalog_payload = {
+        "schema_version": 1,
+        "figures": [
+            {
+                "figure_id": "F1",
+                "template_id": "demo.template",
+                "paper_role": "main_text",
+                "export_paths": [legacy_figure_png],
+                "source_paths": [legacy_figure_note],
+                "qc_result": {
+                    "status": "pass",
+                    "layout_sidecar_path": legacy_figure_layout,
+                },
+            }
+        ],
+    }
+    table_catalog_payload = {
+        "schema_version": 1,
+        "tables": [
+            {
+                "table_id": "T1",
+                "table_shell_id": "demo.table",
+                "paper_role": "main_text",
+                "input_schema_id": "demo_schema",
+                "qc_profile": "demo_qc",
+                "qc_result": {"status": "pass"},
+                "asset_paths": [legacy_table_csv, legacy_table_md],
+                "source_paths": [legacy_table_shell],
+            }
+        ],
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        (root / "figures").mkdir(parents=True, exist_ok=True)
+        (root / "tables").mkdir(parents=True, exist_ok=True)
+        write_json(root / "figures" / "figure_catalog.json", figure_catalog_payload)
+        write_json(root / "figure_catalog.json", figure_catalog_payload)
+        write_json(root / "tables" / "table_catalog.json", table_catalog_payload)
+        write_json(root / "table_catalog.json", table_catalog_payload)
+
+    repaired = artifact.repair_paper_live_paths(
+        quest_root,
+        workspace_root=paper_workspace,
+        current_workspace_root=current_workspace_root,
+        legacy_workspace_roots=[legacy_workspace_root],
+    )
+
+    assert repaired["ok"] is True
+
+    expected_quest_figure_png = os.path.relpath(figure_png, quest_root).replace(os.sep, "/")
+    expected_quest_figure_layout = os.path.relpath(figure_layout, quest_root).replace(os.sep, "/")
+    expected_quest_figure_note = os.path.relpath(figure_note, quest_root).replace(os.sep, "/")
+    expected_quest_table_csv = os.path.relpath(table_csv, quest_root).replace(os.sep, "/")
+    expected_quest_table_md = os.path.relpath(table_md, quest_root).replace(os.sep, "/")
+    expected_quest_table_shell = os.path.relpath(table_shell, quest_root).replace(os.sep, "/")
+    expected_worktree_figure_png = os.path.relpath(figure_png, paper_workspace).replace(os.sep, "/")
+    expected_worktree_figure_layout = os.path.relpath(figure_layout, paper_workspace).replace(os.sep, "/")
+    expected_worktree_figure_note = os.path.relpath(figure_note, paper_workspace).replace(os.sep, "/")
+    expected_worktree_table_csv = os.path.relpath(table_csv, paper_workspace).replace(os.sep, "/")
+    expected_worktree_table_md = os.path.relpath(table_md, paper_workspace).replace(os.sep, "/")
+    expected_worktree_table_shell = os.path.relpath(table_shell, paper_workspace).replace(os.sep, "/")
+
+    canonical_figure_catalog = read_json(canonical_paper_root / "figures" / "figure_catalog.json", {})
+    worktree_figure_catalog = read_json(paper_root / "figures" / "figure_catalog.json", {})
+    assert canonical_figure_catalog["figures"][0]["export_paths"] == [expected_quest_figure_png]
+    assert canonical_figure_catalog["figures"][0]["source_paths"] == [expected_quest_figure_note]
+    assert canonical_figure_catalog["figures"][0]["qc_result"]["layout_sidecar_path"] == expected_quest_figure_layout
+    assert worktree_figure_catalog["figures"][0]["export_paths"] == [expected_worktree_figure_png]
+    assert worktree_figure_catalog["figures"][0]["source_paths"] == [expected_worktree_figure_note]
+    assert worktree_figure_catalog["figures"][0]["qc_result"]["layout_sidecar_path"] == expected_worktree_figure_layout
+
+    canonical_table_catalog = read_json(canonical_paper_root / "tables" / "table_catalog.json", {})
+    worktree_table_catalog = read_json(paper_root / "tables" / "table_catalog.json", {})
+    assert canonical_table_catalog["tables"][0]["asset_paths"] == [expected_quest_table_csv, expected_quest_table_md]
+    assert canonical_table_catalog["tables"][0]["source_paths"] == [expected_quest_table_shell]
+    assert worktree_table_catalog["tables"][0]["asset_paths"] == [
+        expected_worktree_table_csv,
+        expected_worktree_table_md,
+    ]
+    assert worktree_table_catalog["tables"][0]["source_paths"] == [expected_worktree_table_shell]
+
+
 def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
