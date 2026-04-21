@@ -3394,6 +3394,16 @@ def test_repair_paper_live_paths_preserves_workspace_relative_catalog_paths_with
                 "qc_result": {"status": "pass"},
                 "asset_paths": ["paper/tables/generated/T2.csv", "paper/tables/generated/T2.md"],
                 "source_paths": ["paper/tables/T2.shell.json"],
+            },
+            {
+                "table_id": "S1",
+                "table_shell_id": "demo.table",
+                "paper_role": "supplementary",
+                "input_schema_id": "demo_schema",
+                "qc_profile": "demo_qc",
+                "qc_result": {"status": "pass"},
+                "asset_paths": [".ds/worktrees/paper-paper-main/paper/paper/supplementary_material.md"],
+                "source_paths": [".ds/worktrees/paper-paper-main/paper/paper/supplementary_material.md"],
             }
         ],
     }
@@ -3429,6 +3439,12 @@ def test_repair_paper_live_paths_preserves_workspace_relative_catalog_paths_with
         for path in table_catalog["tables"][0]["source_paths"]:
             assert "paper/paper/" not in path
             assert path.endswith("T2.shell.json")
+        for path in table_catalog["tables"][1]["asset_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith("supplementary_material.md")
+        for path in table_catalog["tables"][1]["source_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith("supplementary_material.md")
 
 
 def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home: Path) -> None:

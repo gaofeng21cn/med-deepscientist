@@ -962,6 +962,16 @@ class ArtifactService:
             index += 1
         return Path(*rewritten) if rewritten else Path()
 
+    @staticmethod
+    def _collapse_duplicate_paper_segments(path: Path) -> Path:
+        parts = list(path.parts)
+        collapsed: list[str] = []
+        for part in parts:
+            if part == "paper" and collapsed and collapsed[-1] == "paper":
+                continue
+            collapsed.append(part)
+        return Path(*collapsed) if collapsed else Path()
+
     def _paper_live_path_candidates(
         self,
         raw_path: object,
@@ -1003,6 +1013,9 @@ class ArtifactService:
                         continue
                     add(current_root / self._rewrite_workspace_legacy_parts(legacy_relative))
         else:
+            collapsed_candidate = self._collapse_duplicate_paper_segments(candidate)
+            if collapsed_candidate != candidate:
+                add(source_root / collapsed_candidate)
             add(source_root / candidate)
         return resolved
 
