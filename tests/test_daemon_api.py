@@ -5973,6 +5973,59 @@ def test_submit_user_message_records_latest_user_requirement_in_runtime_state(
     assert runtime_state["continuation_reason"] == f"latest_user_requirement:{payload['message']['id']}"
 
 
+def test_submit_user_message_keeps_latest_user_requirement_truth_for_progress_reply_target(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("latest user requirement progress reply truth")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_anchor="decision",
+        continuation_reason="decision:decision-continue-001",
+    )
+    app.artifact_service.interact(
+        quest_root,
+        kind="progress",
+        message="先告诉我新的最高优先级要求。",
+        deliver_to_bound_conversations=False,
+        include_recent_inbound_messages=False,
+        reply_mode="blocking",
+    )
+
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.submit_user_message(
+        quest_id,
+        text="请立刻按最新专家要求改成全国多中心并做分层统计。",
+        source="web-react",
+    )
+
+    assert payload["started"] is True
+    assert payload["message"]["reply_to_interaction_id"]
+    assert scheduled == [(quest_id, "user_message")]
+
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["continuation_reason"] == f"latest_user_requirement:{payload['message']['id']}"
+
+
 def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_message(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

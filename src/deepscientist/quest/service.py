@@ -5380,6 +5380,7 @@ class QuestService:
         interaction_state_path = quest_root / ".ds" / "interaction_state.json"
         interaction_state = self._read_interaction_state(quest_root)
         open_requests: list[dict] = []
+        recent_threads: list[dict] = []
         waiting_indexes: list[int] = []
         target_index: int | None = None
         target_thread_index: int | None = None
@@ -5512,7 +5513,13 @@ class QuestService:
                 latest_requirement=record,
             )
             latest_user_requirement_reason = None
-            if resolved_reply_to_interaction_id is None and not record.get("decision_response"):
+            reply_target: dict[str, Any] | None = None
+            if target_index is not None and target_index < len(open_requests):
+                reply_target = dict(open_requests[target_index])
+            elif target_thread_index is not None and target_thread_index < len(recent_threads):
+                reply_target = dict(recent_threads[target_thread_index])
+            reply_target_kind = str((reply_target or {}).get("kind") or "").strip().lower()
+            if reply_target_kind != "decision_request" and not record.get("decision_response"):
                 latest_user_requirement_reason = f"latest_user_requirement:{record['id']}"
             quest_data = read_yaml(quest_root / "quest.yaml", {})
             runtime_state = self._read_runtime_state(quest_root)
