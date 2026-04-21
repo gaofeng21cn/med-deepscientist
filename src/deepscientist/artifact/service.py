@@ -4004,11 +4004,12 @@ class ArtifactService:
                 )
             if not catalog_source_payload:
                 continue
-            catalog_source_root = (
-                catalog_source_path.parent.parent.resolve(strict=False)
-                if catalog_source_path is not None
-                else active_workspace_root
-            )
+            if catalog_source_path is None:
+                catalog_source_root = active_workspace_root
+            elif relative_path.startswith(("figures/", "tables/")):
+                catalog_source_root = catalog_source_path.parents[2].resolve(strict=False)
+            else:
+                catalog_source_root = catalog_source_path.parent.parent.resolve(strict=False)
             for paper_root in target_paper_roots:
                 path = paper_root / relative_path
                 if paper_root not in default_paper_roots and not path.exists():

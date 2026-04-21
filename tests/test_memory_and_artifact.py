@@ -3336,6 +3336,101 @@ def test_repair_paper_live_paths_normalizes_display_catalog_paths_per_root(temp_
     assert worktree_table_catalog["tables"][0]["source_paths"] == [expected_worktree_table_shell]
 
 
+def test_repair_paper_live_paths_preserves_workspace_relative_catalog_paths_without_double_paper_prefix(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper relative catalog repair quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Relative Catalog Repair Outline",
+        detailed_outline={
+            "title": "Relative Catalog Repair Outline",
+            "research_questions": ["RQ-relative-display-repair"],
+            "experimental_designs": ["Exp-relative-display-repair"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Create a paper worktree for relative catalog path repair.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    canonical_paper_root = quest_root / "paper"
+
+    relative_figure_catalog_payload = {
+        "schema_version": 1,
+        "figures": [
+            {
+                "figure_id": "F2",
+                "template_id": "demo.template",
+                "paper_role": "main_text",
+                "export_paths": ["paper/figures/generated/F2.png", "paper/figures/generated/F2.svg"],
+                "source_paths": ["paper/figures/F2.shell.json", "paper/results_narrative_map.json"],
+                "qc_result": {
+                    "status": "pass",
+                    "layout_sidecar_path": "paper/figures/generated/F2.layout.json",
+                },
+            }
+        ],
+    }
+    relative_table_catalog_payload = {
+        "schema_version": 1,
+        "tables": [
+            {
+                "table_id": "T2",
+                "table_shell_id": "demo.table",
+                "paper_role": "main_text",
+                "input_schema_id": "demo_schema",
+                "qc_profile": "demo_qc",
+                "qc_result": {"status": "pass"},
+                "asset_paths": ["paper/tables/generated/T2.csv", "paper/tables/generated/T2.md"],
+                "source_paths": ["paper/tables/T2.shell.json"],
+            }
+        ],
+    }
+
+    for root in (canonical_paper_root, paper_root):
+        (root / "figures").mkdir(parents=True, exist_ok=True)
+        (root / "tables").mkdir(parents=True, exist_ok=True)
+        write_json(root / "figures" / "figure_catalog.json", relative_figure_catalog_payload)
+        write_json(root / "tables" / "table_catalog.json", relative_table_catalog_payload)
+
+    repaired = artifact.repair_paper_live_paths(
+        quest_root,
+        workspace_root=paper_workspace,
+        current_workspace_root=paper_workspace,
+    )
+
+    assert repaired["ok"] is True
+
+    for root in (canonical_paper_root, paper_root):
+        figure_catalog = read_json(root / "figures" / "figure_catalog.json", {})
+        table_catalog = read_json(root / "tables" / "table_catalog.json", {})
+        for path in figure_catalog["figures"][0]["export_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith(("F2.png", "F2.svg"))
+        for path in figure_catalog["figures"][0]["source_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith(("F2.shell.json", "results_narrative_map.json"))
+        assert "paper/paper/" not in figure_catalog["figures"][0]["qc_result"]["layout_sidecar_path"]
+        assert figure_catalog["figures"][0]["qc_result"]["layout_sidecar_path"].endswith("F2.layout.json")
+        for path in table_catalog["tables"][0]["asset_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith(("T2.csv", "T2.md"))
+        for path in table_catalog["tables"][0]["source_paths"]:
+            assert "paper/paper/" not in path
+            assert path.endswith("T2.shell.json")
+
+
 def test_repair_paper_live_paths_backfills_claim_ledger_from_claim_map(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
