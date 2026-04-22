@@ -32,7 +32,7 @@ from deepscientist.connector.lingzhu_support import generate_lingzhu_auth_ak, li
 from deepscientist.mcp.context import McpContext
 from deepscientist.connector.qq_profiles import list_qq_profiles
 from deepscientist.runners import RunResult
-from deepscientist.shared import append_jsonl, ensure_dir, generate_id, read_json, read_jsonl, read_yaml, utc_now, write_json, write_yaml
+from deepscientist.shared import append_jsonl, ensure_dir, generate_id, read_json, read_jsonl, read_yaml, utc_now, write_json, write_text, write_yaml
 
 
 _ASYNC_TURN_TIMEOUT_SECONDS = 10.0
@@ -90,6 +90,106 @@ def _parse_sse_events(raw: bytes) -> list[dict[str, object]]:
             }
         )
     return events
+
+
+def _write_managed_publication_eval_latest(
+    study_root: Path,
+    *,
+    quest_id: str,
+    payload: dict[str, object],
+) -> Path:
+    latest_path = study_root / "artifacts" / "publication_eval" / "latest.json"
+    write_json(latest_path, {"schema_version": 1, "study_id": study_root.name, "quest_id": quest_id, **payload})
+    return latest_path
+
+
+def _materialize_ready_paper_line_for_publication_gate(
+    quest_root: Path,
+    *,
+    study_root_ref: str,
+) -> Path:
+    paper_root = ensure_dir(quest_root / "paper")
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Managed Gate Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-managed-gate",
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "title": "Managed Gate Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-10T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/managed-gate",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": study_root_ref,
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    write_text(
+        paper_root / "draft.md",
+        "\n".join(
+            [
+                "# Draft",
+                "",
+                "## Introduction",
+                "",
+                "Prediction-model literature motivates the manuscript framing [@demo202601; @demo202602].",
+                "",
+                "## Discussion",
+                "",
+                "The discussion remains anchored to the verified literature set [@demo202603; @demo202604].",
+                "",
+            ]
+        ),
+    )
+    write_text(
+        paper_root / "references.bib",
+        "".join(
+            f"@article{{demo2026{index:02d}, title={{Demo Reference {index}}}}}\n"
+            for index in range(1, 21)
+        ),
+    )
+    literature_root = ensure_dir(quest_root / "literature" / "pubmed")
+    write_text(
+        literature_root / "records.jsonl",
+        "\n".join(
+            json.dumps(
+                {
+                    "record_id": f"pubmed-demo-{index:03d}",
+                    "source": "pubmed",
+                    "title": f"Demo Reference {index}",
+                    "pmid": f"4000{index:04d}",
+                }
+            )
+            for index in range(1, 21)
+        )
+        + "\n",
+    )
+    return paper_root
 
 
 class _FakeHeaders:
@@ -6630,6 +6730,99 @@ def test_auto_continue_parks_after_repeated_unchanged_finalize_state(temp_home: 
     assert second_snapshot["continuation_policy"] == "wait_for_user_or_resume"
     assert second_snapshot["continuation_anchor"] == "decision"
     assert second_snapshot["continuation_reason"] == "unchanged_finalize_state"
+
+
+def test_auto_continue_parks_after_repeated_unchanged_decision_state(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("decision auto park quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_settings(quest_id, active_anchor="decision")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="decision_loop_test",
+    )
+
+    app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
+    first_snapshot = app.quest_service.snapshot(quest_id)
+    assert first_snapshot["same_fingerprint_auto_turn_count"] == 1
+    assert first_snapshot["continuation_policy"] == "auto"
+
+    app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
+    second_snapshot = app.quest_service.snapshot(quest_id)
+    assert second_snapshot["same_fingerprint_auto_turn_count"] >= 2
+    assert second_snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert second_snapshot["continuation_anchor"] == "decision"
+    assert second_snapshot["continuation_reason"] == "unchanged_decision_state"
+
+
+def test_auto_continue_parks_after_repeated_unchanged_publication_gate_state(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate auto park quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "reporting",
+                    "severity": "must_fix",
+                    "summary": "forbidden_manuscript_terminology",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="write",
+        reason="publication_gate_loop_test",
+    )
+
+    for _ in range(2):
+        app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
+        snapshot = app.quest_service.snapshot(quest_id)
+        assert snapshot["continuation_policy"] == "auto"
+
+    app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["same_fingerprint_auto_turn_count"] >= 3
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == "unchanged_publication_gate_state"
 
 
 def test_daemon_auto_continue_routes_into_review_companion_skill_after_decision_artifact(temp_home: Path) -> None:

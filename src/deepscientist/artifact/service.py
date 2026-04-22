@@ -4360,7 +4360,11 @@ class ArtifactService:
     ) -> str:
         policy = str(continuation_policy or "").strip().lower()
         reason = str(continuation_reason or "").strip()
-        if policy == "wait_for_user_or_resume" and reason == "unchanged_finalize_state":
+        if (
+            policy == "wait_for_user_or_resume"
+            and reason.startswith("unchanged_")
+            and reason.endswith("_state")
+        ):
             return "stop"
         if not reason.startswith("decision:"):
             return "continue"

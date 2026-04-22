@@ -3254,6 +3254,49 @@ class DaemonApp:
         return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
     @staticmethod
+    def _anti_spin_continuation_update(
+        snapshot: dict,
+        *,
+        turn_reason: str,
+        same_fingerprint_count: int,
+    ) -> dict[str, str] | None:
+        if str(turn_reason or "").strip() != "auto_continue":
+            return None
+        if int(snapshot.get("pending_user_message_count") or 0) > 0:
+            return None
+        if str(snapshot.get("waiting_interaction_id") or "").strip():
+            return None
+        active_anchor = str(snapshot.get("active_anchor") or "").strip().lower()
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        managed_publication_gate_blocked = (
+            str(paper_health.get("global_stage_authority") or "").strip().lower() == "publication_gate"
+            and not bool(paper_health.get("managed_publication_gate_clear"))
+        )
+        stage = ""
+        threshold = 0
+        if active_anchor == "decision":
+            stage = "decision"
+            threshold = 2
+        elif active_anchor == "finalize":
+            stage = "finalize"
+            threshold = 2
+        elif managed_publication_gate_blocked:
+            stage = "publication_gate"
+            threshold = 3
+        if not stage or same_fingerprint_count < threshold:
+            return None
+        return {
+            "continuation_policy": "wait_for_user_or_resume",
+            "continuation_anchor": "decision",
+            "continuation_reason": f"unchanged_{stage}_state",
+            "continuation_updated_at": utc_now(),
+        }
+
+    @staticmethod
     def _turn_intent_for(latest_user_message: dict | None, *, turn_reason: str = "user_message") -> str:
         if str(turn_reason or "").strip() == "auto_continue" or latest_user_message is None:
             return "continue_stage"
@@ -3912,20 +3955,13 @@ class DaemonApp:
                 "same_fingerprint_auto_turn_count": same_fingerprint_count,
             }
         )
-        if (
-            str(turn_reason or "").strip() == "auto_continue"
-            and str(snapshot.get("active_anchor") or "").strip() == "finalize"
-            and same_fingerprint_count >= 2
-            and int(snapshot.get("pending_user_message_count") or 0) == 0
-        ):
-            runtime_updates.update(
-                {
-                    "continuation_policy": "wait_for_user_or_resume",
-                    "continuation_anchor": "decision",
-                    "continuation_reason": "unchanged_finalize_state",
-                    "continuation_updated_at": utc_now(),
-                }
-            )
+        anti_spin_update = self._anti_spin_continuation_update(
+            snapshot,
+            turn_reason=turn_reason,
+            same_fingerprint_count=same_fingerprint_count,
+        )
+        if anti_spin_update:
+            runtime_updates.update(anti_spin_update)
         self.quest_service.update_runtime_state(
             quest_root=self.quest_service._quest_root(quest_id),
             **runtime_updates,

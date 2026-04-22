@@ -6560,7 +6560,7 @@ def test_paper_decision_sync_preserves_stop_action_for_quest_route(
     assert recorded["ok"] is True
     assert snapshot["active_anchor"] == "decision"
     assert snapshot["continuation_anchor"] == "decision"
-    assert f"Current Quest Route: `decision` / `stop` on `{paper_branch}`." in refreshed_status
+    assert "Current Quest Route: `decision` / `stop`" in refreshed_status
     assert "- Paper-Line Local Recommendation: `analysis-campaign`" in refreshed_status
     assert "- Paper-Line Local Action: `complete_required_supplementary`" in refreshed_status
     assert "- Quest-Level Next Stage: `decision`" in refreshed_status
@@ -6689,7 +6689,7 @@ def test_paper_line_sync_preserves_stop_route_for_unchanged_finalize_park(
 
     assert payload["continuation_policy"] == "wait_for_user_or_resume"
     assert payload["continuation_reason"] == "unchanged_finalize_state"
-    assert f"Current Quest Route: `decision` / `stop` on `{paper_branch}`." in refreshed_status
+    assert "Current Quest Route: `decision` / `stop`" in refreshed_status
     assert "- Paper-Line Local Recommendation: `write`" in refreshed_status
     assert "- Paper-Line Local Action: `prepare_bundle`" in refreshed_status
     assert "- Quest-Level Next Stage: `decision`" in refreshed_status
@@ -6697,6 +6697,59 @@ def test_paper_line_sync_preserves_stop_route_for_unchanged_finalize_park(
     assert "- Continuation Anchor: `decision`" in refreshed_status
     assert "- Quest-level next step: `decision` / `stop`" in refreshed_summary
     assert "- Recommendation scope: `paper_line_local_only`" in refreshed_summary
+
+
+def test_write_paper_line_state_treats_publication_gate_anti_spin_reason_as_stop(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper publication gate anti spin stop quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_branch = "paper/main"
+
+    write_json(
+        quest_root / "paper" / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-publication-gate-stop",
+            "paper_branch": paper_branch,
+            "selected_outline_ref": "outline-001",
+            "title": "Publication Gate Stop",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        quest_root / "paper" / "paper_bundle_manifest.json",
+        {
+            "paper_branch": paper_branch,
+            "selected_outline_ref": "outline-001",
+        },
+    )
+    write_json(
+        quest_root / "paper" / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Publication Gate Stop",
+            "sections": [],
+        },
+    )
+    quest_service.update_settings(quest["quest_id"], active_anchor="write")
+    quest_service.set_continuation_state(
+        quest_root,
+        policy="wait_for_user_or_resume",
+        anchor="decision",
+        reason="unchanged_publication_gate_state",
+    )
+
+    payload = artifact._write_paper_line_state(quest_root, workspace_root=paper_workspace)
+    refreshed_status = (quest_root / "status.md").read_text(encoding="utf-8")
+
+    assert payload["continuation_reason"] == "unchanged_publication_gate_state"
+    assert payload["continuation_display_action"] == "stop"
+    assert "Current Quest Route: `decision` / `stop`" in refreshed_status
 
 
 def test_progress_interact_does_not_refresh_paper_line_sync_after_route_decision(
@@ -7951,6 +8004,84 @@ def test_get_quest_state_prefers_richer_canonical_paper_surface_over_stale_activ
     assert "0.7600" in canonical_draft
     assert "0.7600" in active_draft
     assert "Result placeholder" not in active_draft
+
+
+def test_runtime_hygiene_focus_ignores_historical_worktree_paper_surfaces(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("runtime hygiene focus ignores historical paper surfaces")
+    quest_root = Path(quest["quest_root"])
+
+    active_root = quest_root / ".ds" / "worktrees" / "paper-active"
+    active_root.mkdir(parents=True, exist_ok=True)
+    historical_root = quest_root / ".ds" / "worktrees" / "paper-historical-rich"
+    historical_root.mkdir(parents=True, exist_ok=True)
+    quest_service.update_research_state(
+        quest_root,
+        workspace_mode="paper",
+        current_workspace_root=str(active_root),
+        current_workspace_branch="paper/active",
+    )
+
+    active_paper_root = active_root / "paper"
+    active_paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        active_paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/active",
+            "selected_outline_ref": "outline-active",
+        },
+    )
+
+    canonical_paper_root = quest_root / "paper"
+    canonical_paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        canonical_paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-canonical",
+            "title": "Canonical Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        canonical_paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/canonical",
+            "selected_outline_ref": "outline-canonical",
+        },
+    )
+
+    historical_paper_root = historical_root / "paper"
+    historical_paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        historical_paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-historical",
+            "title": "Historical Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        historical_paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/historical",
+            "selected_outline_ref": "outline-historical",
+        },
+    )
+    write_json(historical_paper_root / "claim_evidence_map.json", {"claims": [{"claim_id": "claim-old"}]})
+    write_json(historical_paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-historical", "items": []})
+    _write_citation_rich_draft(historical_paper_root, count=20)
+
+    hygiene = quest_service.runtime_hygiene_status(quest_root, workspace_root=active_root)
+    best_root = quest_service._best_paper_root(quest_root, active_root)
+
+    assert hygiene["focus_mode"] == "active_workspace_first"
+    assert hygiene["focused_workspace_count"] == 2
+    assert hygiene["ignored_historical_workspace_count"] == 1
+    assert hygiene["historical_worktrees_ignored_by_default"] is True
+    assert str(historical_root) in hygiene["ignored_historical_workspace_roots_preview"]
+    assert best_root == canonical_paper_root
 
 
 def test_get_paper_contract_health_keeps_bundle_not_ready_when_submission_checklist_has_blockers(temp_home: Path) -> None:

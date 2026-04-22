@@ -420,28 +420,94 @@ class QuestService:
         write_json(self._lab_canvas_state_path(quest_root), payload)
         return payload
 
-    def workspace_roots(self, quest_root: Path) -> list[Path]:
-        roots: list[Path] = [quest_root]
+    @staticmethod
+    def _normalize_existing_workspace_root(value: object) -> Path | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        candidate = Path(text)
+        return candidate if candidate.exists() else None
+
+    def _candidate_workspace_roots(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+        include_historical: bool,
+    ) -> list[Path]:
         state = self.read_research_state(quest_root)
-        preferred_raw = str(state.get("research_head_worktree_root") or "").strip()
-        if preferred_raw:
-            preferred = Path(preferred_raw)
-            if preferred.exists():
-                roots.append(preferred)
-        worktrees_root = quest_root / ".ds" / "worktrees"
-        if worktrees_root.exists():
-            for path in sorted(worktrees_root.iterdir()):
-                if path.is_dir():
-                    roots.append(path)
-        deduped: list[Path] = []
+        roots: list[Path] = []
         seen: set[str] = set()
-        for root in roots:
-            key = str(root.resolve())
-            if key in seen:
-                continue
+
+        def add(path: Path | None) -> None:
+            if path is None:
+                return
+            resolved = path.resolve(strict=False)
+            key = str(resolved)
+            if key in seen or not resolved.exists():
+                return
             seen.add(key)
-            deduped.append(root)
-        return deduped
+            roots.append(resolved)
+
+        add(workspace_root.resolve(strict=False) if workspace_root is not None else None)
+        add(self._normalize_existing_workspace_root(state.get("current_workspace_root")))
+        add(quest_root)
+        add(self._normalize_existing_workspace_root(state.get("paper_parent_worktree_root")))
+        add(self._normalize_existing_workspace_root(state.get("analysis_parent_worktree_root")))
+        add(self._normalize_existing_workspace_root(state.get("research_head_worktree_root")))
+
+        if include_historical:
+            worktrees_root = quest_root / ".ds" / "worktrees"
+            if worktrees_root.exists():
+                for path in sorted(worktrees_root.iterdir()):
+                    if path.is_dir():
+                        add(path)
+        return roots
+
+    def focused_workspace_roots(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> list[Path]:
+        return self._candidate_workspace_roots(
+            quest_root,
+            workspace_root=workspace_root,
+            include_historical=False,
+        )
+
+    def workspace_roots(self, quest_root: Path) -> list[Path]:
+        return self._candidate_workspace_roots(
+            quest_root,
+            workspace_root=None,
+            include_historical=True,
+        )
+
+    def runtime_hygiene_status(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        focused_roots = self.focused_workspace_roots(quest_root, workspace_root=workspace_root)
+        all_roots = self.workspace_roots(quest_root)
+        focused_keys = {str(root.resolve(strict=False)) for root in focused_roots}
+        ignored_historical_roots = [
+            root
+            for root in all_roots
+            if str(root.resolve(strict=False)) not in focused_keys
+        ]
+        return {
+            "focus_mode": "active_workspace_first",
+            "active_workspace_root": str((workspace_root or self.active_workspace_root(quest_root)).resolve(strict=False)),
+            "focused_workspace_count": len(focused_roots),
+            "focused_workspace_roots": [str(root) for root in focused_roots],
+            "ignored_historical_workspace_count": len(ignored_historical_roots),
+            "ignored_historical_workspace_roots_preview": [
+                str(root) for root in ignored_historical_roots[:8]
+            ],
+            "historical_worktrees_ignored_by_default": bool(ignored_historical_roots),
+        }
 
     def active_workspace_root(self, quest_root: Path) -> Path:
         state = self.read_research_state(quest_root)
@@ -1642,27 +1708,7 @@ class QuestService:
         return excerpt or None
 
     def _snapshot_workspace_candidates(self, quest_root: Path, workspace_root: Path) -> list[Path]:
-        candidates: list[Path] = []
-        seen: set[str] = set()
-
-        def add(path: Path | None) -> None:
-            if path is None:
-                return
-            resolved = path.resolve()
-            key = str(resolved)
-            if key in seen or not resolved.exists():
-                return
-            seen.add(key)
-            candidates.append(resolved)
-
-        add(workspace_root)
-        add(quest_root)
-        worktrees_root = quest_root / ".ds" / "worktrees"
-        if worktrees_root.exists():
-            for item in sorted(worktrees_root.iterdir()):
-                if item.is_dir():
-                    add(item)
-        return candidates
+        return self.focused_workspace_roots(quest_root, workspace_root=workspace_root)
 
     @staticmethod
     def _path_mtime(path: Path) -> float:
@@ -2543,7 +2589,7 @@ class QuestService:
         current_workspace_root = workspace_root.resolve(strict=False)
         legacy_workspace_roots = [
             root.resolve(strict=False)
-            for root in self.workspace_roots(quest_root)
+            for root in self.focused_workspace_roots(quest_root, workspace_root=current_workspace_root)
             if root.resolve(strict=False) != current_workspace_root
         ]
         ArtifactService(self.home).repair_paper_live_paths(
