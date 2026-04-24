@@ -1779,6 +1779,52 @@ def test_snapshot_marks_invalid_when_managed_publication_eval_schema_is_incomple
     assert "invalid" in str(health["managed_publication_gate_summary"] or "")
 
 
+def test_snapshot_keeps_publication_gate_nonclear_when_promising_eval_requires_controller_decision(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper gate stays nonclear when continue_same_line still needs controller decision")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "promising",
+                "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+            },
+            "gaps": [
+                {
+                    "summary": "bundle-stage work is unlocked and can proceed on the critical path",
+                    "severity": "optional",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "continue_same_line",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["managed_publication_gate_status"] == "promising"
+    assert health["managed_publication_gate_clear"] is False
+    assert "controller decision" in str(health["managed_publication_gate_summary"] or "")
+
+
 def test_snapshot_updated_at_tracks_managed_publication_eval_emitted_at(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -1905,6 +1951,83 @@ def test_snapshot_updated_at_refreshes_when_managed_publication_eval_changes(tem
     assert refreshed_snapshot["updated_at"] == refreshed_emitted_at
     assert refreshed_compact["updated_at"] == refreshed_emitted_at
     assert service.list_quests()[0]["updated_at"] == refreshed_emitted_at
+
+
+def test_stopped_snapshot_updated_at_ignores_managed_publication_eval_refresh(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("stopped paper keeps stop timestamp in list")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    stopped_at = "2026-04-24T06:57:05+00:00"
+    quest_yaml = service.read_quest_yaml(quest_root)
+    quest_yaml["status"] = "stopped"
+    quest_yaml["updated_at"] = stopped_at
+    write_yaml(quest_root / "quest.yaml", quest_yaml)
+    write_text(
+        quest_root / "status.md",
+        "\n".join(
+            [
+                "# Status",
+                "",
+                "Current Quest Route: `decision` / `stop` on `paper/main`.",
+                "",
+                f"- Updated at: {stopped_at}",
+                "- Quest-Level Next Stage: `decision`",
+                "- Quest-Level Next Action: `stop`",
+                "",
+            ]
+        ),
+    )
+    service.update_runtime_state(
+        quest_root=quest_root,
+        status="stopped",
+        active_run_id=None,
+        stop_reason="content milestone reached",
+        last_transition_at=stopped_at,
+    )
+
+    refreshed_eval_at = "2026-04-24T13:03:47+00:00"
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "emitted_at": refreshed_eval_at,
+            "verdict": {
+                "overall_verdict": "blocked",
+                "summary": "Publication gate projection was refreshed after stop.",
+            },
+            "gaps": [
+                {
+                    "summary": "stale_submission_minimal_authority",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_type": "return_to_publishability_gate",
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    compact = service.summary_compact(snapshot["quest_id"])
+
+    assert refreshed["runtime_status"] == "stopped"
+    assert refreshed["updated_at"] == stopped_at
+    assert compact["updated_at"] == stopped_at
+    assert service.list_quests()[0]["updated_at"] == stopped_at
+
+
+def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    service = QuestService(temp_home)
 
 
 def test_list_quests_handles_null_updated_at_without_crashing(temp_home: Path) -> None:

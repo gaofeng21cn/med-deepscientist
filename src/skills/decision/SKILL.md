@@ -16,6 +16,7 @@ Use it to make one route judgment from durable evidence and then get the quest m
 - If the runtime starts an auto-continue turn with no new user message, continue from the active requirements and durable quest state instead of replaying the previous user turn.
 - If `startup_contract.decision_policy = autonomous`, do not emit ordinary `artifact.interact(kind='decision_request', ...)` calls; decide the route yourself, record the reason, and continue.
 - If there is no new durable evidence, no blocker change, and no new user instruction since the last route judgment, do not restate the same decision again; continue the current action or remain waiting/blocked instead.
+- If the current durable route is already a blocked `stop` or `stop-hold` state and this turn only reconfirms that nothing changed, reuse that existing authority. Do not create another same-meaning decision artifact, and do not emit repeated near-duplicate progress updates after the hold state is already clear.
 - Use `reply_mode='blocking'` for the actual decision request only when the user must choose before safe continuation and the quest contract still allows a user-gated decision.
 - If a threaded user reply arrives, interpret it relative to the latest decision or progress interaction before assuming the task changed completely.
 - Quest completion is a special terminal decision: first ask for explicit completion approval with `artifact.interact(kind='decision_request', reply_mode='blocking', reply_schema={'decision_type': 'quest_completion_approval'}, ...)`, and only after an explicit approval reply should you call `artifact.complete_quest(...)`.
@@ -165,6 +166,14 @@ Typical mapping:
   - reset, stop
 - `blocked`
   - reuse baseline, attach baseline, request user decision, stop
+
+For publication-gate or controller-owned hold states, `blocked + stop` remains the correct outcome until one of these becomes true:
+
+- a blocker materially changed
+- a new controller-compliant bounded evidence question exists
+- a new user instruction supersedes the hold
+
+If none of those changed, the decision step is already resolved. Preserve the existing durable authority and end the turn without another duplicate decision cycle.
 
 The action must match the actual state.
 

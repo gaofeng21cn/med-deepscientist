@@ -66,6 +66,7 @@ _PROJECTION_REFRESH_THROTTLE_SECONDS = 1.0
 _EVENT_TYPE_BYTES_RE = re.compile(rb'"(?:type|event_type)"\s*:\s*"([^"]+)"')
 _EVENT_TOOL_NAME_BYTES_RE = re.compile(rb'"tool_name"\s*:\s*"([^"]+)"')
 _EVENT_RUN_ID_BYTES_RE = re.compile(rb'"run_id"\s*:\s*"([^"]+)"')
+_STATUS_UPDATED_AT_RE = re.compile(r"^-\s*Updated at:\s*(?P<timestamp>\S+)\s*$", re.IGNORECASE | re.MULTILINE)
 CONTINUATION_POLICIES = {"auto", "when_external_progress", "wait_for_user_or_resume", "none"}
 
 
@@ -1947,6 +1948,36 @@ class QuestService:
                 latest = parsed
         return latest.isoformat() if latest is not None else None
 
+    @classmethod
+    def _snapshot_updated_at(
+        cls,
+        *,
+        runtime_state: dict[str, Any],
+        quest_yaml: dict[str, Any],
+        managed_publication_eval: dict[str, Any],
+        status_text: str = "",
+    ) -> str | None:
+        runtime_status = str(runtime_state.get("status") or quest_yaml.get("status") or "").strip().lower()
+        live_progress_values: list[Any] = [
+            runtime_state.get("last_artifact_interact_at"),
+            runtime_state.get("last_tool_activity_at"),
+            runtime_state.get("last_delivered_at"),
+        ]
+        if runtime_status in {"stopped", "paused", "completed"}:
+            status_match = _STATUS_UPDATED_AT_RE.search(status_text or "")
+            if status_match is not None:
+                parsed_status_timestamp = cls._latest_progress_timestamp(status_match.group("timestamp"))
+                if parsed_status_timestamp is not None:
+                    return parsed_status_timestamp
+            return cls._latest_progress_timestamp(
+                runtime_state.get("last_transition_at"),
+                quest_yaml.get("updated_at"),
+            )
+        live_progress_values.append(managed_publication_eval.get("emitted_at"))
+        return cls._latest_progress_timestamp(*live_progress_values) or cls._latest_progress_timestamp(
+            quest_yaml.get("updated_at"),
+        )
+
     @staticmethod
     def _read_paper_catalog(
         *,
@@ -2329,10 +2360,24 @@ class QuestService:
                 continue
             blocking_gap_summaries.append(gap_summary)
         clear_action_types = {"continue_same_line", "prepare_promotion_review"}
+        clear_action_records = [
+            item
+            for item in recommended_actions
+            if str(item.get("action_type") or "").strip() in clear_action_types
+        ]
+        controller_gated_clear_action_types = sorted(
+            {
+                str(item.get("action_type") or "").strip()
+                for item in clear_action_records
+                if bool(item.get("requires_controller_decision"))
+                and str(item.get("action_type") or "").strip()
+            }
+        )
         clear_from_publication_eval = (
             bool(gaps)
             and not blocking_gap_summaries
-            and any(action_type in clear_action_types for action_type in recommended_action_types)
+            and bool(clear_action_records)
+            and not controller_gated_clear_action_types
         )
         if not overall_verdict or not summary:
             return {
@@ -2345,6 +2390,14 @@ class QuestService:
                 "gap_summaries": gap_summaries,
                 "recommended_action_types": recommended_action_types,
             }
+        if controller_gated_clear_action_types:
+            action_preview = ", ".join(controller_gated_clear_action_types)
+            controller_decision_gap = f"controller decision required before {action_preview}"
+            if controller_decision_gap not in gap_summaries:
+                gap_summaries.append(controller_decision_gap)
+            summary = (
+                f"managed publication gate still requires controller decision before {action_preview}"
+            )
 
         status = (
             "clear"
@@ -2362,6 +2415,7 @@ class QuestService:
             "emitted_at": emitted_at,
             "gap_summaries": gap_summaries,
             "recommended_action_types": recommended_action_types,
+            "controller_decision_required": bool(controller_gated_clear_action_types),
         }
 
     def _paper_reference_materialization_payload(
@@ -3934,6 +3988,11 @@ class QuestService:
             str(managed_publication_gate.get("summary") or "").strip()
             or "managed publication gate status is unavailable"
         )
+        managed_publication_gate_recommended_action_types = {
+            str(item).strip()
+            for item in (managed_publication_gate.get("recommended_action_types") or [])
+            if str(item).strip()
+        }
         reference_gate = (
             dict(reference_materialization.get("reference_gate") or {})
             if isinstance(reference_materialization.get("reference_gate"), dict)
@@ -4066,6 +4125,14 @@ class QuestService:
             and proofing_outputs_ready
             and submission_checklist_ready
         )
+        managed_publication_gate_requires_route_hold = (
+            audit_package_ready
+            and not managed_publication_gate_clear
+            and (
+                bool(managed_publication_gate.get("controller_decision_required"))
+                or "return_to_controller" in managed_publication_gate_recommended_action_types
+            )
+        )
         submission_ready_for_delivery = (
             audit_package_ready
             and submission_blocking_item_count == 0
@@ -4145,6 +4212,10 @@ class QuestService:
         else:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
+
+        if managed_publication_gate_requires_route_hold and recommended_next_stage in {"write", "finalize"}:
+            recommended_next_stage = "write"
+            recommended_action = "return_to_publishability_gate"
 
         blocking_reasons: list[str] = []
         if unmapped_completed_items:
@@ -4278,8 +4349,12 @@ class QuestService:
                     + (f": {managed_publication_gate_summary}" if managed_publication_gate_summary else "")
                     + (f" (gaps: {gap_preview})" if gap_preview else "")
                 )
-            if managed_publication_completion_blocker and not blocking_reasons:
-                blocking_reasons.append(managed_publication_completion_blocker)
+            if managed_publication_completion_blocker:
+                if managed_publication_gate_requires_route_hold:
+                    if managed_publication_completion_blocker not in blocking_reasons:
+                        blocking_reasons.insert(0, managed_publication_completion_blocker)
+                elif not blocking_reasons:
+                    blocking_reasons.append(managed_publication_completion_blocker)
 
         finalize_ready = (
             writing_ready
@@ -4820,7 +4895,8 @@ class QuestService:
             active_baseline_variant_id = confirmed_ref.get("variant_id")
 
         status_line = "Quest created."
-        status_text = self._read_cached_text(quest_root / "status.md").strip().splitlines()
+        status_text_raw = self._read_cached_text(quest_root / "status.md")
+        status_text = status_text_raw.strip().splitlines()
         if status_text:
             for line in status_text:
                 line = line.strip().lstrip("#").strip()
@@ -4837,13 +4913,11 @@ class QuestService:
             quest_root,
             paper_root=paper_root,
         )
-        updated_at = self._latest_progress_timestamp(
-            runtime_state.get("last_artifact_interact_at"),
-            runtime_state.get("last_tool_activity_at"),
-            runtime_state.get("last_delivered_at"),
-            managed_publication_eval.get("emitted_at"),
-        ) or self._latest_progress_timestamp(
-            quest_yaml.get("updated_at"),
+        updated_at = self._snapshot_updated_at(
+            runtime_state=runtime_state,
+            quest_yaml=quest_yaml,
+            managed_publication_eval=managed_publication_eval,
+            status_text=status_text_raw,
         )
         payload = {
             "quest_id": quest_yaml.get("quest_id", quest_id),
@@ -5202,7 +5276,8 @@ class QuestService:
             active_baseline_id = confirmed_ref.get("baseline_id")
             active_baseline_variant_id = confirmed_ref.get("variant_id")
         status_line = "Quest created."
-        status_text = self._read_cached_text(quest_root / "status.md").strip().splitlines()
+        status_text_raw = self._read_cached_text(quest_root / "status.md")
+        status_text = status_text_raw.strip().splitlines()
         if status_text:
             for line in status_text:
                 line = line.strip().lstrip("#").strip()
@@ -5220,13 +5295,11 @@ class QuestService:
             quest_root,
             paper_root=paper_root,
         )
-        updated_at = self._latest_progress_timestamp(
-            runtime_state.get("last_artifact_interact_at"),
-            runtime_state.get("last_tool_activity_at"),
-            runtime_state.get("last_delivered_at"),
-            managed_publication_eval.get("emitted_at"),
-        ) or self._latest_progress_timestamp(
-            quest_yaml.get("updated_at"),
+        updated_at = self._snapshot_updated_at(
+            runtime_state=runtime_state,
+            quest_yaml=quest_yaml,
+            managed_publication_eval=managed_publication_eval,
+            status_text=status_text_raw,
         )
         paper_contract = self._paper_contract_payload(quest_root, workspace_root)
         paper_evidence = self._paper_evidence_payload(quest_root, workspace_root)

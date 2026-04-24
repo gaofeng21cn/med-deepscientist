@@ -32,6 +32,7 @@ const pythonCommands = new Set([
   'baseline',
   'latex',
   'config',
+  'repair',
 ]);
 const UPDATE_PACKAGE_NAME = String(packageJson.name || '@researai/deepscientist').trim() || '@researai/deepscientist';
 const UPDATE_CHECK_TTL_MS = 12 * 60 * 60 * 1000;
@@ -67,6 +68,10 @@ function readOptionValue(argv, optionName) {
     }
   }
   return null;
+}
+
+function isPythonCliCommand(commandName) {
+  return pythonCommands.has(commandName);
 }
 
 function parseBooleanFlagValue(rawValue) {
@@ -4523,7 +4528,7 @@ async function main() {
     printLauncherHelp();
     return;
   }
-  if (positional && pythonCommands.has(positional.value)) {
+  if (positional && isPythonCliCommand(positional.value)) {
     const home = resolveHome(args);
     const pythonRuntime = ensurePythonRuntime(home);
     const runtimePython = pythonRuntime.runtimePython;
@@ -4590,6 +4595,7 @@ module.exports = {
     officialRepositoryLine,
     stripAnsi,
     normalizeLegacyHostFlagArgs,
+    isPythonCliCommand,
   },
 };
 

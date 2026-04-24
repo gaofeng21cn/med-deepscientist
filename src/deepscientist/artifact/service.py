@@ -4370,14 +4370,14 @@ class ArtifactService:
     def _human_milestone_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return dict(payload.get("human_milestone") or {}) if isinstance(payload.get("human_milestone"), dict) else {}
 
-    def _continuation_display_action(
+    def _continuation_action_projection(
         self,
         quest_root: Path,
         *,
         continuation_policy: str | None = None,
         continuation_reason: str | None,
         workspace_root: Path | None = None,
-    ) -> str:
+    ) -> dict[str, str]:
         policy = str(continuation_policy or "").strip().lower()
         reason = str(continuation_reason or "").strip()
         if (
@@ -4385,12 +4385,12 @@ class ArtifactService:
             and reason.startswith("unchanged_")
             and reason.endswith("_state")
         ):
-            return "stop"
+            return {"display_action": "stop", "canonical_action": "stop"}
         if not reason.startswith("decision:"):
-            return "continue"
+            return {"display_action": "continue", "canonical_action": "continue"}
         artifact_id = reason.split(":", 1)[1].strip()
         if not artifact_id:
-            return "continue"
+            return {"display_action": "continue", "canonical_action": "continue"}
         roots: list[Path] = []
         resolved_workspace = self._workspace_root_for(quest_root, workspace_root)
         if resolved_workspace not in roots:
@@ -4402,13 +4402,23 @@ class ArtifactService:
             if not isinstance(record, dict) or not record:
                 continue
             action = str(record.get("action") or "").strip()
-            if self._is_parked_decision_action(action):
-                return "stop"
-            if action in {"reset", "request_user_decision"}:
-                return action
+            details = dict(record.get("details") or {}) if isinstance(record.get("details"), dict) else {}
+            operational_route = str(details.get("operational_route") or "").strip()
+            route_action = operational_route.rsplit("/", 1)[-1].strip() if "/" in operational_route else ""
+            protocol_step = str(record.get("protocol_step") or "").strip().lower()
+            if self._is_parked_decision_action(action) or action in {"reset", "request_user_decision"}:
+                display_action = action
+                if route_action and route_action != action:
+                    display_action = route_action
+                elif self._is_parked_decision_action(action) and "stop_hold" in protocol_step:
+                    display_action = "stop-hold"
+                return {
+                    "display_action": display_action,
+                    "canonical_action": action,
+                }
             if action:
-                return "continue"
-        return "continue"
+                return {"display_action": "continue", "canonical_action": action}
+        return {"display_action": "continue", "canonical_action": "continue"}
 
     def _paper_line_route_projection(self, payload: dict[str, Any]) -> dict[str, Any]:
         recommendation_scope = str(payload.get("recommendation_scope") or "").strip() or "none"
@@ -4426,6 +4436,10 @@ class ArtifactService:
                 "headline_label": "Current Quest Route",
                 "display_stage": continuation_stage,
                 "display_action": str(payload.get("continuation_display_action") or "continue").strip() or "continue",
+                "canonical_action": (
+                    str(payload.get("continuation_canonical_action") or payload.get("continuation_display_action") or "continue").strip()
+                    or "continue"
+                ),
                 "local_stage": local_stage,
                 "local_action": local_action,
                 "continuation_anchor": continuation_anchor,
@@ -4440,6 +4454,7 @@ class ArtifactService:
             "headline_label": headline_label,
             "display_stage": local_stage,
             "display_action": local_action,
+            "canonical_action": local_action,
             "local_stage": local_stage,
             "local_action": local_action,
             "continuation_anchor": continuation_anchor,
@@ -4590,14 +4605,18 @@ class ArtifactService:
         if milestone_summary_zh:
             lines.insert(10, f"- 当前判断：{milestone_summary_zh}")
         if route_source == "quest_continuation":
+            display_action = str(route.get("display_action") or "none").strip() or "none"
+            canonical_action = str(route.get("canonical_action") or display_action).strip() or display_action
             lines.insert(
                 21,
-                f"- Quest-Level Next Action: `{str(route.get('display_action') or 'none').strip() or 'none'}`",
+                f"- Quest-Level Next Action: `{display_action}`",
             )
             lines.insert(
                 21,
                 f"- Quest-Level Next Stage: `{str(route.get('display_stage') or 'none').strip() or 'none'}`",
             )
+            if canonical_action != display_action:
+                lines.insert(23, f"- Canonical Recorded Action: `{canonical_action}`")
         if metadata_closeout_lines:
             lines.extend(metadata_closeout_lines)
             lines.extend(["", "## Blocking Reasons", ""])
@@ -4639,9 +4658,13 @@ class ArtifactService:
             f"- {next_step_label}: `{str(route.get('display_stage') or 'none').strip() or 'none'}` / `{str(route.get('display_action') or 'none').strip() or 'none'}`",
             f"- Recommendation scope: `{str(payload.get('recommendation_scope') or 'none').strip() or 'none'}`",
         ]
+        display_action = str(route.get("display_action") or "").strip()
+        canonical_action = str(route.get("canonical_action") or display_action).strip()
         if milestone_summary_zh:
             lines.insert(8, f"- 当前判断：{milestone_summary_zh}")
         if route_source == "quest_continuation":
+            if canonical_action and canonical_action != display_action:
+                lines.insert(11, f"- Canonical recorded action: `{canonical_action}`")
             lines.insert(
                 9,
                 (
@@ -4801,11 +4824,18 @@ class ArtifactService:
             "status_narration_contract": dict(health.get("status_narration_contract") or {}),
             "updated_at": utc_now(),
         }
-        payload["continuation_display_action"] = self._continuation_display_action(
+        continuation_route = self._continuation_action_projection(
             quest_root,
             continuation_policy=payload.get("continuation_policy"),
             continuation_reason=payload.get("continuation_reason"),
             workspace_root=workspace_root,
+        )
+        payload["continuation_display_action"] = (
+            str(continuation_route.get("display_action") or "continue").strip() or "continue"
+        )
+        payload["continuation_canonical_action"] = (
+            str(continuation_route.get("canonical_action") or payload["continuation_display_action"]).strip()
+            or payload["continuation_display_action"]
         )
         payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
         completion_payload = dict(payload)
@@ -6572,6 +6602,29 @@ class ArtifactService:
             "paper_contract_health": payload,
         }
 
+    def _artifact_surface_paper_contract_health(
+        self,
+        quest_root: Path,
+        *,
+        snapshot: dict[str, Any] | None = None,
+        workspace_root: Path | None = None,
+    ) -> dict[str, Any]:
+        snapshot_health = (
+            dict((snapshot or {}).get("paper_contract_health") or {})
+            if isinstance((snapshot or {}).get("paper_contract_health"), dict)
+            else {}
+        )
+        resolved_workspace_root = workspace_root or self.quest_service.active_workspace_root(quest_root)
+        live_health = self._paper_contract_health_payload(
+            quest_root,
+            workspace_root=resolved_workspace_root,
+        )
+        paper_health = dict(snapshot_health)
+        paper_health.update(dict(live_health or {}))
+        if paper_health:
+            paper_health["blocking_reasons"] = self._paper_line_display_blockers(paper_health)
+        return paper_health
+
     def get_quest_state(
         self,
         quest_root: Path,
@@ -6586,6 +6639,12 @@ class ArtifactService:
             workspace_root=self.quest_service.active_workspace_root(quest_root),
         )
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+        workspace_root = self.quest_service.active_workspace_root(quest_root)
+        paper_health = self._artifact_surface_paper_contract_health(
+            quest_root,
+            snapshot=snapshot,
+            workspace_root=workspace_root,
+        )
         payload: dict[str, Any] = {
             "quest_id": snapshot.get("quest_id"),
             "title": snapshot.get("title"),
@@ -6611,7 +6670,7 @@ class ArtifactService:
             "waiting_interaction_id": snapshot.get("waiting_interaction_id"),
             "pending_user_message_count": snapshot.get("pending_user_message_count"),
             "next_pending_slice_id": snapshot.get("next_pending_slice_id"),
-            "paper_contract_health": snapshot.get("paper_contract_health"),
+            "paper_contract_health": paper_health,
         }
         if normalized_detail == "full":
             payload.update(
@@ -6646,14 +6705,19 @@ class ArtifactService:
         if normalized_detail not in {"brief", "full"}:
             raise ValueError("get_global_status detail must be `brief` or `full`.")
         normalized_locale = str(locale or "zh").strip().lower() or "zh"
+        workspace_root = self.quest_service.active_workspace_root(quest_root)
+        self._synchronize_paper_reference_materials(
+            quest_root,
+            workspace_root=workspace_root,
+        )
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
         scoreboard = self.refresh_method_scoreboard(quest_root)
         scoreboard_payload = dict(scoreboard.get("scoreboard") or {}) if isinstance(scoreboard.get("scoreboard"), dict) else {}
         counts = dict(snapshot.get("counts") or {}) if isinstance(snapshot.get("counts"), dict) else {}
-        paper_health = (
-            dict(snapshot.get("paper_contract_health") or {})
-            if isinstance(snapshot.get("paper_contract_health"), dict)
-            else {}
+        paper_health = self._artifact_surface_paper_contract_health(
+            quest_root,
+            snapshot=snapshot,
+            workspace_root=workspace_root,
         )
         recent_runs = [dict(item) for item in (snapshot.get("recent_runs") or []) if isinstance(item, dict)]
         latest_run = recent_runs[-1] if recent_runs else {}

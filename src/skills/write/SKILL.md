@@ -52,6 +52,7 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - For any figure that will enter the draft, appendix, or paper bundle, open `figure-polish/SKILL.md` and complete its render-inspect-revise pass before treating the figure as final.
 - If you generate figure code in Python, start from the system prompt Morandi plotting template and only adjust figure size, labels, and series colors as needed.
 - If the runtime starts an auto-continue turn with no new user message, keep drafting or verifying from the durable state and active requirements instead of replaying the previous user turn.
+- If paper-local writing readiness conflicts with a higher-authority global publication gate, controller hold, or other explicit write blocker, treat that higher authority as dominant. Route back once, preserve the current frozen or `stop-hold` state, and do not keep emitting repeated write-progress updates on later no-delta auto-continue turns.
 - Message templates are references only. Adapt to the actual context and vary wording so updates feel respectful, human, and non-robotic.
 - If a threaded user reply arrives, interpret it relative to the latest writing progress update before assuming the task changed completely.
 - Use milestone updates deliberately when outline selection, claim downgrades, proofing completion, bundle readiness, or route-back-to-experiment decisions become durably true.
@@ -124,6 +125,7 @@ Prefer an author-facing outline folder under `paper/outline/` with section-level
 - the main work is still baseline establishment or ideation
 - the current need is a follow-up analysis rather than narrative consolidation
 - the startup contract explicitly disables research-paper delivery and the user has not re-enabled paper writing
+- a higher-authority publication gate or controller instruction explicitly blocks write and has not yet supplied a cleared write path or a new bounded evidence-building question
 
 ## Preconditions and gate
 

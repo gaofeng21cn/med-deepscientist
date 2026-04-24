@@ -7,6 +7,12 @@ const { spawnSync } = require('node:child_process');
 
 const { __internal } = require('../bin/ds.js');
 
+test('isPythonCliCommand forwards repair alongside the existing Python CLI commands', () => {
+  assert.equal(__internal.isPythonCliCommand('repair'), true);
+  assert.equal(__internal.isPythonCliCommand('status'), true);
+  assert.equal(__internal.isPythonCliCommand('bogus'), false);
+});
+
 test('createPythonRuntimePlan prefers a valid active conda interpreter', () => {
   const plan = __internal.createPythonRuntimePlan({
     condaProbes: [
