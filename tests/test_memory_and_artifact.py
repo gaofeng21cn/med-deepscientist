@@ -6971,6 +6971,41 @@ def test_decision_record_updates_active_anchor_from_next_stage(temp_home: Path) 
     assert snapshot["active_anchor"] == "write"
 
 
+@pytest.mark.parametrize("action", ["stop", "stop-hold"])
+def test_decision_record_uses_waiting_continuation_policy_for_parked_actions(
+    temp_home: Path,
+    action: str,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create(f"decision parked continuation quest {action}")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    quest_service.update_settings(quest["quest_id"], active_anchor="finalize")
+
+    recorded = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "blocked",
+            "action": action,
+            "next_stage": "decision",
+            "reason": "Park this route until the user resumes or sends a new message.",
+            "summary": "Route is intentionally parked.",
+        },
+    )
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    assert recorded["ok"] is True
+    assert snapshot["active_anchor"] == "decision"
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == f"decision:{recorded['artifact_id']}"
+
+
 def test_quest_service_accepts_companion_skill_active_anchor(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

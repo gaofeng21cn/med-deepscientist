@@ -265,6 +265,26 @@ class ArtifactService:
             )
         return normalized
 
+    @staticmethod
+    def _normalize_decision_action(action: object) -> str:
+        normalized = str(action or "").strip().lower()
+        if normalized == "stop" or normalized.startswith("stop-"):
+            return "stop"
+        return normalized
+
+    @classmethod
+    def _is_parked_decision_action(cls, action: object) -> bool:
+        return cls._normalize_decision_action(action) == "stop"
+
+    @classmethod
+    def _normalize_record_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized_payload = dict(payload)
+        if str(normalized_payload.get("kind") or "").strip() == "decision":
+            action = cls._normalize_decision_action(normalized_payload.get("action"))
+            if action:
+                normalized_payload["action"] = action
+        return normalized_payload
+
     def _build_idea_interaction_message(
         self,
         *,
@@ -4382,7 +4402,9 @@ class ArtifactService:
             if not isinstance(record, dict) or not record:
                 continue
             action = str(record.get("action") or "").strip()
-            if action in {"stop", "reset", "request_user_decision"}:
+            if self._is_parked_decision_action(action):
+                return "stop"
+            if action in {"reset", "request_user_decision"}:
                 return action
             if action:
                 return "continue"
@@ -7407,6 +7429,7 @@ class ArtifactService:
         commit_message: str | None = None,
         push: bool | None = None,
     ) -> dict:
+        payload = self._normalize_record_payload(payload)
         errors = validate_artifact_payload(payload)
         if errors:
             return {
@@ -7594,7 +7617,11 @@ class ArtifactService:
             )
             self.quest_service.update_runtime_state(
                 quest_root=quest_root,
-                continuation_policy="auto",
+                continuation_policy=(
+                    "wait_for_user_or_resume"
+                    if self._is_parked_decision_action(record.get("action"))
+                    else "auto"
+                ),
                 continuation_anchor=decision_continuation_anchor,
                 continuation_reason=f"decision:{artifact_id}",
             )
