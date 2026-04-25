@@ -75,7 +75,17 @@ class ConfigManager:
             if not path.exists():
                 write_yaml(path, default_payload(name, self.home))
                 created.append(path)
+        self._migrate_stale_runners_file()
         return created
+
+    def _migrate_stale_runners_file(self) -> None:
+        path = self.path_for("runners")
+        if not path.exists():
+            return
+        original = self.load_named("runners")
+        normalized = self._normalize_runners_payload(original)
+        if normalized != original:
+            write_yaml(path, normalized)
 
     def ensure_optional_file(self, name: str) -> Path:
         if name not in OPTIONAL_CONFIG_NAMES:
@@ -108,8 +118,23 @@ class ConfigManager:
     def load_named_normalized(self, name: str, create_optional: bool = False) -> dict:
         return self._normalize_named_payload(name, self.load_named(name, create_optional=create_optional))
 
+    @staticmethod
+    def _normalize_stale_codex_model_pin(model: object) -> object:
+        normalized = str(model or "").strip()
+        if normalized == "gpt-5.4":
+            return "inherit_local_codex_default"
+        return model
+
+    def _normalize_runners_payload(self, payload: dict) -> dict:
+        normalized = self._normalize_named_payload("runners", payload)
+        codex = normalized.get("codex") if isinstance(normalized.get("codex"), dict) else None
+        if isinstance(codex, dict):
+            codex["model"] = self._normalize_stale_codex_model_pin(codex.get("model"))
+            normalized["codex"] = codex
+        return normalized
+
     def load_runners_config(self) -> dict:
-        return apply_runners_runtime_overrides(self.load_named_normalized("runners"))
+        return apply_runners_runtime_overrides(self._normalize_runners_payload(self.load_named("runners")))
 
     def load_runtime_config(self) -> dict:
         return self.load_named_normalized("config")

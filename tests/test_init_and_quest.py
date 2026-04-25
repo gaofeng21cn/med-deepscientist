@@ -234,6 +234,35 @@ def test_legacy_codex_retry_profile_is_upgraded_when_loading_normalized_runners(
     assert runners["codex"]["retry_max_backoff_sec"] == 1800.0
 
 
+
+def test_stale_codex_model_pin_is_migrated_when_loading_runners(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    runners_path = manager.path_for("runners")
+    runners = manager.load_named("runners")
+    runners["codex"]["model"] = "gpt-5.4"
+    write_yaml(runners_path, runners)
+
+    normalized = manager.load_runners_config()
+
+    assert normalized["codex"]["model"] == "inherit_local_codex_default"
+    assert manager.load_named("runners")["codex"]["model"] == "gpt-5.4"
+
+
+def test_stale_codex_model_pin_is_persistently_migrated_by_ensure_files(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    manager = ConfigManager(temp_home)
+    manager.ensure_files()
+    runners = manager.load_named("runners")
+    runners["codex"]["model"] = "gpt-5.4"
+    write_yaml(manager.path_for("runners"), runners)
+
+    manager.ensure_files()
+
+    assert manager.load_named("runners")["codex"]["model"] == "inherit_local_codex_default"
+
+
 def test_new_creates_standalone_git_repo(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
