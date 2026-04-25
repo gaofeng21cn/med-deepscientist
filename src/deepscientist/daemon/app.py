@@ -1435,6 +1435,24 @@ class DaemonApp:
             turn_reason="user_message",
         )
         if runtime_status == "running" and has_live_turn and stalled_details is None:
+            retry_state = snapshot.get("retry_state") if isinstance(snapshot.get("retry_state"), dict) else None
+            if retry_state and str(retry_state.get("next_retry_at") or "").strip():
+                self._interrupt_retry_wait_for_new_user_message(
+                    quest_id,
+                    message_id=str(message.get("id") or "").strip() or None,
+                )
+                scheduled = {
+                    "scheduled": True,
+                    "started": False,
+                    "queued": True,
+                    "reason": "preempting_retry_backoff",
+                }
+                return {
+                    "message": message,
+                    "auto_resumed": auto_resumed,
+                    "previous_status": previous_status or None,
+                    **scheduled,
+                }
             scheduled = {
                 "scheduled": True,
                 "started": False,
@@ -3000,8 +3018,21 @@ class DaemonApp:
                             backoff_seconds=delay_seconds,
                             next_attempt_index=attempt_index + 1,
                         )
-                        if self._wait_for_retry_delay(quest_id, delay_seconds):
+                        retry_wait_result = self._wait_for_retry_delay(
+                            quest_id,
+                            delay_seconds,
+                            turn_id=turn_id,
+                        )
+                        if retry_wait_result == "ready":
                             continue
+                        if retry_wait_result == "new_user_message":
+                            self.quest_service.update_runtime_state(
+                                quest_root=quest_root,
+                                status="active",
+                                display_status="active",
+                                active_run_id=None,
+                                retry_state=None,
+                            )
                         self._append_retry_event(
                             quest_id,
                             event_type="runner.turn_retry_aborted",
@@ -3012,8 +3043,13 @@ class DaemonApp:
                             model=model,
                             attempt_index=attempt_index,
                             max_attempts=max_attempts,
-                            summary="Retry sequence aborted because the quest was stopped or paused.",
+                            summary=(
+                                "Retry sequence aborted because a newer user message arrived."
+                                if retry_wait_result == "new_user_message"
+                                else "Retry sequence aborted because the quest was stopped or paused."
+                            ),
                             failure_summary=failure_summary,
+                            abort_reason=retry_wait_result,
                         )
                         return
                     exhausted_summary = f"{failure_summary} Retry budget exhausted after {attempt_index} attempt(s)."
@@ -3173,8 +3209,21 @@ class DaemonApp:
                         backoff_seconds=delay_seconds,
                         next_attempt_index=attempt_index + 1,
                     )
-                    if self._wait_for_retry_delay(quest_id, delay_seconds):
+                    retry_wait_result = self._wait_for_retry_delay(
+                        quest_id,
+                        delay_seconds,
+                        turn_id=turn_id,
+                    )
+                    if retry_wait_result == "ready":
                         continue
+                    if retry_wait_result == "new_user_message":
+                        self.quest_service.update_runtime_state(
+                            quest_root=quest_root,
+                            status="active",
+                            display_status="active",
+                            active_run_id=None,
+                            retry_state=None,
+                        )
                     self._append_retry_event(
                         quest_id,
                         event_type="runner.turn_retry_aborted",
@@ -3185,8 +3234,13 @@ class DaemonApp:
                         model=model,
                         attempt_index=attempt_index,
                         max_attempts=max_attempts,
-                        summary="Retry sequence aborted because the quest was stopped or paused.",
+                        summary=(
+                            "Retry sequence aborted because a newer user message arrived."
+                            if retry_wait_result == "new_user_message"
+                            else "Retry sequence aborted because the quest was stopped or paused."
+                        ),
                         failure_summary=failure_summary,
+                        abort_reason=retry_wait_result,
                     )
                     return
 
@@ -3566,15 +3620,69 @@ class DaemonApp:
             return utc_now()
         return (datetime.now(UTC) + timedelta(seconds=delay_seconds)).replace(microsecond=0).isoformat()
 
-    def _wait_for_retry_delay(self, quest_id: str, delay_seconds: float) -> bool:
+    def _interrupt_retry_wait_for_new_user_message(self, quest_id: str, *, message_id: str | None) -> bool:
+        with self._turn_lock:
+            state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
+            state["pending"] = True
+            state["reason"] = "queued_user_messages"
+            state["retry_wait_interrupt_reason"] = "new_user_message"
+            state["retry_wait_interrupt_message_id"] = str(message_id or "").strip() or None
+            event = state.get("retry_wait_event")
+            if hasattr(event, "set"):
+                event.set()
+                return True
+        return False
+
+    def _begin_retry_wait(self, quest_id: str, *, turn_id: str | None) -> threading.Event:
+        event = threading.Event()
+        with self._turn_lock:
+            state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
+            state["retry_wait_event"] = event
+            state["retry_wait_turn_id"] = str(turn_id or "").strip() or None
+            if state.get("pending"):
+                state["retry_wait_interrupt_reason"] = "new_user_message"
+                event.set()
+            else:
+                state.pop("retry_wait_interrupt_reason", None)
+                state.pop("retry_wait_interrupt_message_id", None)
+        return event
+
+    def _retry_wait_interrupt_reason(self, quest_id: str, event: threading.Event) -> str | None:
+        with self._turn_lock:
+            state = self._turn_state.get(quest_id) or {}
+            if state.get("retry_wait_event") is not event:
+                return None
+            return str(state.get("retry_wait_interrupt_reason") or "").strip() or None
+
+    def _finish_retry_wait(self, quest_id: str, event: threading.Event) -> None:
+        with self._turn_lock:
+            state = self._turn_state.get(quest_id)
+            if not isinstance(state, dict) or state.get("retry_wait_event") is not event:
+                return
+            state.pop("retry_wait_event", None)
+            state.pop("retry_wait_turn_id", None)
+            state.pop("retry_wait_interrupt_reason", None)
+            state.pop("retry_wait_interrupt_message_id", None)
+
+    def _wait_for_retry_delay(self, quest_id: str, delay_seconds: float, *, turn_id: str | None = None) -> str:
         if delay_seconds <= 0:
-            return not self._turn_stop_requested(quest_id)
+            return "stopped" if self._turn_stop_requested(quest_id) else "ready"
+        event = self._begin_retry_wait(quest_id, turn_id=turn_id)
         deadline = time.monotonic() + delay_seconds
-        while time.monotonic() < deadline:
+        try:
+            while time.monotonic() < deadline:
+                if self._turn_stop_requested(quest_id):
+                    return "stopped"
+                reason = self._retry_wait_interrupt_reason(quest_id, event)
+                if reason:
+                    return reason
+                timeout = min(0.1, max(0.01, deadline - time.monotonic()))
+                event.wait(timeout=timeout)
             if self._turn_stop_requested(quest_id):
-                return False
-            time.sleep(min(0.1, max(0.01, deadline - time.monotonic())))
-        return not self._turn_stop_requested(quest_id)
+                return "stopped"
+            return self._retry_wait_interrupt_reason(quest_id, event) or "ready"
+        finally:
+            self._finish_retry_wait(quest_id, event)
 
     def _append_retry_event(
         self,
@@ -3593,6 +3701,7 @@ class DaemonApp:
         backoff_seconds: float | None = None,
         next_attempt_index: int | None = None,
         previous_run_id: str | None = None,
+        abort_reason: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "event_id": generate_id("evt"),
@@ -3616,6 +3725,8 @@ class DaemonApp:
             payload["next_attempt_index"] = next_attempt_index
         if previous_run_id:
             payload["previous_run_id"] = previous_run_id
+        if abort_reason:
+            payload["abort_reason"] = abort_reason
         append_jsonl(self.home / "quests" / quest_id / ".ds" / "events.jsonl", payload)
         self.logger.log(
             "warning" if "scheduled" in event_type or "exhausted" in event_type else "info",
@@ -3629,6 +3740,7 @@ class DaemonApp:
             backoff_seconds=backoff_seconds,
             next_attempt_index=next_attempt_index,
             previous_run_id=previous_run_id,
+            abort_reason=abort_reason,
         )
         return payload
 

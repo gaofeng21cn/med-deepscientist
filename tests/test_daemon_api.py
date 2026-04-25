@@ -7090,6 +7090,101 @@ def test_daemon_retries_failed_runner_attempt_and_continues_with_retry_context(t
     )
 
 
+def test_submit_user_message_preempts_waiting_retry_backoff(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": True,
+            "retry_max_attempts": 3,
+            "retry_initial_backoff_sec": 2,
+            "retry_backoff_multiplier": 2,
+            "retry_max_backoff_sec": 2,
+        }
+    )
+    quest = app.quest_service.create("retry preemption quest")
+    quest_id = quest["quest_id"]
+    first_failure_seen = threading.Event()
+    new_turn_seen = threading.Event()
+
+    class RetryPreemptionRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def run(self, request):
+            self.requests.append(request)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            if len(self.requests) == 1:
+                first_failure_seen.set()
+                return RunResult(
+                    ok=False,
+                    run_id=request.run_id,
+                    model=request.model,
+                    output_text="old partial output",
+                    exit_code=1,
+                    history_root=history_root,
+                    run_root=run_root,
+                    stderr_text="temporary failure before user update",
+                )
+
+            assert request.attempt_index == 1
+            assert "Please handle the newer requirement first." in request.message
+            new_turn_seen.set()
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="handled newer requirement",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RetryPreemptionRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Original request.", "source": "tui-ink"})
+    assert payload["ok"] is True
+    assert first_failure_seen.wait(timeout=5)
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        if isinstance(snapshot.get("retry_state"), dict) and snapshot.get("status") == "retrying":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("runner did not enter retry backoff")
+
+    submitted_at = time.monotonic()
+    payload = app.submit_user_message(
+        quest_id,
+        text="Please handle the newer requirement first.",
+        source="tui-ink",
+    )
+    assert payload["scheduled"] is True
+    assert payload["queued"] is True
+    assert new_turn_seen.wait(timeout=1.0)
+    assert time.monotonic() - submitted_at < 1.0
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+
+    assert len(runner.requests) == 2
+    assert snapshot["retry_state"] is None
+    assert snapshot["pending_user_message_count"] == 0
+    assert any(
+        item.get("type") == "runner.turn_retry_aborted"
+        and item.get("abort_reason") == "new_user_message"
+        for item in events
+    )
+
+
 def test_daemon_retry_policy_upgrades_legacy_codex_backoff_profile(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
