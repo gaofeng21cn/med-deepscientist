@@ -2292,6 +2292,7 @@ class QuestService:
             "publication_eval_path": None,
             "gap_summaries": [],
             "recommended_action_types": [],
+            "current_required_action": None,
         }
         if paper_root is None:
             return default_payload
@@ -2318,6 +2319,7 @@ class QuestService:
                 "emitted_at": emitted_at,
                 "gap_summaries": [],
                 "recommended_action_types": [],
+                "current_required_action": None,
             }
 
         if not isinstance(payload, dict) or not payload:
@@ -2330,6 +2332,7 @@ class QuestService:
                 "emitted_at": emitted_at,
                 "gap_summaries": [],
                 "recommended_action_types": [],
+                "current_required_action": None,
             }
 
         verdict = dict(payload.get("verdict") or {}) if isinstance(payload.get("verdict"), dict) else {}
@@ -2349,6 +2352,13 @@ class QuestService:
             for item in recommended_actions
             if str(item.get("action_type") or "").strip()
         ]
+        current_required_action = str(payload.get("current_required_action") or "").strip() or None
+        if current_required_action is None:
+            supervisor_state = payload.get("publication_supervisor_state")
+            if isinstance(supervisor_state, dict):
+                current_required_action = str(supervisor_state.get("current_required_action") or "").strip() or None
+        if current_required_action is None:
+            current_required_action = str(payload.get("recommended_action") or "").strip() or None
         nonblocking_gap_severities = {"optional", "advisory", "watch", "info", "informational"}
         blocking_gap_summaries = []
         for item in gaps:
@@ -2389,6 +2399,7 @@ class QuestService:
                 "emitted_at": emitted_at,
                 "gap_summaries": gap_summaries,
                 "recommended_action_types": recommended_action_types,
+                "current_required_action": current_required_action,
             }
         if controller_gated_clear_action_types:
             action_preview = ", ".join(controller_gated_clear_action_types)
@@ -2415,6 +2426,7 @@ class QuestService:
             "emitted_at": emitted_at,
             "gap_summaries": gap_summaries,
             "recommended_action_types": recommended_action_types,
+            "current_required_action": current_required_action,
             "controller_decision_required": bool(controller_gated_clear_action_types),
         }
 
@@ -4125,9 +4137,17 @@ class QuestService:
             and proofing_outputs_ready
             and submission_checklist_ready
         )
+        managed_publication_gate_current_required_action = (
+            str(managed_publication_gate.get("current_required_action") or "").strip() or None
+        )
+        managed_publication_gate_complete_bundle_stage = (
+            managed_publication_gate_current_required_action == "complete_bundle_stage"
+            or "complete_bundle_stage" in managed_publication_gate_recommended_action_types
+        )
         managed_publication_gate_requires_route_hold = (
             audit_package_ready
             and not managed_publication_gate_clear
+            and not managed_publication_gate_complete_bundle_stage
             and (
                 bool(managed_publication_gate.get("controller_decision_required"))
                 or "return_to_controller" in managed_publication_gate_recommended_action_types
@@ -4213,7 +4233,10 @@ class QuestService:
             recommended_next_stage = "finalize"
             recommended_action = "finalize_paper_line"
 
-        if managed_publication_gate_requires_route_hold and recommended_next_stage in {"write", "finalize"}:
+        if managed_publication_gate_complete_bundle_stage:
+            recommended_next_stage = "finalize"
+            recommended_action = "complete_bundle_stage"
+        elif managed_publication_gate_requires_route_hold and recommended_next_stage in {"write", "finalize"}:
             recommended_next_stage = "write"
             recommended_action = "return_to_publishability_gate"
 
@@ -4387,7 +4410,11 @@ class QuestService:
         recommendation_scope = "paper_line_local_only"
         global_stage_authority = "publication_gate"
         global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
-        if not managed_publication_gate_clear and recommended_next_stage == "finalize":
+        if (
+            not managed_publication_gate_clear
+            and recommended_next_stage == "finalize"
+            and not managed_publication_gate_complete_bundle_stage
+        ):
             recommended_next_stage = "write"
             recommended_action = "return_to_publishability_gate"
         narration_contract_anchor = selected_outline_ref or active_line_id or "paper-line"

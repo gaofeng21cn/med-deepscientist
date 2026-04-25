@@ -1653,6 +1653,66 @@ def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_no
     assert "forbidden_manuscript_terminology" in joined
 
 
+
+def test_snapshot_routes_managed_submission_hardening_to_finalize_bundle_stage(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked only by submission hardening")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "supported",
+                "summary": "same-line submission hardening remains",
+                "stop_loss_pressure": "none",
+            },
+            "current_required_action": "complete_bundle_stage",
+            "publication_supervisor_state": {
+                "supervisor_phase": "bundle_stage_blocked",
+                "current_required_action": "complete_bundle_stage",
+            },
+            "gaps": [
+                {
+                    "gap_id": "submission-hardening",
+                    "gap_type": "submission_hardening",
+                    "severity": "must_fix",
+                    "summary": "submission_hardening_incomplete",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "complete-bundle-stage",
+                    "action_type": "complete_bundle_stage",
+                    "priority": "now",
+                    "reason": "repair manuscript hardening and rebuild submission package",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    _materialize_submission_minimal_projection(paper_root, include_display_exports=True)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["managed_publication_gate_status"] == "blocked"
+    assert health["managed_publication_gate_clear"] is False
+    assert health["recommended_next_stage"] == "finalize"
+    assert health["recommended_action"] == "complete_bundle_stage"
+    assert health["finalize_ready"] is False
+
+
 def test_snapshot_prefers_display_frontier_when_managed_gate_clear_reports_figure_floor_gap(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
