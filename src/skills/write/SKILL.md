@@ -26,6 +26,7 @@ This skill intentionally absorbs the strongest old DeepScientist writing discipl
 - Keep ordinary subtask completions concise. When a paper/draft milestone is actually completed, upgrade to a richer `artifact.interact(kind='milestone', reply_mode='threaded', ...)` report instead of another short progress update.
 - That richer writing-stage milestone report should normally cover: which draft, section, or outline milestone finished, what is now supportable, what is still missing, and the exact recommended next revision or route decision.
 - That richer milestone report is still normally non-blocking. If the next writing or return-to-experiment step is already clear, continue automatically after reporting instead of pausing by default.
+- Exception: when a human-facing submission package or milestone review package has been delivered and the remaining work is only external submission metadata or administrative handoff, emit the milestone once, route to `finalize` or `decision` with an explicit pause/park recommendation, and do not continue auto-writing, rebuilding, or re-running gate checks on no-delta auto-continue turns.
 - If the active communication surface is QQ, keep writing milestones text-first unless a final paper PDF or one clearly useful summary artifact already exists.
 - Treat connector-facing report charts separately from paper-facing figures; do not auto-send draft paper figures to QQ.
 - For paper-facing figures and figure drafts, keep palette discipline explicit:
@@ -1269,6 +1270,7 @@ Preferred artifact choices:
   - the final go-to-finalize judgment
 - use `milestone` for:
   - draft readiness when a user-facing checkpoint helps
+  - delivered submission-package or milestone-review-package readiness, followed by an explicit pause/park route when only external metadata or administrative handoff remains
 - use `approval` when the user explicitly confirms a submission-critical choice
 - use `artifact.submit_paper_outline(mode='candidate'|'select'|'revise', ...)` for the real outline lifecycle instead of leaving outline choice only in prose
 - when `mode='select'`, treat the selected outline as the activation point of the active paper line and keep its folder/json contract synchronized

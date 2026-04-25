@@ -16,6 +16,7 @@ The goal is to leave a stable stopping point and a clean resume path, not to kee
 - If the runtime starts an auto-continue turn with no new user message, keep finalizing from the durable quest state and active requirements instead of replaying the previous user turn.
 - If a threaded user reply arrives, interpret it relative to the latest finalize progress update before assuming the task changed completely.
 - When finalize reaches a real closure state, pause-ready packet, or route-back decision, send one threaded `artifact.interact(kind='milestone', ...)` update that names the recommendation, why it is the right call, and any reopen condition that still matters.
+- If a human-facing submission package or milestone review package has already been delivered and the remaining work is only external submission metadata or administrative handoff, treat that as a pause-ready closure state: record the route/decision handoff, send one milestone, and stop further automatic rebuilds or gate-refresh loops unless a new explicit bounded task arrives.
 - True quest completion still requires explicit user approval through the runtime completion flow before calling `artifact.complete_quest(...)`.
 - Rechecking that the same bundle files still exist, or re-aligning status surfaces without changing the closure judgment, does not by itself count as a fresh milestone.
 - Hard execution rule: if this stage needs terminal work such as Git inspection, packaging checks, document builds, or file inspection, every such command must go through `bash_exec`.

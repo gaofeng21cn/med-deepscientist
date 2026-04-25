@@ -318,6 +318,18 @@ def test_decision_and_finalize_skills_document_checkpoint_memory_handoff() -> No
     assert "authoritative resume point" in resume_packet_text
 
 
+def test_write_and_finalize_skills_park_after_delivered_submission_package_milestone() -> None:
+    root = repo_root() / "src" / "skills"
+    write_text = (root / "write" / "SKILL.md").read_text(encoding="utf-8")
+    finalize_text = (root / "finalize" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "milestone review package has been delivered" in write_text
+    assert "do not continue auto-writing" in write_text
+    assert "external submission metadata or administrative handoff" in write_text
+    assert "pause-ready closure state" in finalize_text
+    assert "stop further automatic rebuilds or gate-refresh loops" in finalize_text
+
+
 def test_prompt_builder_skill_paths_only_reference_existing_files(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
