@@ -46,6 +46,14 @@ By default, upstream intake should happen only when at least one of these is tru
 - a specific upstream PR / commit bundle has already been identified as valuable
 - a local bug or migration blocker points to a bounded upstream fix worth absorbing
 
+When the maintainer says “学习一下 `DeepScientist` 的最新更新”, “看看 `DeepScientist` 最近更新有什么值得吸收”, or a similar periodic-learning phrase, treat it as an explicit upstream review round. The expected outcome is not a read-only summary: audit the fresh upstream delta, classify candidates, land bounded valuable slices in isolated worktrees, verify both fork-local and `MedAutoScience` contract surfaces, merge back to `main`, and clean temporary worktrees / branches.
+
+The `MedAutoScience` owner-side trigger protocol lives in:
+
+- `med-autoscience/docs/program/deepscientist_latest_update_learning_protocol.md`
+
+Use that protocol to decide whether a change should become an `MDS` code slice, a `MAS` contract/template update, `watch_only`, or `reject`.
+
 The main delivery stream remains:
 
 - improving `MedAutoScience -> MedDeepScientist` compatibility
