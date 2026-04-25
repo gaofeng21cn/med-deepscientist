@@ -157,6 +157,18 @@ def test_scout_skill_requires_memory_first_literature_report() -> None:
     assert template.exists()
 
 
+
+def test_global_skill_sync_is_disabled(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    installer = SkillInstaller(repo_root(), temp_home)
+
+    result = installer.sync_global()
+
+    assert result["codex"] == []
+    assert result["claude"] == []
+    assert result["notes"]
+
+
 def test_quest_creation_syncs_all_stage_skills(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

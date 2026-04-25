@@ -2124,7 +2124,7 @@ def test_preview_next_numeric_quest_id_matches_allocator_without_consuming_it(te
     assert created["quest_id"] == "001"
     assert service.preview_next_numeric_quest_id() == "002"
 
-def test_init_command_syncs_global_skills(temp_home: Path, monkeypatch) -> None:
+def test_init_command_does_not_sync_global_skills(temp_home: Path, monkeypatch) -> None:
     ensure_home_layout(temp_home)
 
     calls: list[str] = []
@@ -2136,7 +2136,7 @@ def test_init_command_syncs_global_skills(temp_home: Path, monkeypatch) -> None:
     monkeypatch.setattr(SkillInstaller, "sync_global", _record_sync)
     exit_code = init_command(temp_home)
     assert exit_code in {0, 1}
-    assert calls == ["sync_global"]
+    assert calls == []
 
 
 def test_pause_command_prefers_daemon_control_when_available(temp_home: Path, monkeypatch, capsys) -> None:

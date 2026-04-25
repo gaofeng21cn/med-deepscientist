@@ -55,7 +55,7 @@ def default_config(home: Path) -> dict:
             "graph_formats": ["svg", "png", "json"],
         },
         "skills": {
-            "sync_global_on_init": True,
+            "sync_global_on_init": False,
             "sync_quest_on_create": True,
             "sync_quest_on_open": True,
         },

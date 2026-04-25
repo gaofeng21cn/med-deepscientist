@@ -141,8 +141,11 @@ def init_command(home: Path) -> int:
     config_manager = ConfigManager(home)
     created = config_manager.ensure_files()
     git_info = config_manager.git_readiness()
-    installer = SkillInstaller(repo_root(), home)
-    synced = installer.sync_global()
+    synced = {
+        "codex": [],
+        "claude": [],
+        "notes": ["Global skill sync is disabled; DeepScientist skills are installed per quest workspace."],
+    }
     print(json.dumps(
         {
             "home": str(home),
