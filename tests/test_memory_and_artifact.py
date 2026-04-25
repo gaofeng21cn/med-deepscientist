@@ -4057,6 +4057,9 @@ def test_record_main_experiment_writes_result_and_baseline_comparison(temp_home:
     assert payload["baseline_ref"]["baseline_id"] == "baseline-main"
     assert payload["baseline_ref"]["metric_contract_json_rel_path"] == "baselines/imported/baseline-main/json/metric_contract.json"
     assert payload["metrics_summary"]["acc"] == 0.89
+    canonical_main_result = quest_root / "artifacts" / "results" / "main_result.json"
+    assert canonical_main_result.exists()
+    assert read_json(canonical_main_result, {}) == payload
     assert payload["baseline_comparisons"]["primary_metric_id"] == "acc"
     assert payload["evaluation_summary"]["claim_update"] == "strengthens"
     primary = next(item for item in payload["baseline_comparisons"]["items"] if item["metric_id"] == "acc")

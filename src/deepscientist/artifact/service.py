@@ -9435,7 +9435,10 @@ class ArtifactService:
             "run_md_path": str(run_md_path),
             "metric_validation": metric_validation,
         }
+        canonical_main_result_path = quest_root / "artifacts" / "results" / "main_result.json"
+        canonical_main_result_path.parent.mkdir(parents=True, exist_ok=True)
         write_json(result_json_path, result_payload)
+        write_json(canonical_main_result_path, result_payload)
         metric_charts: list[dict[str, Any]] = []
 
         artifact = self.record(
@@ -9513,6 +9516,7 @@ class ArtifactService:
         if metric_charts:
             result_payload["connector_metric_charts"] = metric_charts
             write_json(result_json_path, result_payload)
+            write_json(canonical_main_result_path, result_payload)
             artifact_record = dict(artifact.get("record") or {}) if isinstance(artifact.get("record"), dict) else {}
             artifact_record["connector_metric_charts"] = metric_charts
             details = dict(artifact_record.get("details") or {}) if isinstance(artifact_record.get("details"), dict) else {}
