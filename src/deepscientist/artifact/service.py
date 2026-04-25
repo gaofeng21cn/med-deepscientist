@@ -11594,6 +11594,359 @@ class ArtifactService:
             "guidance": "The selected baseline is now attached under baselines/imported. Reuse it before considering a fresh reproduction.",
         }
 
+    @staticmethod
+    def _metric_contract_index(metric_contract: object) -> dict[str, dict[str, Any]]:
+        payload = metric_contract if isinstance(metric_contract, dict) else {}
+        indexed: dict[str, dict[str, Any]] = {}
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), list) else []
+        for item in metrics:
+            if not isinstance(item, dict):
+                continue
+            metric_id = str(item.get("metric_id") or "").strip()
+            if metric_id:
+                indexed[metric_id] = dict(item)
+        return indexed
+
+    def _baseline_overwrite_changes(
+        self,
+        *,
+        old_ref: dict[str, Any],
+        new_ref: dict[str, Any],
+        old_metric_contract: object,
+        new_metric_contract: object,
+        old_metrics_summary: object,
+        new_metrics_summary: object,
+    ) -> dict[str, Any]:
+        old_contract = old_metric_contract if isinstance(old_metric_contract, dict) else {}
+        new_contract = new_metric_contract if isinstance(new_metric_contract, dict) else {}
+        old_metrics = self._metric_contract_index(old_contract)
+        new_metrics = self._metric_contract_index(new_contract)
+        old_metric_ids = list(old_metrics.keys())
+        new_metric_ids = list(new_metrics.keys())
+        removed_metric_ids = [metric_id for metric_id in old_metric_ids if metric_id not in new_metrics]
+        added_metric_ids = [metric_id for metric_id in new_metric_ids if metric_id not in old_metrics]
+        direction_changes = {
+            metric_id: {
+                "old": old_metrics[metric_id].get("direction"),
+                "new": new_metrics[metric_id].get("direction"),
+            }
+            for metric_id in old_metric_ids
+            if metric_id in new_metrics
+            and str(old_metrics[metric_id].get("direction") or "").strip()
+            != str(new_metrics[metric_id].get("direction") or "").strip()
+        }
+        old_primary_metric_id = str(old_contract.get("primary_metric_id") or "").strip() or None
+        new_primary_metric_id = str(new_contract.get("primary_metric_id") or "").strip() or None
+
+        old_summary = normalize_metrics_summary(old_metrics_summary)
+        new_summary = normalize_metrics_summary(new_metrics_summary)
+        metric_value_changes = {
+            metric_id: {
+                "old": old_summary.get(metric_id),
+                "new": new_summary.get(metric_id),
+            }
+            for metric_id in sorted(set(old_summary) | set(new_summary))
+            if old_summary.get(metric_id) != new_summary.get(metric_id)
+        }
+        path_changed = str(old_ref.get("baseline_root_rel_path") or "").strip() != str(
+            new_ref.get("baseline_root_rel_path") or ""
+        ).strip()
+        protocol_breaking_changes = {
+            "removed_metric_ids": removed_metric_ids,
+            "direction_changes": direction_changes,
+            "primary_metric_changed": old_primary_metric_id != new_primary_metric_id,
+            "old_primary_metric_id": old_primary_metric_id,
+            "new_primary_metric_id": new_primary_metric_id,
+        }
+        return {
+            "path_changed": path_changed,
+            "added_metric_ids": added_metric_ids,
+            "metric_value_changes": metric_value_changes,
+            "protocol_breaking_changes": protocol_breaking_changes,
+            "protocol_breaking": bool(
+                removed_metric_ids
+                or direction_changes
+                or old_primary_metric_id != new_primary_metric_id
+            ),
+        }
+
+    def overwrite_baseline(
+        self,
+        quest_root: Path,
+        *,
+        baseline_path: str,
+        baseline_id: str | None = None,
+        variant_id: str | None = None,
+        summary: str | None = None,
+        reason: str,
+        overwrite_scope: str = "baseline",
+        baseline_kind: str | None = None,
+        metric_contract: dict[str, Any] | None = None,
+        metric_directions: dict[str, str] | None = None,
+        metrics_summary: dict[str, Any] | None = None,
+        primary_metric: dict[str, Any] | None = None,
+        allow_path_change: bool = False,
+        allow_protocol_breaking_change: bool = False,
+    ) -> dict[str, Any]:
+        reason_text = str(reason or "").strip()
+        if not reason_text:
+            raise ValueError("`reason` is required to overwrite a baseline.")
+        quest_yaml = self.quest_service.read_quest_yaml(quest_root)
+        confirmed_ref = (
+            dict(quest_yaml.get("confirmed_baseline_ref") or {})
+            if isinstance(quest_yaml.get("confirmed_baseline_ref"), dict)
+            else {}
+        )
+        if str(quest_yaml.get("baseline_gate") or "").strip().lower() != "confirmed" or not confirmed_ref:
+            raise ValueError("`artifact.overwrite_baseline(...)` requires an accepted or confirmed active baseline.")
+        active_baseline_id = str(confirmed_ref.get("baseline_id") or "").strip()
+        requested_baseline_id = str(baseline_id or "").strip()
+        if not active_baseline_id:
+            raise ValueError("Active confirmed baseline is missing `baseline_id`.")
+        if requested_baseline_id and requested_baseline_id != active_baseline_id:
+            raise ValueError("Requested baseline id must match the current active baseline id.")
+        if str(confirmed_ref.get("source_mode") or "").strip().lower() == "imported":
+            raise ValueError(
+                "Imported active baseline refresh is rejected; materialize a local baseline or confirm a new local variant first."
+            )
+
+        resolved = self._resolve_baseline_path(quest_root, baseline_path, baseline_id=active_baseline_id)
+        if str(resolved["source_mode"]).strip().lower() == "imported":
+            raise ValueError(
+                "Imported active baseline refresh is rejected; materialize a local baseline or confirm a new local variant first."
+            )
+        resolved_root = Path(resolved["baseline_root"])
+        resolved_root_rel_path = str(resolved["baseline_root_rel_path"])
+        source_mode = str(resolved["source_mode"])
+
+        old_contract_payload = self._load_metric_contract_payload(
+            quest_root,
+            str(confirmed_ref.get("metric_contract_json_rel_path") or "").strip() or None,
+        ) or {}
+        old_metric_contract = old_contract_payload.get("metric_contract")
+        old_metrics_summary = old_contract_payload.get("metrics_summary")
+
+        entry, selected_variant = self._baseline_entry_from_local_state(
+            quest_root,
+            baseline_id=active_baseline_id,
+            baseline_root=resolved_root,
+            variant_id=variant_id,
+            summary=summary,
+            baseline_kind=baseline_kind,
+            metric_contract=metric_contract,
+            metrics_summary=metrics_summary,
+            primary_metric=primary_metric,
+        )
+        resolved_variant_id = str(
+            variant_id
+            or (selected_variant or {}).get("variant_id")
+            or entry.get("default_variant_id")
+            or ""
+        ).strip() or None
+        source_metrics_summary = (
+            selected_variant.get("metrics_summary")
+            if isinstance(selected_variant, dict) and selected_variant.get("metrics_summary") is not None
+            else entry.get("metrics_summary")
+        )
+        entry_metric_contract, entry_primary_metric = self._apply_metric_directions_to_contract(
+            metric_contract=entry.get("metric_contract"),
+            metric_directions=metric_directions,
+            baseline_id=active_baseline_id,
+            metrics_summary=source_metrics_summary,
+            primary_metric=entry.get("primary_metric"),
+            baseline_variants=entry.get("baseline_variants"),
+        )
+        entry = {
+            **entry,
+            "metric_contract": entry_metric_contract,
+            "primary_metric": entry_primary_metric or entry.get("primary_metric"),
+        }
+        canonical_baseline = validate_baseline_metric_contract_submission(
+            metric_contract=entry.get("metric_contract"),
+            metrics_summary=source_metrics_summary,
+            primary_metric=entry.get("primary_metric"),
+        )
+        entry = {
+            **entry,
+            "path": str(resolved_root),
+            "metrics_summary": canonical_baseline["metrics_summary"],
+            "metric_contract": canonical_baseline["metric_contract"],
+            "metric_details": canonical_baseline["metric_details"],
+        }
+        if isinstance(selected_variant, dict):
+            selected_variant = {
+                **selected_variant,
+                "metrics_summary": canonical_baseline["metrics_summary"],
+            }
+        if isinstance(entry.get("baseline_variants"), list):
+            entry["baseline_variants"] = [
+                (
+                    {
+                        **variant,
+                        "metrics_summary": canonical_baseline["metrics_summary"],
+                    }
+                    if isinstance(variant, dict)
+                    and str(variant.get("variant_id") or "").strip() == str(resolved_variant_id or "").strip()
+                    else variant
+                )
+                for variant in entry.get("baseline_variants", [])
+            ]
+        primary_metric_id = str(
+            (entry.get("primary_metric") or {}).get("metric_id")
+            or (entry.get("primary_metric") or {}).get("name")
+            or (entry.get("primary_metric") or {}).get("id")
+            or (canonical_baseline["metric_contract"] or {}).get("primary_metric_id")
+            or ""
+        ).strip()
+        if primary_metric_id and primary_metric_id in canonical_baseline["metrics_summary"]:
+            primary_metric_meta = next(
+                (
+                    item
+                    for item in (canonical_baseline["metric_contract"] or {}).get("metrics", [])
+                    if isinstance(item, dict) and str(item.get("metric_id") or "").strip() == primary_metric_id
+                ),
+                {},
+            )
+            entry["primary_metric"] = {
+                **(dict(entry.get("primary_metric") or {}) if isinstance(entry.get("primary_metric"), dict) else {}),
+                "metric_id": primary_metric_id,
+                "value": canonical_baseline["metrics_summary"][primary_metric_id],
+                "direction": primary_metric_meta.get("direction")
+                or (entry.get("primary_metric") or {}).get("direction"),
+            }
+
+        new_ref_preview = {
+            **confirmed_ref,
+            "baseline_id": active_baseline_id,
+            "variant_id": resolved_variant_id,
+            "baseline_path": str(resolved_root),
+            "baseline_root_rel_path": resolved_root_rel_path,
+            "source_mode": source_mode,
+        }
+        affected_changes = self._baseline_overwrite_changes(
+            old_ref=confirmed_ref,
+            new_ref=new_ref_preview,
+            old_metric_contract=old_metric_contract,
+            new_metric_contract=entry.get("metric_contract"),
+            old_metrics_summary=old_metrics_summary,
+            new_metrics_summary=entry.get("metrics_summary"),
+        )
+        if affected_changes["path_changed"] and not allow_path_change:
+            raise ValueError("Baseline path changed; pass allow_path_change=True to accept the new materialized path.")
+        if affected_changes["protocol_breaking"] and not allow_protocol_breaking_change:
+            raise ValueError(
+                "Baseline protocol-breaking changes detected; pass allow_protocol_breaking_change=True to accept them."
+            )
+
+        metric_contract_json = self._write_baseline_metric_contract_json(
+            quest_root,
+            baseline_root=resolved_root,
+            baseline_root_rel_path=resolved_root_rel_path,
+            baseline_id=active_baseline_id,
+            variant_id=resolved_variant_id,
+            entry=entry,
+            selected_variant=selected_variant,
+            source_mode=source_mode,
+        )
+        attachment = self._write_confirmed_baseline_attachment(
+            quest_root,
+            baseline_id=active_baseline_id,
+            variant_id=resolved_variant_id,
+            entry=entry,
+            selected_variant=selected_variant,
+            source_mode=source_mode,
+            baseline_root=resolved_root,
+            comment={"reason": reason_text, "overwrite_scope": overwrite_scope},
+            metric_contract_json_path=str(metric_contract_json.get("path") or ""),
+            metric_contract_json_rel_path=str(metric_contract_json.get("rel_path") or ""),
+        )
+        artifact = self.record(
+            quest_root,
+            {
+                "kind": "baseline",
+                "status": "overwritten",
+                "summary": summary or f"Baseline `{active_baseline_id}` overwritten.",
+                "reason": reason_text,
+                "baseline_id": active_baseline_id,
+                "baseline_variant_id": resolved_variant_id,
+                "baseline_kind": entry.get("baseline_kind") or baseline_kind or source_mode,
+                "default_variant_id": entry.get("default_variant_id"),
+                "baseline_variants": entry.get("baseline_variants") or [],
+                "metric_contract": entry.get("metric_contract"),
+                "primary_metric": entry.get("primary_metric"),
+                "metrics_summary": entry.get("metrics_summary") or {},
+                "path": str(resolved_root),
+                "paths": {
+                    "baseline_root": str(resolved_root),
+                    "attachment_yaml": str(quest_root / "baselines" / "imported" / active_baseline_id / "attachment.yaml"),
+                    "metric_contract_json": str(metric_contract_json.get("path") or ""),
+                },
+                "flow_type": "baseline_gate",
+                "protocol_step": "overwrite",
+                "overwrite_scope": overwrite_scope,
+                "details": {
+                    "old_baseline_ref": confirmed_ref,
+                    "new_baseline_ref": new_ref_preview,
+                    "affected_changes": affected_changes,
+                    "metric_contract_json_rel_path": str(metric_contract_json.get("rel_path") or ""),
+                },
+                "startup_contract": self._startup_contract(quest_root) or None,
+                "source": {"kind": "system", "role": "artifact"},
+            },
+            checkpoint=True,
+        )
+        returned_artifact = {
+            **artifact,
+            "status": (artifact.get("record") or {}).get("status"),
+        }
+        now = utc_now()
+        new_ref = {
+            **new_ref_preview,
+            "metric_contract_json_path": str(metric_contract_json.get("path") or ""),
+            "metric_contract_json_rel_path": str(metric_contract_json.get("rel_path") or ""),
+            "confirmed_at": confirmed_ref.get("confirmed_at"),
+            "overwritten_at": now,
+            "overwrite": {
+                "reason": reason_text,
+                "overwrite_scope": overwrite_scope,
+                "affected_changes": affected_changes,
+                "old_baseline_ref": confirmed_ref,
+            },
+        }
+        quest_state = self.quest_service.update_baseline_state(
+            quest_root,
+            baseline_gate="confirmed",
+            confirmed_baseline_ref=new_ref,
+        )
+        registry_entry = self._sync_confirmed_baseline_registry_entry(
+            quest_root=quest_root,
+            baseline_id=active_baseline_id,
+            variant_id=resolved_variant_id,
+            entry=entry,
+            selected_variant=selected_variant,
+            resolved_root=resolved_root,
+            summary=summary or f"Baseline `{active_baseline_id}` overwritten.",
+            source_mode=source_mode,
+        )
+        return {
+            "ok": True,
+            "baseline_gate": quest_state.get("baseline_gate"),
+            "old_baseline_ref": confirmed_ref,
+            "new_baseline_ref": quest_state.get("confirmed_baseline_ref"),
+            "overwrite_scope": overwrite_scope,
+            "reason": reason_text,
+            "affected_changes": affected_changes,
+            "metric_contract_json": metric_contract_json,
+            "attachment": attachment,
+            "artifact": returned_artifact,
+            "artifact_status": returned_artifact.get("status"),
+            "baseline_registry_entry": registry_entry,
+            "snapshot": self.quest_service.snapshot(self._quest_id(quest_root)),
+            "metric_details": canonical_baseline["metric_details"],
+            "metric_contract_json_path": str(metric_contract_json.get("path") or ""),
+            "metric_contract_json_rel_path": str(metric_contract_json.get("rel_path") or ""),
+        }
+
     def delete_baseline(self, baseline_id: str) -> dict[str, Any]:
         existing = self.baselines.get(baseline_id, include_deleted=True)
         if existing is None:

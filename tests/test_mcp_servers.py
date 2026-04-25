@@ -318,6 +318,7 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
             "publish_baseline",
             "attach_baseline",
             "confirm_baseline",
+            "overwrite_baseline",
             "waive_baseline",
             "arxiv",
             "deepxiv",
@@ -1151,6 +1152,73 @@ def test_artifact_mcp_server_confirm_baseline_accepts_metric_directions(temp_hom
         }
         assert directions["sigma_max"] == "minimize"
         assert directions["raw_false"] == "minimize"
+
+    asyncio.run(scenario())
+
+
+def test_artifact_mcp_server_overwrite_baseline_returns_structured_metric_errors(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp overwrite baseline metric error quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-overwrite",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="baseline",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+        baseline_root = quest_root / "baselines" / "local" / "mcp-overwrite-baseline"
+        baseline_root.mkdir(parents=True, exist_ok=True)
+        (baseline_root / "README.md").write_text("# MCP Overwrite Baseline\n", encoding="utf-8")
+
+        confirm_result = _unwrap_tool_result(
+            await server.call_tool(
+                "confirm_baseline",
+                {
+                    "baseline_path": "baselines/local/mcp-overwrite-baseline",
+                    "baseline_id": "mcp-overwrite-baseline",
+                    "summary": "Baseline confirmed before overwrite",
+                    "metrics_summary": {"acc": 0.8},
+                    "primary_metric": {"metric_id": "acc", "value": 0.8},
+                    "metric_contract": _detailed_metric_contract(["acc"], primary_metric_id="acc"),
+                },
+            )
+        )
+        assert confirm_result["ok"] is True
+
+        overwrite_result = _unwrap_tool_result(
+            await server.call_tool(
+                "overwrite_baseline",
+                {
+                    "baseline_path": "baselines/local/mcp-overwrite-baseline",
+                    "baseline_id": "mcp-overwrite-baseline",
+                    "summary": "Invalid overwrite contract",
+                    "reason": "Verify structured MCP metric errors",
+                    "metrics_summary": {"acc": 0.81},
+                    "primary_metric": {"metric_id": "acc", "value": 0.81},
+                    "metric_contract": {
+                        "primary_metric_id": "acc",
+                        "metrics": [{"metric_id": "acc", "direction": "higher"}],
+                    },
+                },
+            )
+        )
+
+        assert overwrite_result["ok"] is False
+        assert overwrite_result["error_code"] == "baseline_metric_explanations_missing"
+        assert overwrite_result["validation_stage"] == "baseline"
+        assert overwrite_result["baseline_metric_ids"] == ["acc"]
+        assert overwrite_result["missing_explanations"][0]["metric_id"] == "acc"
 
     asyncio.run(scenario())
 

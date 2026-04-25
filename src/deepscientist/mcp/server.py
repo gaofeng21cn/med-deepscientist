@@ -34,6 +34,10 @@ ARTIFACT_STATE_CHANGE_WATCHDOG_NOTES = {
         "Baseline confirmation changed durable quest state and this tool does not send a user-visible "
         "summary on its own. Send one concise artifact.interact(...) update now."
     ),
+    "overwrite_baseline": (
+        "Baseline overwrite changed durable quest state and this tool does not send a user-visible "
+        "summary on its own. Send one concise artifact.interact(...) update now."
+    ),
     "waive_baseline": (
         "Baseline waiver changed durable quest state and this tool does not send a user-visible summary "
         "on its own. Send one concise artifact.interact(...) update now."
@@ -1311,6 +1315,49 @@ def build_artifact_server(context: McpContext) -> FastMCP:
                 strict_metric_contract=True,
             )
             return finalize_state_changing_artifact_tool(result, tool_name="confirm_baseline")
+        except MetricContractValidationError as exc:
+            return _metric_validation_error_payload(exc)
+
+    @server.tool(
+        name="overwrite_baseline",
+        description=(
+            "Overwrite-refresh the active confirmed local baseline while preserving the MedDeepScientist "
+            "artifact contract. Requires explicit flags for path changes or protocol-breaking metric changes."
+        ),
+    )
+    def overwrite_baseline(
+        baseline_path: str,
+        baseline_id: str | None = None,
+        variant_id: str | None = None,
+        summary: str | None = None,
+        reason: str = "",
+        overwrite_scope: str = "baseline",
+        baseline_kind: str | None = None,
+        metric_contract: dict[str, Any] | None = None,
+        metric_directions: dict[str, str] | None = None,
+        metrics_summary: dict[str, Any] | None = None,
+        primary_metric: dict[str, Any] | None = None,
+        allow_path_change: bool = False,
+        allow_protocol_breaking_change: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            result = service.overwrite_baseline(
+                context.require_quest_root(),
+                baseline_path=baseline_path,
+                baseline_id=baseline_id,
+                variant_id=variant_id,
+                summary=summary,
+                reason=reason,
+                overwrite_scope=overwrite_scope,
+                baseline_kind=baseline_kind,
+                metric_contract=metric_contract,
+                metric_directions=metric_directions,
+                metrics_summary=metrics_summary,
+                primary_metric=primary_metric,
+                allow_path_change=allow_path_change,
+                allow_protocol_breaking_change=allow_protocol_breaking_change,
+            )
+            return finalize_state_changing_artifact_tool(result, tool_name="overwrite_baseline")
         except MetricContractValidationError as exc:
             return _metric_validation_error_payload(exc)
 

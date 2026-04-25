@@ -383,6 +383,173 @@ def test_confirm_baseline_metric_directions_override_and_main_run_prefers_confir
     assert payload["progress_eval"]["beats_baseline"] is True
 
 
+def test_overwrite_baseline_refreshes_confirmed_local_baseline_and_records_changes(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("overwrite baseline quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    baseline_root = quest_root / "baselines" / "local" / "baseline-overwrite"
+    baseline_root.mkdir(parents=True, exist_ok=True)
+    (baseline_root / "README.md").write_text("# Baseline v1\n", encoding="utf-8")
+
+    artifact.confirm_baseline(
+        quest_root,
+        baseline_path=str(baseline_root),
+        baseline_id="baseline-overwrite",
+        summary="Baseline v1 confirmed",
+        metrics_summary={"acc": 0.8, "f1": 0.7},
+        primary_metric={"metric_id": "acc", "value": 0.8},
+        metric_contract=_detailed_metric_contract(["acc", "f1"], primary_metric_id="acc"),
+        strict_metric_contract=True,
+    )
+
+    result = artifact.overwrite_baseline(
+        quest_root,
+        baseline_path=str(baseline_root),
+        baseline_id="baseline-overwrite",
+        summary="Baseline v2 refreshed",
+        reason="Upstream overwrite baseline refresh",
+        overwrite_scope="metric_contract_and_results",
+        metrics_summary={"acc": 0.83, "f1": 0.74},
+        primary_metric={"metric_id": "acc", "value": 0.83},
+        metric_contract=_detailed_metric_contract(["acc", "f1"], primary_metric_id="acc"),
+    )
+
+    assert result["ok"] is True
+    assert result["old_baseline_ref"]["baseline_id"] == "baseline-overwrite"
+    assert result["new_baseline_ref"]["baseline_id"] == "baseline-overwrite"
+    assert result["new_baseline_ref"]["baseline_root_rel_path"] == "baselines/local/baseline-overwrite"
+    assert result["overwrite_scope"] == "metric_contract_and_results"
+    assert result["affected_changes"]["metric_value_changes"]["acc"] == {"old": 0.8, "new": 0.83}
+    assert result["affected_changes"]["metric_value_changes"]["f1"] == {"old": 0.7, "new": 0.74}
+    assert result["artifact"]["status"] == "overwritten"
+    assert result["artifact_status"] == "overwritten"
+    assert result["metric_contract_json"]["payload"]["metrics_summary"] == {"acc": 0.83, "f1": 0.74}
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    confirmed_ref = snapshot["confirmed_baseline_ref"]
+    assert confirmed_ref["baseline_id"] == "baseline-overwrite"
+    assert confirmed_ref["overwrite"]["reason"] == "Upstream overwrite baseline refresh"
+    assert confirmed_ref["metric_contract_json_rel_path"] == "baselines/local/baseline-overwrite/json/metric_contract.json"
+    registry_entry = artifact.baselines.get("baseline-overwrite")
+    assert registry_entry["metrics_summary"] == {"acc": 0.83, "f1": 0.74}
+    assert registry_entry["status"] == "quest_confirmed"
+
+
+def test_overwrite_baseline_requires_explicit_flags_for_path_and_protocol_changes(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+        "overwrite baseline guard quest"
+    )
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    baseline_root = quest_root / "baselines" / "local" / "baseline-guard"
+    refreshed_root = quest_root / "baselines" / "local" / "baseline-guard-refreshed"
+    baseline_root.mkdir(parents=True, exist_ok=True)
+    refreshed_root.mkdir(parents=True, exist_ok=True)
+    (baseline_root / "README.md").write_text("# Baseline v1\n", encoding="utf-8")
+    (refreshed_root / "README.md").write_text("# Baseline v2\n", encoding="utf-8")
+
+    artifact.confirm_baseline(
+        quest_root,
+        baseline_path=str(baseline_root),
+        baseline_id="baseline-guard",
+        summary="Baseline guard confirmed",
+        metrics_summary={"acc": 0.8, "f1": 0.7},
+        primary_metric={"metric_id": "acc", "value": 0.8},
+        metric_contract=_detailed_metric_contract(["acc", "f1"], primary_metric_id="acc"),
+        strict_metric_contract=True,
+    )
+
+    with pytest.raises(ValueError, match="allow_path_change=True"):
+        artifact.overwrite_baseline(
+            quest_root,
+            baseline_path=str(refreshed_root),
+            baseline_id="baseline-guard",
+            summary="Path changed",
+            reason="Move refreshed local materialization",
+            metrics_summary={"acc": 0.82, "f1": 0.72},
+            primary_metric={"metric_id": "acc", "value": 0.82},
+            metric_contract=_detailed_metric_contract(["acc", "f1"], primary_metric_id="acc"),
+        )
+
+    with pytest.raises(ValueError, match="allow_protocol_breaking_change=True"):
+        artifact.overwrite_baseline(
+            quest_root,
+            baseline_path=str(refreshed_root),
+            baseline_id="baseline-guard",
+            summary="Protocol changed",
+            reason="Drop f1 from the canonical contract",
+            metrics_summary={"acc": 0.82},
+            primary_metric={"metric_id": "acc", "value": 0.82},
+            metric_contract=_detailed_metric_contract(["acc"], primary_metric_id="acc"),
+            allow_path_change=True,
+        )
+
+    result = artifact.overwrite_baseline(
+        quest_root,
+        baseline_path=str(refreshed_root),
+        baseline_id="baseline-guard",
+        summary="Protocol change accepted",
+        reason="Reviewed upstream protocol change",
+        metrics_summary={"acc": 0.82},
+        primary_metric={"metric_id": "acc", "value": 0.82},
+        metric_contract=_detailed_metric_contract(["acc"], primary_metric_id="acc"),
+        allow_path_change=True,
+        allow_protocol_breaking_change=True,
+    )
+
+    assert result["ok"] is True
+    assert result["affected_changes"]["path_changed"] is True
+    assert result["affected_changes"]["protocol_breaking_changes"]["removed_metric_ids"] == ["f1"]
+
+
+def test_overwrite_baseline_rejects_imported_active_baseline_refresh(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+        "overwrite imported baseline quest"
+    )
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    source_root = temp_home / "external-baseline"
+    source_root.mkdir(parents=True, exist_ok=True)
+    (source_root / "README.md").write_text("# External baseline\n", encoding="utf-8")
+    artifact.baselines.publish(
+        {
+            "baseline_id": "imported-refresh",
+            "summary": "Imported refresh fixture",
+            "path": str(source_root),
+            "metrics_summary": {"acc": 0.8},
+            "primary_metric": {"metric_id": "acc", "value": 0.8},
+            "metric_contract": _detailed_metric_contract(["acc"], primary_metric_id="acc"),
+        }
+    )
+    artifact.attach_baseline(quest_root, "imported-refresh")
+    artifact.confirm_baseline(
+        quest_root,
+        baseline_path="baselines/imported/imported-refresh",
+        baseline_id="imported-refresh",
+        summary="Imported baseline confirmed",
+        strict_metric_contract=True,
+    )
+
+    with pytest.raises(ValueError, match="Imported active baseline"):
+        artifact.overwrite_baseline(
+            quest_root,
+            baseline_path="baselines/imported/imported-refresh",
+            baseline_id="imported-refresh",
+            summary="Imported refresh rejected",
+            reason="Attempt imported in-place overwrite",
+            metrics_summary={"acc": 0.81},
+            primary_metric={"metric_id": "acc", "value": 0.81},
+            metric_contract=_detailed_metric_contract(["acc"], primary_metric_id="acc"),
+        )
+
+
 def test_confirm_baseline_strict_flattens_canonical_metric_summary(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
