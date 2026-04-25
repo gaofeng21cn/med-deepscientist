@@ -3478,6 +3478,86 @@ class QuestService:
                     return str(resolved)
             return None
 
+        def _submission_text_paths() -> list[Path]:
+            paths: list[Path] = []
+            seen_paths: set[str] = set()
+            candidate_values: list[str] = []
+            for key in ("source_markdown_path", "compiled_markdown_path", "submission_markdown_path"):
+                value = submission_minimal_manifest.get(key)
+                if isinstance(value, str):
+                    candidate_values.append(value)
+            for key in ("source_path", "markdown_path", "submission_path"):
+                value = manuscript_payload.get(key)
+                if isinstance(value, str):
+                    candidate_values.append(value)
+            for paper_root in paper_roots:
+                candidate_values.extend(
+                    [
+                        str(paper_root / "submission_minimal" / "manuscript_source.md"),
+                        str(paper_root / "submission_minimal" / "manuscript_submission.md"),
+                    ]
+                )
+            for value in candidate_values:
+                resolved = _resolve_workspace_relative_path(value)
+                if resolved is None:
+                    continue
+                key = str(Path(resolved).resolve())
+                if key in seen_paths:
+                    continue
+                seen_paths.add(key)
+                paths.append(Path(resolved))
+            return paths
+
+        def _submission_manuscript_hygiene() -> dict[str, Any]:
+            section_counts: dict[str, int] = {}
+            internal_instruction_hits: list[str] = []
+            internal_instruction_markers = (
+                "the manuscript should",
+                "the paper should",
+                "the manuscript can",
+                "must not be",
+                "must not promote",
+                "must not be reframed",
+                "should open with",
+            )
+            for path in _submission_text_paths():
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("#"):
+                        title = stripped.lstrip("#").strip().lower()
+                        if title in {
+                            "abstract",
+                            "introduction",
+                            "materials and methods",
+                            "methods",
+                            "results",
+                            "discussion",
+                            "figures",
+                            "figure legends",
+                            "tables",
+                        } or title.startswith("appendix"):
+                            section_counts[title] = section_counts.get(title, 0) + 1
+                    lowered = stripped.lower()
+                    if any(marker in lowered for marker in internal_instruction_markers):
+                        try:
+                            relative_path = str(path.relative_to(quest_root))
+                        except ValueError:
+                            relative_path = str(path)
+                        internal_instruction_hits.append(f"{relative_path}: {stripped[:160]}")
+            duplicate_sections = sorted(
+                section for section, count in section_counts.items() if count > 1
+            )
+            return {
+                "ready": not duplicate_sections and not internal_instruction_hits,
+                "checked_paths": [str(path) for path in _submission_text_paths()],
+                "duplicate_sections": duplicate_sections,
+                "internal_instruction_hits": internal_instruction_hits[:12],
+            }
+
         review_report_path = _first_existing([paper_root / "review" / "review.md" for paper_root in paper_roots])
         review_revision_log_path = _first_existing([paper_root / "review" / "revision_log.md" for paper_root in paper_roots])
         proofing_report_path = _first_existing([paper_root / "proofing" / "proofing_report.md" for paper_root in paper_roots])
@@ -3604,6 +3684,7 @@ class QuestService:
             materialized_main_text_figure_ids == expected_main_text_figure_ids
             and materialized_table_ids == expected_table_ids
         )
+        submission_manuscript_hygiene = _submission_manuscript_hygiene()
         submission_checklist_handoff_ready = _submission_checklist_handoff_ready(submission_checklist)
         submission_checklist_status = (
             str(submission_checklist.get("overall_status") or submission_checklist.get("status") or "").strip() or None
@@ -3639,11 +3720,14 @@ class QuestService:
             "submission_minimal_expected_table_count": len(expected_table_ids),
             "submission_minimal_materialized_table_count": len(materialized_table_ids),
             "submission_minimal_missing_table_ids": sorted(expected_table_ids - materialized_table_ids),
+            "submission_minimal_manuscript_hygiene_ready": bool(submission_manuscript_hygiene.get("ready")),
+            "submission_minimal_manuscript_hygiene": submission_manuscript_hygiene,
             "submission_minimal_ready": bool(
                 submission_minimal_manifest_path
                 and submission_minimal_docx_path
                 and submission_minimal_pdf_path
                 and submission_minimal_display_exports_ready
+                and bool(submission_manuscript_hygiene.get("ready"))
             ),
             "final_claim_ledger_ready": bool(final_claim_ledger_path),
             "final_claim_ledger_path": final_claim_ledger_path,
@@ -4131,6 +4215,14 @@ class QuestService:
             closure_evidence.get("submission_minimal_materialized_table_count") or 0
         )
         submission_minimal_missing_table_ids = list(closure_evidence.get("submission_minimal_missing_table_ids") or [])
+        submission_minimal_manuscript_hygiene_ready = bool(
+            closure_evidence.get("submission_minimal_manuscript_hygiene_ready")
+        )
+        submission_minimal_manuscript_hygiene = (
+            dict(closure_evidence.get("submission_minimal_manuscript_hygiene") or {})
+            if isinstance(closure_evidence.get("submission_minimal_manuscript_hygiene"), dict)
+            else {}
+        )
         audit_package_ready = (
             bundle_status == "present"
             and review_outputs_ready
@@ -4349,6 +4441,20 @@ class QuestService:
                     f"({submission_minimal_materialized_table_count}/"
                     f"{submission_minimal_expected_table_count} tables materialized)"
                 )
+            if submission_minimal_manifest_path and not submission_minimal_manuscript_hygiene_ready:
+                duplicate_sections = list(submission_minimal_manuscript_hygiene.get("duplicate_sections") or [])
+                internal_instruction_hits = list(
+                    submission_minimal_manuscript_hygiene.get("internal_instruction_hits") or []
+                )
+                details: list[str] = []
+                if duplicate_sections:
+                    details.append("duplicate sections: " + ", ".join(str(item) for item in duplicate_sections[:6]))
+                if internal_instruction_hits:
+                    details.append(f"internal instruction leakage: {len(internal_instruction_hits)} hit(s)")
+                blocking_reasons.append(
+                    "submission-minimal manuscript hygiene check failed"
+                    + (f" ({'; '.join(details)})" if details else "")
+                )
         if not managed_publication_gate_clear:
             gap_preview = ", ".join(
                 item for item in managed_publication_gate_gap_summaries[:4] if item
@@ -4553,6 +4659,8 @@ class QuestService:
             "submission_minimal_expected_table_count": submission_minimal_expected_table_count,
             "submission_minimal_materialized_table_count": submission_minimal_materialized_table_count,
             "submission_minimal_missing_table_ids": submission_minimal_missing_table_ids,
+            "submission_minimal_manuscript_hygiene_ready": submission_minimal_manuscript_hygiene_ready,
+            "submission_minimal_manuscript_hygiene": submission_minimal_manuscript_hygiene,
             "submission_minimal_ready": submission_minimal_ready,
             "final_claim_ledger_ready": bool(closure_evidence.get("final_claim_ledger_ready")),
             "final_claim_ledger_path": str(closure_evidence.get("final_claim_ledger_path") or "").strip() or None,

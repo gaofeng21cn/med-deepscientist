@@ -9775,6 +9775,147 @@ def test_get_paper_contract_health_blocks_finalize_when_submission_minimal_omits
     )
 
 
+def test_get_paper_contract_health_blocks_finalize_when_submission_manuscript_hygiene_fails(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("artifact submission manuscript hygiene quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Artifact Submission Manuscript Hygiene Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-artifact-submission-manuscript-hygiene",
+            "paper_branch": "paper/artifact-submission-manuscript-hygiene",
+            "selected_outline_ref": "outline-001",
+            "title": "Artifact Submission Manuscript Hygiene Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "paper_branch": "paper/artifact-submission-manuscript-hygiene",
+            "selected_outline_ref": "outline-001",
+            "status": "ready_for_submission",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    (review_root / "review.md").write_text("# Review\n\nReady.\n", encoding="utf-8")
+    (review_root / "revision_log.md").write_text("# Revision Log\n\nReady.\n", encoding="utf-8")
+    write_json(
+        review_root / "submission_checklist.json",
+        {
+            "status": "ready_for_submission",
+            "blocking_items": [],
+        },
+    )
+    proofing_root = paper_root / "proofing"
+    proofing_root.mkdir(parents=True, exist_ok=True)
+    (proofing_root / "proofing_report.md").write_text("# Proofing Report\n\nLayout is clean.\n", encoding="utf-8")
+    (proofing_root / "language_issues.md").write_text("# Language Issues\n\nNone.\n", encoding="utf-8")
+    (paper_root / "final_claim_ledger.md").write_text(
+        "# Final Claim Ledger\n\nAll claims closed.\n",
+        encoding="utf-8",
+    )
+    (quest_root / "handoffs" / "finalize_resume_packet.md").write_text(
+        "# Finalize Resume Packet\n\nReady.\n",
+        encoding="utf-8",
+    )
+    _materialize_submission_minimal_projection(paper_root, include_display_exports=True)
+    write_json(
+        paper_root / "figure_catalog.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "paper_role": "main_text",
+                    "title": "Cohort flow",
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "table_catalog.json",
+        {
+            "tables": [
+                {
+                    "table_id": "T1",
+                    "title": "Baseline characteristics",
+                }
+            ]
+        },
+    )
+    manuscript_source_path = paper_root / "submission_minimal" / "manuscript_source.md"
+    manuscript_source_path.write_text(
+        "\n".join(
+            [
+                "# Abstract",
+                "",
+                "## Introduction",
+                "",
+                "## Results",
+                "",
+                "# Introduction",
+                "",
+                "# Results",
+                "",
+                "# Figure Legends",
+                "",
+                "The manuscript should open with this figure and must not be reframed as predictive superiority.",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    submission_manifest_path = paper_root / "submission_minimal" / "submission_manifest.json"
+    submission_manifest = json.loads(submission_manifest_path.read_text(encoding="utf-8"))
+    submission_manifest["manuscript"]["source_path"] = "paper/submission_minimal/manuscript_source.md"
+    write_json(submission_manifest_path, submission_manifest)
+
+    health_result = artifact.get_paper_contract_health(quest_root, detail="full")
+
+    assert health_result["ok"] is True
+    health = health_result["paper_contract_health"]
+    assert health["submission_minimal_ready"] is False
+    assert health["submission_minimal_manuscript_hygiene_ready"] is False
+    hygiene = health["submission_minimal_manuscript_hygiene"]
+    assert hygiene["duplicate_sections"] == ["introduction", "results"]
+    assert len(hygiene["internal_instruction_hits"]) == 1
+    assert health["recommended_next_stage"] == "write"
+    assert health["recommended_action"] == "finish_proofing_and_submission_checks"
+    assert "submission-minimal manuscript hygiene check failed" in " ".join(health["blocking_reasons"])
+
+
 def test_get_paper_contract_health_accepts_submission_minimal_display_exports_declared_via_output_paths(
     temp_home: Path,
 ) -> None:
