@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from deepscientist.artifact.guidance import build_guidance_for_record
 from deepscientist.artifact.schemas import validate_artifact_payload
+from deepscientist.artifact.service_parts.notifications import (
+    append_notification_file_section,
+    append_notification_section,
+    notification_block,
+    notification_text,
+)
 
 
 def test_main_run_guidance_prefers_iteration_when_paper_disabled() -> None:
@@ -66,3 +72,25 @@ def test_decision_schema_accepts_iterate_action() -> None:
     )
 
     assert errors == []
+
+
+def test_notification_helpers_normalize_sections_and_files() -> None:
+    lines: list[str] = ["# Update"]
+
+    assert notification_text("  First   line\n\n second\tline  ") == "First line\n\nsecond line"
+    assert notification_block({"next_action": [" Run profile ", "Check gate"]}) == (
+        "- Next Action:\n  - Run profile\n  - Check gate"
+    )
+
+    append_notification_section(lines, "Next", {"runtime_recovery": " Resume worker "})
+    append_notification_file_section(lines, [("Report", " artifacts/report.json "), ("Empty", None)])
+
+    assert lines == [
+        "# Update",
+        "",
+        "Next:",
+        "- Runtime Recovery: Resume worker",
+        "",
+        "Files:",
+        "- Report: `artifacts/report.json`",
+    ]
