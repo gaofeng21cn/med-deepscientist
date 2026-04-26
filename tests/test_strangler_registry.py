@@ -8,6 +8,7 @@ from deepscientist.strangler_registry import (
     RUNTIME_PROTOCOL_REF,
     boundary_guard_report,
     default_strangler_registry,
+    mas_consumption_contract_report,
     normalize_surface_record,
 )
 
@@ -52,6 +53,93 @@ def test_surface_record_requires_runtime_protocol_for_mas_consumable_promotion()
     assert record["strangler_stage"] == "promote_to_runtime_protocol"
 
 
+def test_mas_consumption_contract_report_lists_required_fields_for_each_surface() -> None:
+    report = mas_consumption_contract_report()
+
+    assert report["ok"] is True
+    assert report["surface_count"] >= 9
+    required_fields = {
+        "owner",
+        "target_owner",
+        "stage",
+        "promotion_gate",
+        "parity_proof",
+        "rollback_surface",
+        "mas_consumable_status",
+    }
+    for surface in report["surfaces"]:
+        assert required_fields <= set(surface)
+
+    by_surface = {surface["surface"]: surface for surface in report["surfaces"]}
+    assert by_surface["daemon_api_minimum"]["mas_consumable_status"] == "mas_consumable"
+    assert by_surface["publication_readiness_authority"]["mas_consumable_status"] == "mas_owned_or_absorbed"
+    assert by_surface["paper_baseline_inventory"]["mas_consumable_status"] == "not_mas_consumable"
+
+
+def test_mas_consumption_contract_report_fail_closes_missing_runtime_gate_or_parity_proof() -> None:
+    surfaces = [
+        {
+            "surface": "unregistered_runtime_adapter",
+            "current_owner": "MedDeepScientist",
+            "target_owner": "MedAutoScience runtime adapter",
+            "strangler_stage": "promote_to_runtime_protocol",
+            "mas_consumable_contract": True,
+            "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+            "parity_proof": "targeted runtime regression",
+            "rollback_surface": "quest-local fixture",
+        },
+        {
+            "surface": "runtime_projection_without_oracle",
+            "current_owner": "MedDeepScientist",
+            "target_owner": "MedAutoScience runtime adapter",
+            "strangler_stage": "promote_to_runtime_protocol",
+            "mas_consumable_contract": True,
+            "promotion_gate": RUNTIME_PROTOCOL_REF,
+            "parity_proof": "",
+            "rollback_surface": "runtime projection fixture",
+        },
+    ]
+
+    report = mas_consumption_contract_report(surfaces)
+
+    assert report["ok"] is False
+    assert {issue["code"] for issue in report["issues"]} == {
+        "mas_consumable_missing_runtime_protocol_gate",
+        "mas_consumable_missing_parity_proof",
+    }
+    by_surface = {surface["surface"]: surface for surface in report["surfaces"]}
+    assert (
+        by_surface["unregistered_runtime_adapter"]["mas_consumable_status"]
+        == "blocked_missing_runtime_protocol_gate"
+    )
+    assert (
+        by_surface["runtime_projection_without_oracle"]["mas_consumable_status"]
+        == "blocked_missing_parity_proof"
+    )
+
+
+def test_mas_consumption_contract_report_flags_owner_reflux_for_mas_authority() -> None:
+    report = mas_consumption_contract_report(
+        [
+            {
+                "surface": "publication_gate_status",
+                "current_owner": "MedDeepScientist",
+                "target_owner": "MedDeepScientist backend",
+                "strangler_stage": "retain_in_mds_backend",
+                "mas_consumable_contract": False,
+                "promotion_gate": RUNTIME_PROTOCOL_REF,
+                "parity_proof": "paper gate regression",
+                "rollback_surface": "artifacts/publication_eval/latest.json",
+                "owner_authority": "publication_readiness",
+            }
+        ]
+    )
+
+    assert report["ok"] is False
+    assert report["issues"][0]["code"] == "owner_reflux_risk"
+    assert report["surfaces"][0]["mas_consumable_status"] == "blocked_owner_reflux"
+
+
 def test_boundary_guard_flags_oversized_files_and_owner_reflux_risk(tmp_path: Path) -> None:
     oversized = tmp_path / "src" / "deepscientist" / "owner_surface.py"
     oversized.parent.mkdir(parents=True)
@@ -81,4 +169,3 @@ def test_boundary_guard_flags_oversized_files_and_owner_reflux_risk(tmp_path: Pa
     oversized_issue = next(issue for issue in report["issues"] if issue["code"] == "oversized_file")
     assert oversized_issue["path"] == "src/deepscientist/owner_surface.py"
     assert oversized_issue["line_count"] == 6
-
