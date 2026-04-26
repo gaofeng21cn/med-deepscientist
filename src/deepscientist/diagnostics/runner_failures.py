@@ -27,11 +27,16 @@ _MODEL_UNAVAILABLE_MARKERS = (
 )
 
 
-_CODEX_UPSTREAM_ERROR_MARKERS = (
+_CODEX_UPSTREAM_QUOTA_MARKERS = (
     "account balance is negative",
     "please recharge first",
     "insufficient quota",
     "quota exceeded",
+    "credits exhausted",
+    "payment required",
+)
+
+_CODEX_UPSTREAM_ERROR_MARKERS = (
     "rate limit",
     "too many requests",
     "service unavailable",
@@ -44,7 +49,6 @@ _CODEX_UPSTREAM_ERROR_MARKERS = (
 
 _CODEX_UPSTREAM_STATUS_MARKERS = (
     "401 unauthorized",
-    "402 payment required",
     "403 forbidden",
     "429 too many requests",
     "500 internal server error",
@@ -68,29 +72,6 @@ def diagnose_runner_failure(
     haystack = _build_haystack(summary, stderr_text, output_text)
     lower = haystack.lower()
     normalized_runner = str(runner_name or "").strip().lower()
-
-    if normalized_runner == "codex" and (
-        any(marker in lower for marker in _CODEX_UPSTREAM_ERROR_MARKERS)
-        or (
-            ("unexpected status" in lower or "http_code" in lower or "status" in lower)
-            and any(marker in lower for marker in _CODEX_UPSTREAM_STATUS_MARKERS)
-        )
-    ):
-        return FailureDiagnosis(
-            code="codex_upstream_provider_error",
-            problem="The configured Codex upstream provider rejected or could not serve the request.",
-            why=(
-                "This is an external provider/account/API service condition. DeepScientist can retry with backoff, "
-                "but it cannot repair upstream provider state from inside the quest runtime."
-            ),
-            guidance=(
-                "Check the configured provider account, quota, rate limit, credentials, and service health.",
-                "Verify the same Codex profile works outside DeepScientist before resuming the quest.",
-                "Do not relaunch the same quest repeatedly until the upstream provider state is healthy.",
-            ),
-            retriable=True,
-            matched_text="codex upstream provider error",
-        )
 
     if (
         "tool call result does not follow tool call (2013)" in lower
@@ -134,6 +115,121 @@ def diagnose_runner_failure(
             matched_text="tool-call arguments",
         )
 
+    if normalized_runner == "codex" and "invalid params" in lower and "bad_request_error" in lower:
+        return FailureDiagnosis(
+            code="provider_invalid_params",
+            problem="The provider rejected the request parameters.",
+            why="The upstream provider returned a deterministic request-shape error instead of a transient transport failure.",
+            guidance=(
+                "Inspect the immediately preceding tool call / tool result sequence for protocol ordering or JSON-shape mistakes.",
+                "Do not keep retrying the same request until the request payload or provider config is corrected.",
+            ),
+            retriable=False,
+            matched_text="invalid params",
+        )
+
+    if normalized_runner == "codex" and (
+        any(marker in lower for marker in _CODEX_UPSTREAM_QUOTA_MARKERS)
+        or (
+            ("unexpected status" in lower or "http_code" in lower or "status" in lower)
+            and "402 payment required" in lower
+        )
+    ):
+        return FailureDiagnosis(
+            code="codex_upstream_quota_error",
+            problem="The configured Codex upstream provider account has a quota or billing blocker.",
+            why=(
+                "This is an external provider/account state. DeepScientist cannot repair exhausted quota, "
+                "billing, or recharge state from inside the quest runtime."
+            ),
+            guidance=(
+                "Check the configured provider account balance, quota, billing status, and credentials.",
+                "Verify the same Codex profile succeeds outside DeepScientist after the quota state is fixed.",
+                "Do not retry the same quest until the provider account state is healthy.",
+            ),
+            retriable=False,
+            matched_text="codex upstream quota error",
+        )
+
+    if normalized_runner == "codex" and (
+        any(marker in lower for marker in _CODEX_UPSTREAM_ERROR_MARKERS)
+        or (
+            ("unexpected status" in lower or "http_code" in lower or "status" in lower)
+            and any(marker in lower for marker in _CODEX_UPSTREAM_STATUS_MARKERS)
+        )
+    ):
+        return FailureDiagnosis(
+            code="codex_upstream_provider_error",
+            problem="The configured Codex upstream provider rejected or could not serve the request.",
+            why=(
+                "This is an external provider/account/API service condition. DeepScientist can retry with backoff, "
+                "but it cannot repair upstream provider state from inside the quest runtime."
+            ),
+            guidance=(
+                "Check the configured provider account, quota, rate limit, credentials, and service health.",
+                "Verify the same Codex profile works outside DeepScientist before resuming the quest.",
+                "Do not relaunch the same quest repeatedly until the upstream provider state is healthy.",
+            ),
+            retriable=True,
+            matched_text="codex upstream provider error",
+        )
+
+    if "no live worker" in lower:
+        return FailureDiagnosis(
+            code="daemon_no_live_worker",
+            problem="The daemon found a running quest state without a live turn worker.",
+            why="The persisted runtime state still referenced an active run, but the daemon had no live worker for it.",
+            guidance=(
+                "Trust the daemon reconciliation event as the durable boundary for the abandoned run.",
+                "Submit a new user message or resume the quest after confirming the prior run did not leave incomplete required artifacts.",
+            ),
+            retriable=False,
+            matched_text="no live worker",
+        )
+
+    if (
+        "stalled running turn" in lower
+        or "stale live turn" in lower
+        or "no visible progress while queued user messages" in lower
+    ):
+        return FailureDiagnosis(
+            code="daemon_stalled_live_turn",
+            problem="The daemon recovered a stalled live turn.",
+            why="The turn remained live while queued user work waited and no meaningful tool activity progressed for the stuck window.",
+            guidance=(
+                "Continue from the reconciled workspace state instead of restarting the quest from scratch.",
+                "Inspect the abandoned run only if the next turn reports missing artifacts or conflicting state.",
+            ),
+            retriable=False,
+            matched_text="stalled live turn",
+        )
+
+    if "currently parked" in lower or "runtime parked" in lower or "wait_for_user_or_resume" in lower:
+        return FailureDiagnosis(
+            code="runtime_intentionally_parked",
+            problem="The runtime is intentionally parked pending a user message or resume action.",
+            why="The current continuation policy explicitly waits for user input or an explicit resume before starting more runner work.",
+            guidance=(
+                "Send a new user message or resume the quest when the next unit of work should start.",
+                "Do not treat a parked runtime as a provider, daemon, or runner crash.",
+            ),
+            retriable=False,
+            matched_text="runtime parked",
+        )
+
+    if "retry budget exhausted" in lower:
+        return FailureDiagnosis(
+            code="runner_retry_budget_exhausted",
+            problem="The runner exhausted its retry budget.",
+            why="The same turn failed through the configured retry attempts without producing a successful runner result.",
+            guidance=(
+                "Inspect the final runner error and retry context before resuming.",
+                "Resume only after the underlying transient condition or runner configuration is corrected.",
+            ),
+            retriable=False,
+            matched_text="retry budget exhausted",
+        )
+
     if "argument list too long" in lower or "[errno 7]" in lower:
         return FailureDiagnosis(
             code="runner_argument_list_too_long",
@@ -175,19 +271,6 @@ def diagnose_runner_failure(
             ),
             retriable=False,
             matched_text="model unavailable",
-        )
-
-    if normalized_runner == "codex" and "invalid params" in lower and "bad_request_error" in lower:
-        return FailureDiagnosis(
-            code="provider_invalid_params",
-            problem="The provider rejected the request parameters.",
-            why="The upstream provider returned a deterministic request-shape error instead of a transient transport failure.",
-            guidance=(
-                "Inspect the immediately preceding tool call / tool result sequence for protocol ordering or JSON-shape mistakes.",
-                "Do not keep retrying the same request until the request payload or provider config is corrected.",
-            ),
-            retriable=False,
-            matched_text="invalid params",
         )
 
     if normalized_runner == "codex" and (

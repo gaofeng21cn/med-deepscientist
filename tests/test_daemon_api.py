@@ -775,6 +775,13 @@ def test_quest_runtime_audit_reconciles_stale_active_run_without_worker(temp_hom
     assert snapshot["runtime_status"] == "active"
     assert snapshot["display_status"] == "active"
     assert snapshot["active_run_id"] is None
+    events = app.quest_service.events(quest_id)["events"]
+    assert any(
+        item.get("type") == "quest.turn_state_reconciled"
+        and item.get("abandoned_run_id") == "run-stale-audit-001"
+        and item.get("diagnosis_code") == "daemon_no_live_worker"
+        for item in events
+    )
 
 
 def test_quest_session_surfaces_stale_interaction_watchdog_for_live_silent_turn(temp_home: Path) -> None:
@@ -5761,6 +5768,7 @@ def test_submit_user_message_recovers_stalled_live_turn_and_starts_new_run(
         item.get("type") == "quest.turn_state_reconciled"
         and item.get("abandoned_run_id") == stale_run_id
         and item.get("recovery_kind") == "stalled_live_turn"
+        and item.get("diagnosis_code") == "daemon_stalled_live_turn"
         for item in events
     )
 
@@ -7292,13 +7300,19 @@ def test_daemon_retry_exhausts_after_five_attempts(temp_home: Path) -> None:
 
     snapshot = app.quest_service.snapshot(quest_id)
     events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+    turn_errors = [item for item in events if item.get("type") == "runner.turn_error"]
+    retry_exhausted_events = [item for item in events if item.get("type") == "runner.turn_retry_exhausted"]
 
     assert len(runner.requests) == 5
     assert snapshot["runtime_status"] == "active"
     assert snapshot["status"] == "error"
     assert snapshot["retry_state"] is None
-    assert any(item.get("type") == "runner.turn_error" for item in events)
-    assert any(item.get("type") == "runner.turn_retry_exhausted" for item in events)
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "runner_retry_budget_exhausted"
+    assert turn_errors
+    assert turn_errors[-1].get("diagnosis_code") == "runner_retry_budget_exhausted"
+    assert retry_exhausted_events
+    assert retry_exhausted_events[-1].get("diagnosis_code") == "runner_retry_budget_exhausted"
     assert not any(
         str(item.get("role") or "") == "assistant"
         and str(item.get("content") or "") == "Partial failed output."
@@ -7384,6 +7398,80 @@ def test_daemon_retries_codex_upstream_error_then_stops_with_external_blocker(
     assert turn_errors
     assert turn_errors[-1].get("diagnosis_code") == "codex_upstream_provider_error"
     assert any("provider account, quota, rate limit" in line for line in turn_errors[-1].get("guidance") or [])
+
+
+def test_daemon_stops_codex_quota_error_without_retrying_provider_account_blocker(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": True,
+            "retry_max_attempts": 3,
+            "retry_initial_backoff_sec": 0,
+            "retry_backoff_multiplier": 2,
+            "retry_max_backoff_sec": 0,
+        }
+    )
+    quest = app.quest_service.create("codex quota error quest")
+    quest_id = quest["quest_id"]
+
+    class CodexQuotaFailRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def run(self, request):
+            self.requests.append(request)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=False,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="unexpected status 402 Payment Required: quota exceeded for this account",
+                exit_code=1,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = CodexQuotaFailRunner()
+    app.runners["codex"] = runner
+
+    payload = app.handlers.chat(quest_id, {"text": "Please continue.", "source": "tui-ink"})
+    assert payload["ok"] is True
+
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snapshot = app.quest_service.snapshot(quest_id)
+        events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+        if (
+            any(item.get("type") == "runner.turn_error" for item in events)
+            and snapshot.get("retry_state") is None
+            and str(snapshot.get("display_status") or "").strip() == "error"
+        ):
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError("Codex quota failure did not settle into an immediate external account blocker")
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    events = read_jsonl(Path(quest["quest_root"]) / ".ds" / "events.jsonl")
+    turn_errors = [item for item in events if item.get("type") == "runner.turn_error"]
+
+    assert len(runner.requests) == 1
+    assert snapshot["retry_state"] is None
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "external_codex_upstream_quota_error"
+    assert snapshot["status"] == "error"
+    assert snapshot["display_status"] == "error"
+    assert not any(item.get("type") == "runner.turn_retry_scheduled" for item in events)
+    assert turn_errors
+    assert turn_errors[-1].get("diagnosis_code") == "codex_upstream_quota_error"
 
 
 def test_daemon_skips_retry_for_non_retryable_minimax_protocol_error(temp_home: Path) -> None:
