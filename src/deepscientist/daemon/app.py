@@ -1949,6 +1949,12 @@ class DaemonApp:
                 summary = f"{summary} The active runner process was interrupted."
             if stopped_bash_session_ids:
                 summary = f"{summary} Stopped {len(stopped_bash_session_ids)} bash_exec session(s)."
+            diagnosis = self._runner_failure_diagnosis(
+                runner_name="daemon",
+                summary=summary,
+                stderr_text="",
+                output_text="",
+            )
             quest_root = self.quest_service._quest_root(quest_id)
             append_jsonl(
                 quest_root / ".ds" / "events.jsonl",
@@ -1963,6 +1969,7 @@ class DaemonApp:
                     "exit_code": None,
                     "summary": summary,
                     "recovery_kind": "stalled_live_turn",
+                    "diagnosis_code": diagnosis.code if diagnosis is not None else None,
                     "interrupted": interrupted,
                     "stopped_bash_session_ids": stopped_bash_session_ids,
                     "created_at": utc_now(),
@@ -2144,6 +2151,12 @@ class DaemonApp:
                 )
             )
         )
+        diagnosis = self._runner_failure_diagnosis(
+            runner_name="daemon",
+            summary=summary,
+            stderr_text="",
+            output_text="",
+        )
         append_jsonl(
             quest_root / ".ds" / "events.jsonl",
             {
@@ -2156,6 +2169,7 @@ class DaemonApp:
                 "completed_at": completed_at or None,
                 "exit_code": exit_code if isinstance(exit_code, int) else None,
                 "summary": summary,
+                "diagnosis_code": diagnosis.code if diagnosis is not None else None,
                 "created_at": utc_now(),
             },
         )
@@ -2971,7 +2985,7 @@ class DaemonApp:
                         self.quest_service.update_runtime_state(
                             quest_root=quest_root,
                             continuation_policy="wait_for_user_or_resume",
-                            continuation_reason="non_retryable_runner_error",
+                            continuation_reason=self._non_retryable_continuation_reason(diagnosis),
                             continuation_updated_at=utc_now(),
                         )
                         self._record_turn_error(
@@ -3059,7 +3073,7 @@ class DaemonApp:
                         stderr_text=str(exc),
                         output_text="",
                     )
-                    if diagnosis is not None and diagnosis.retriable:
+                    if diagnosis is not None:
                         self.quest_service.update_runtime_state(
                             quest_root=quest_root,
                             continuation_policy="wait_for_user_or_resume",
@@ -3078,6 +3092,7 @@ class DaemonApp:
                         max_attempts=max_attempts,
                         summary=exhausted_summary,
                         failure_summary=failure_summary,
+                        diagnosis_code=diagnosis.code if diagnosis is not None else None,
                     )
                     self._record_turn_error(
                         quest_id=quest_id,
@@ -3177,7 +3192,7 @@ class DaemonApp:
                     self.quest_service.update_runtime_state(
                         quest_root=quest_root,
                         continuation_policy="wait_for_user_or_resume",
-                        continuation_reason="non_retryable_runner_error",
+                        continuation_reason=self._non_retryable_continuation_reason(diagnosis),
                         continuation_updated_at=utc_now(),
                     )
                     self._record_turn_error(
@@ -3266,7 +3281,7 @@ class DaemonApp:
                     stderr_text=result.stderr_text,
                     output_text=result.output_text,
                 )
-                if diagnosis is not None and diagnosis.retriable:
+                if diagnosis is not None:
                     self.quest_service.update_runtime_state(
                         quest_root=quest_root,
                         continuation_policy="wait_for_user_or_resume",
@@ -3285,6 +3300,7 @@ class DaemonApp:
                     max_attempts=max_attempts,
                     summary=exhausted_summary,
                     failure_summary=failure_summary,
+                    diagnosis_code=diagnosis.code if diagnosis is not None else None,
                 )
                 self._record_turn_error(
                     quest_id=quest_id,
@@ -3732,6 +3748,7 @@ class DaemonApp:
         next_attempt_index: int | None = None,
         previous_run_id: str | None = None,
         abort_reason: str | None = None,
+        diagnosis_code: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "event_id": generate_id("evt"),
@@ -3757,6 +3774,9 @@ class DaemonApp:
             payload["previous_run_id"] = previous_run_id
         if abort_reason:
             payload["abort_reason"] = abort_reason
+        normalized_diagnosis_code = str(diagnosis_code or "").strip() or None
+        if normalized_diagnosis_code:
+            payload["diagnosis_code"] = normalized_diagnosis_code
         append_jsonl(self.home / "quests" / quest_id / ".ds" / "events.jsonl", payload)
         self.logger.log(
             "warning" if "scheduled" in event_type or "exhausted" in event_type else "info",
@@ -3771,6 +3791,7 @@ class DaemonApp:
             next_attempt_index=next_attempt_index,
             previous_run_id=previous_run_id,
             abort_reason=abort_reason,
+            diagnosis_code=normalized_diagnosis_code,
         )
         return payload
 
@@ -3999,6 +4020,18 @@ class DaemonApp:
         if diagnosis is None or diagnosis.retriable:
             return None
         return diagnosis
+
+    @staticmethod
+    def _non_retryable_continuation_reason(diagnosis: FailureDiagnosis) -> str:
+        if diagnosis.code == "codex_upstream_quota_error":
+            return "external_codex_upstream_quota_error"
+        if diagnosis.code == "runtime_intentionally_parked":
+            return "runtime_intentionally_parked"
+        if diagnosis.code == "daemon_no_live_worker":
+            return "daemon_no_live_worker"
+        if diagnosis.code == "daemon_stalled_live_turn":
+            return "daemon_stalled_live_turn"
+        return "non_retryable_runner_error"
 
     @staticmethod
     def _retry_exhausted_continuation_reason(diagnosis: FailureDiagnosis) -> str:
