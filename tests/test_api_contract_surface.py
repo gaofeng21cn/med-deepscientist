@@ -524,6 +524,35 @@ def test_runner_contract_docs_keep_codex_default_provider_path_and_connector_bou
     assert "`claude` 和 `opencode` 继续保留为 reserved experimental runner contract" in provider_guide_zh_source
 
 
+def test_mas_mds_transition_contract_docs_define_backend_oracle_boundary() -> None:
+    transition_source = _read("docs/policies/mas_mds_transition_contract.md")
+    runtime_protocol_source = _read("docs/policies/runtime_protocol.md")
+    architecture_source = _read("docs/architecture.md")
+    status_source = _read("docs/status.md")
+
+    assert "controlled backend" in transition_source
+    assert "behavior oracle" in transition_source
+    assert "upstream intake buffer" in transition_source
+    assert "MAS owner 必须消费的 surface" in transition_source
+    assert "只作为 MDS parity/oracle 的 surface" in transition_source
+    assert "No physical migration" in transition_source
+    assert "No new product entry" in transition_source
+    assert "docs/policies/runtime_protocol.md" in transition_source
+
+    assert "docs/policies/mas_mds_transition_contract.md" in runtime_protocol_source
+    assert "controlled backend, behavior oracle, and upstream intake buffer" in runtime_protocol_source
+    assert "oracle-only MDS surface" in runtime_protocol_source
+
+    assert "docs/policies/mas_mds_transition_contract.md" in architecture_source
+    assert "MAS owner 消费的是 `docs/policies/runtime_protocol.md`" in architecture_source
+    assert "不能默认升级为 MAS product contract" in architecture_source
+
+    assert "docs/policies/mas_mds_transition_contract.md" in status_source
+    assert "controlled backend" in status_source
+    assert "behavior oracle" in status_source
+    assert "upstream intake buffer" in status_source
+
+
 def test_ui_font_loading_uses_single_stylesheet_entrypoint() -> None:
     index_html_source = _read("src/ui/index.html")
     index_css_source = _read("src/ui/src/index.css")

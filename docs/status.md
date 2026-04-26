@@ -3,6 +3,7 @@
 ## 当前定位
 
 - 仓库角色：`MedAutoScience` 的稳定 runtime substrate，当前通过受控 fork 形态维护
+- MAS/MDS 迁移收缩角色：`controlled backend`、`behavior oracle`、`upstream intake buffer`
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
 - 长线方向：把 runtime surface 收敛成 family 级稳定合同，repo 边界保持可演进
 - 当前执行真相：最底层 AI 执行继续通过 `CodexRunner -> codex exec autonomous agent loop` 落地；默认 `model / reasoning` 继承本机 `Codex` 默认配置，而不是 repo-local pin 固定型号
@@ -13,6 +14,7 @@
 ## 当前主线
 
 - 稳定协议入口：`docs/policies/runtime_protocol.md`
+- 迁移收缩契约：`docs/policies/mas_mds_transition_contract.md`
 - 核心工作方式入口：根 `AGENTS.md`
 - 当前文档骨架：`project / architecture / invariants / decisions / status`
 - BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线
@@ -49,10 +51,11 @@
 ## 当前优先事项
 
 1. 保持 `MedAutoScience -> MedDeepScientist` 兼容性清晰且可验证。
-2. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
-3. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
-4. 让 upstream intake 继续通过审计与验证推进，而不是零散吸收。
-5. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
+2. 按 `controlled backend / behavior oracle / upstream intake buffer` 收缩 MDS 角色，避免把 MDS 扩成第二个 MAS product owner。
+3. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
+4. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
+5. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
+6. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
 
 ## 默认验证
 

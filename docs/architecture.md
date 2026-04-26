@@ -11,6 +11,12 @@
 
 `controller / adapter -> daemon API -> RunRequest -> CodexRunner -> codex exec autonomous agent loop`
 
+## MAS/MDS 迁移边界
+
+当前 MDS 在 MAS 单项目演进线中只承担 `controlled backend`、`behavior oracle`、`upstream intake buffer` 三类职责。MAS owner 消费的是 `docs/policies/runtime_protocol.md` 中列出的 stable runtime surface；MDS 额外保留的 prompt/skill、UI/TUI、BenchStore、DeepXiv、experimental runner 或 upstream 行为，只能作为 parity/oracle 或 intake 参考，不能默认升级为 MAS product contract。
+
+稳定收缩契约见 `docs/policies/mas_mds_transition_contract.md`。该契约不触发 physical migration，不新增产品入口，也不把医学研究设计、publication gate、submission authority 从 MAS 下沉到 MDS。
+
 ## 核心模块
 
 ### 1. Runtime core
@@ -73,6 +79,7 @@
 ## 稳定边界
 
 - 稳定协议以 `docs/policies/runtime_protocol.md` 为准。
+- MAS/MDS 迁移收缩以 `docs/policies/mas_mds_transition_contract.md` 为边界说明，但 stable runtime authority 仍以 runtime protocol 为准。
 - Quest 仍遵循“一题一仓”的 durable layout。
 - `quest.yaml`、`brief.md`、`plan.md`、`status.md`、`SUMMARY.md` 属于稳定 durable surface。
 - `MedAutoScience` 依赖的是协议与 durable surface，不是 prompt 细节或 UI 呈现细节。

@@ -14,6 +14,13 @@ This document defines the only stable runtime surface that `MedAutoScience` may 
 
 Anything not listed here is non-stable product surface.
 
+The MAS/MDS transition boundary is further constrained by
+`docs/policies/mas_mds_transition_contract.md`: `MedDeepScientist` is a
+controlled backend, behavior oracle, and upstream intake buffer. This document
+remains the stable runtime authority; the transition contract explains how MAS
+may consume that authority without treating MDS prompt, UI, product, or
+experimental surfaces as stable MAS-facing product contracts.
+
 ## 2. Stable Daemon API Shape
 
 Only the following HTTP routes and payload shape are stable for adapter integration.
@@ -343,6 +350,10 @@ The following are intentionally non-stable unless promoted into this spec:
 ## 7. Change Control
 
 No intake/fix/refactor may silently break this stable protocol.
+
+No MAS/MDS transition work may promote an oracle-only MDS surface into a
+MAS-consumable contract unless that surface is added to this document and
+covered by targeted regression tests in the same change.
 
 Any change to stable behavior requires all of:
 
