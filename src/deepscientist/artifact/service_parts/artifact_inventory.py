@@ -4,13 +4,10 @@ from pathlib import Path
 from typing import Any
 
 from ...shared import ensure_dir, read_json, utc_now, write_json
-
-RUNTIME_PROTOCOL_REF = "docs/policies/runtime_protocol.md"
-PROMOTION_LADDER_STAGES = (
-    "retain_in_mds_backend",
-    "oracle_only",
-    "promote_to_runtime_protocol",
-    "mas_owned_or_absorbed",
+from ...strangler_registry import (
+    PROMOTION_LADDER_STAGES,
+    RUNTIME_PROTOCOL_REF,
+    validate_promotion_ladder_stage,
 )
 
 _SURFACE_AUDITS: dict[str, dict[str, Any]] = {
@@ -35,25 +32,6 @@ _SURFACE_AUDITS: dict[str, dict[str, Any]] = {
         "rollback_surface": "quest-local paper/baseline_inventory.json",
     },
 }
-
-
-def validate_promotion_ladder_stage(
-    strangler_stage: str,
-    *,
-    runtime_protocol_ref: str | None = None,
-) -> str:
-    normalized_stage = str(strangler_stage or "").strip()
-    if normalized_stage not in PROMOTION_LADDER_STAGES:
-        allowed = ", ".join(PROMOTION_LADDER_STAGES)
-        raise ValueError(f"Unknown MAS/MDS promotion ladder stage `{normalized_stage}`. Expected one of: {allowed}.")
-    if (
-        normalized_stage == "promote_to_runtime_protocol"
-        and str(runtime_protocol_ref or "").strip() != RUNTIME_PROTOCOL_REF
-    ):
-        raise ValueError(f"`promote_to_runtime_protocol` requires runtime protocol reference `{RUNTIME_PROTOCOL_REF}`.")
-    return normalized_stage
-
-
 def artifact_inventory_surface_audit(surface: str) -> dict[str, Any]:
     normalized_surface = str(surface or "").strip()
     audit = _SURFACE_AUDITS.get(normalized_surface)
