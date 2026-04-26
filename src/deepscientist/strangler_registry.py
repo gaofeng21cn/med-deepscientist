@@ -48,6 +48,16 @@ _REQUIRED_SURFACE_FIELDS = (
     "rollback_surface",
 )
 
+_CONSUMPTION_REPORT_FIELDS = (
+    "owner",
+    "target_owner",
+    "stage",
+    "promotion_gate",
+    "parity_proof",
+    "rollback_surface",
+    "mas_consumable_status",
+)
+
 _BASE_SURFACES: tuple[dict[str, Any], ...] = (
     {
         "surface": "daemon_api_minimum",
@@ -200,6 +210,30 @@ def normalize_surface_record(record: Mapping[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def mas_consumption_contract_report(
+    surfaces: Iterable[Mapping[str, Any]] | Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    surface_records = _surface_records_for_report(surfaces)
+    report_surfaces: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for record in surface_records:
+        entry, entry_issues = _mas_consumption_contract_entry(record)
+        report_surfaces.append(entry)
+        issues.extend(entry_issues)
+    return {
+        "schema_version": 1,
+        "ok": not issues,
+        "surface_count": len(report_surfaces),
+        "surfaces": report_surfaces,
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
+def mas_consumption_contract_issues(surfaces: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return mas_consumption_contract_report(surfaces)["issues"]
+
+
 def default_strangler_registry() -> dict[str, dict[str, Any]]:
     registry: dict[str, dict[str, Any]] = {}
     for record in _BASE_SURFACES:
@@ -247,6 +281,170 @@ def owner_reflux_issues(surfaces: Iterable[Mapping[str, Any]]) -> list[dict[str,
     return issues
 
 
+def _surface_records_for_report(
+    surfaces: Iterable[Mapping[str, Any]] | Mapping[str, Mapping[str, Any]] | None,
+) -> list[Mapping[str, Any]]:
+    if surfaces is None:
+        return list(default_strangler_registry().values())
+    if isinstance(surfaces, Mapping):
+        if "surface" in surfaces:
+            return [dict(surfaces)]
+        return [dict(record) for record in surfaces.values()]
+    return list(surfaces)
+
+
+def _mas_consumption_contract_entry(record: Mapping[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    raw = dict(record)
+    entry = {
+        "surface": _text(raw.get("surface")) or "<unknown>",
+        "owner": _text(raw.get("current_owner")),
+        "current_owner": _text(raw.get("current_owner")),
+        "target_owner": _text(raw.get("target_owner")),
+        "stage": _text(raw.get("strangler_stage")),
+        "strangler_stage": _text(raw.get("strangler_stage")),
+        "promotion_gate": _text(raw.get("promotion_gate")),
+        "parity_proof": _text(raw.get("parity_proof")),
+        "rollback_surface": _text(raw.get("rollback_surface")),
+        "mas_consumable": bool(raw.get("mas_consumable_contract")),
+        "mas_consumable_contract": bool(raw.get("mas_consumable_contract")),
+    }
+    owner_authority = _text(raw.get("owner_authority"))
+    if owner_authority:
+        entry["owner_authority"] = owner_authority
+
+    issues = _mas_consumption_contract_entry_issues(entry, raw)
+    if not issues:
+        try:
+            normalized = normalize_surface_record(raw)
+        except ValueError as exc:
+            issues.append(
+                {
+                    "code": "surface_registry_error",
+                    "surface": entry["surface"],
+                    "message": str(exc),
+                }
+            )
+        else:
+            entry.update(
+                {
+                    "surface": normalized["surface"],
+                    "owner": normalized["current_owner"],
+                    "current_owner": normalized["current_owner"],
+                    "target_owner": normalized["target_owner"],
+                    "stage": normalized["strangler_stage"],
+                    "strangler_stage": normalized["strangler_stage"],
+                    "promotion_gate": normalized["promotion_gate"],
+                    "parity_proof": normalized["parity_proof"],
+                    "rollback_surface": normalized["rollback_surface"],
+                    "mas_consumable": normalized["mas_consumable_contract"],
+                    "mas_consumable_contract": normalized["mas_consumable_contract"],
+                }
+            )
+            if "owner_authority" in normalized:
+                entry["owner_authority"] = normalized["owner_authority"]
+    entry["mas_consumable_status"] = _mas_consumable_status(entry, issues)
+    entry["report_fields"] = list(_CONSUMPTION_REPORT_FIELDS)
+    if issues:
+        entry["issues"] = [dict(issue) for issue in issues]
+    return entry, issues
+
+
+def _mas_consumption_contract_entry_issues(
+    entry: Mapping[str, Any],
+    raw: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    surface = str(entry["surface"])
+    missing_fields = [field for field in _REQUIRED_SURFACE_FIELDS if field not in raw]
+    if missing_fields:
+        issues.append(
+            {
+                "code": "surface_registry_error",
+                "surface": surface,
+                "missing_fields": missing_fields,
+                "message": f"Strangler surface record is missing required fields: {', '.join(missing_fields)}.",
+            }
+        )
+
+    stage = str(entry["stage"])
+    if stage and stage not in PROMOTION_LADDER_STAGES:
+        allowed = ", ".join(PROMOTION_LADDER_STAGES)
+        issues.append(
+            {
+                "code": "surface_registry_error",
+                "surface": surface,
+                "strangler_stage": stage,
+                "message": f"Unknown MAS/MDS promotion ladder stage `{stage}`. Expected one of: {allowed}.",
+            }
+        )
+
+    mas_consumable = bool(entry["mas_consumable_contract"])
+    if mas_consumable:
+        if stage != "promote_to_runtime_protocol":
+            issues.append(
+                {
+                    "code": "mas_consumable_invalid_stage",
+                    "surface": surface,
+                    "strangler_stage": stage,
+                    "message": "MAS-consumable MDS surfaces must be promoted through the runtime protocol.",
+                }
+            )
+        if entry["promotion_gate"] != RUNTIME_PROTOCOL_REF:
+            issues.append(
+                {
+                    "code": "mas_consumable_missing_runtime_protocol_gate",
+                    "surface": surface,
+                    "promotion_gate": entry["promotion_gate"],
+                    "required_promotion_gate": RUNTIME_PROTOCOL_REF,
+                    "message": "MAS-consumable MDS surfaces must use the runtime protocol promotion gate.",
+                }
+            )
+        if not entry["parity_proof"]:
+            issues.append(
+                {
+                    "code": "mas_consumable_missing_parity_proof",
+                    "surface": surface,
+                    "message": "MAS-consumable MDS surfaces must declare a parity proof.",
+                }
+            )
+
+    owner_authority = str(entry.get("owner_authority") or "").strip()
+    if owner_authority in MAS_OWNER_AUTHORITIES and stage != "mas_owned_or_absorbed":
+        issues.append(
+            {
+                "code": "owner_reflux_risk",
+                "surface": surface,
+                "owner_authority": owner_authority,
+                "strangler_stage": stage,
+                "current_owner": entry["current_owner"],
+                "target_owner": entry["target_owner"],
+                "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
+            }
+        )
+    return issues
+
+
+def _mas_consumable_status(entry: Mapping[str, Any], issues: Sequence[Mapping[str, Any]]) -> str:
+    issue_codes = {str(issue.get("code") or "") for issue in issues}
+    if "owner_reflux_risk" in issue_codes:
+        return "blocked_owner_reflux"
+    if "mas_consumable_missing_runtime_protocol_gate" in issue_codes:
+        return "blocked_missing_runtime_protocol_gate"
+    if "mas_consumable_missing_parity_proof" in issue_codes:
+        return "blocked_missing_parity_proof"
+    if issue_codes:
+        return "blocked_invalid_surface"
+    if bool(entry["mas_consumable_contract"]):
+        return "mas_consumable"
+    if entry["stage"] == "mas_owned_or_absorbed":
+        return "mas_owned_or_absorbed"
+    return "not_mas_consumable"
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
 def oversized_file_issues(
     root: Path,
     *,
@@ -290,8 +488,9 @@ def boundary_guard_report(
 ) -> dict[str, Any]:
     root_path = Path(root)
     surface_records = list(surfaces) if surfaces is not None else list(default_strangler_registry().values())
+    contract_report = mas_consumption_contract_report(surface_records)
     issues = [
-        *owner_reflux_issues(surface_records),
+        *contract_report["issues"],
         *oversized_file_issues(
             root_path,
             max_file_lines=max_file_lines,
@@ -303,6 +502,7 @@ def boundary_guard_report(
         "schema_version": 1,
         "ok": not issues,
         "root": str(root_path),
+        "mas_consumption_contract_report": contract_report,
         "issue_count": len(issues),
         "issues": issues,
     }
@@ -311,4 +511,3 @@ def boundary_guard_report(
 def _count_file_lines(file_path: Path) -> int:
     with file_path.open("r", encoding="utf-8", errors="ignore") as handle:
         return sum(1 for _line in handle)
-

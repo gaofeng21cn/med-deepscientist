@@ -68,3 +68,13 @@ MDS surface 的后续演进只能沿以下阶梯移动，不能跳级：
 3. 任何 MAS-consumable surface 的新增或语义变化，都同步更新 runtime protocol 与 targeted regression tests。
 4. 任何 upstream intake 只能在增强 runtime contract、behavior oracle 或兼容性证明时进入主线。
 5. 任何 MDS surface promotion 都必须显式落到 `retain_in_mds_backend`、`oracle_only`、`promote_to_runtime_protocol` 或 `mas_owned_or_absorbed` 其中一个阶梯状态。
+
+## 7. MAS consumption contract report
+
+`strangler_registry` 必须能为每个登记 surface 输出 MAS consumption contract report，字段至少包括：当前 owner、目标 owner、阶梯状态、promotion gate、parity proof、rollback surface 与 MAS-consumable status。
+
+报告必须 fail-closed：
+
+- 带有 MAS owner authority 的 surface 若未处于 `mas_owned_or_absorbed`，必须报 `owner_reflux_risk`。
+- 标记为 MAS-consumable 的 surface 若未以 `docs/policies/runtime_protocol.md` 作为 promotion gate，必须阻断。
+- 标记为 MAS-consumable 的 surface 若没有 parity proof，必须阻断。

@@ -7,6 +7,7 @@ from ...shared import ensure_dir, read_json, utc_now, write_json
 from ...strangler_registry import (
     PROMOTION_LADDER_STAGES,
     RUNTIME_PROTOCOL_REF,
+    mas_consumption_contract_report,
     validate_promotion_ladder_stage,
 )
 
@@ -20,6 +21,7 @@ _SURFACE_AUDITS: dict[str, dict[str, Any]] = {
         "promotion_gate": RUNTIME_PROTOCOL_REF,
         "parity_proof": "targeted artifact inventory regression tests",
         "rollback_surface": "quest-local artifacts/baselines/analysis_inventory.json",
+        "owner_authority": "behavior_oracle",
     },
     "paper_baseline_inventory": {
         "surface": "paper_baseline_inventory",
@@ -30,8 +32,11 @@ _SURFACE_AUDITS: dict[str, dict[str, Any]] = {
         "promotion_gate": RUNTIME_PROTOCOL_REF,
         "parity_proof": "targeted artifact inventory regression tests",
         "rollback_surface": "quest-local paper/baseline_inventory.json",
+        "owner_authority": "behavior_oracle",
     },
 }
+
+
 def artifact_inventory_surface_audit(surface: str) -> dict[str, Any]:
     normalized_surface = str(surface or "").strip()
     audit = _SURFACE_AUDITS.get(normalized_surface)
@@ -40,6 +45,10 @@ def artifact_inventory_surface_audit(surface: str) -> dict[str, Any]:
         raise ValueError(f"Unknown artifact inventory surface `{normalized_surface}`. Expected one of: {known}.")
     validate_promotion_ladder_stage(str(audit["strangler_stage"]))
     return dict(audit)
+
+
+def artifact_inventory_surface_contract_report() -> dict[str, Any]:
+    return mas_consumption_contract_report(_SURFACE_AUDITS.values())
 
 
 def analysis_baseline_inventory_path(quest_root: Path) -> Path:

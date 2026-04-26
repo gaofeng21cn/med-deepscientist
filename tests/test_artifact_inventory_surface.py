@@ -17,6 +17,18 @@ def test_artifact_inventory_surface_audit_keeps_baseline_inventory_oracle_only()
     assert audit["mas_consumable_contract"] is False
     assert audit["promotion_gate"] == "docs/policies/runtime_protocol.md"
     assert audit["parity_proof"] == "targeted artifact inventory regression tests"
+    assert audit["owner_authority"] == "behavior_oracle"
+
+
+def test_artifact_inventory_surface_contract_report_is_not_mas_consumable() -> None:
+    report = artifact_inventory.artifact_inventory_surface_contract_report()
+
+    assert report["ok"] is True
+    assert report["surface_count"] == 2
+    by_surface = {surface["surface"]: surface for surface in report["surfaces"]}
+    assert by_surface["analysis_baseline_inventory"]["mas_consumable_status"] == "not_mas_consumable"
+    assert by_surface["paper_baseline_inventory"]["mas_consumable_status"] == "not_mas_consumable"
+    assert by_surface["paper_baseline_inventory"]["owner"] == "MedDeepScientist"
 
 
 def test_validate_promotion_ladder_stage_requires_runtime_protocol_for_promotion() -> None:
