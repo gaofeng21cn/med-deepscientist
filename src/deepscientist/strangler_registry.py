@@ -1,0 +1,314 @@
+from __future__ import annotations
+
+import os
+from collections.abc import Iterable, Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+RUNTIME_PROTOCOL_REF = "docs/policies/runtime_protocol.md"
+TRANSITION_CONTRACT_REF = "docs/policies/mas_mds_transition_contract.md"
+
+PROMOTION_LADDER_STAGES = (
+    "retain_in_mds_backend",
+    "oracle_only",
+    "promote_to_runtime_protocol",
+    "mas_owned_or_absorbed",
+)
+
+DEFAULT_AUDIT_FILE_SUFFIXES = (".py", ".md", ".toml", ".yaml", ".yml", ".sh")
+DEFAULT_SKIP_DIR_NAMES = (
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+)
+
+MAS_OWNER_AUTHORITIES = frozenset(
+    {
+        "medical_research_design",
+        "medical_evidence_interpretation",
+        "publication_readiness",
+        "submission_authority",
+        "user_visible_research_progress",
+    }
+)
+
+_REQUIRED_SURFACE_FIELDS = (
+    "surface",
+    "current_owner",
+    "target_owner",
+    "strangler_stage",
+    "mas_consumable_contract",
+    "promotion_gate",
+    "parity_proof",
+    "rollback_surface",
+)
+
+_BASE_SURFACES: tuple[dict[str, Any], ...] = (
+    {
+        "surface": "daemon_api_minimum",
+        "current_owner": "MedDeepScientist controlled backend",
+        "target_owner": "MedAutoScience runtime adapter",
+        "strangler_stage": "promote_to_runtime_protocol",
+        "mas_consumable_contract": True,
+        "promotion_gate": RUNTIME_PROTOCOL_REF,
+        "parity_proof": "runtime and API contract regression tests",
+        "rollback_surface": "daemon API minimum stable protocol",
+        "owner_authority": "runtime_protocol",
+    },
+    {
+        "surface": "quest_runtime_layout",
+        "current_owner": "MedDeepScientist controlled backend",
+        "target_owner": "MedAutoScience runtime adapter",
+        "strangler_stage": "promote_to_runtime_protocol",
+        "mas_consumable_contract": True,
+        "promotion_gate": RUNTIME_PROTOCOL_REF,
+        "parity_proof": "runtime contract and quest layout regression tests",
+        "rollback_surface": "quest durable layout stable protocol",
+        "owner_authority": "runtime_protocol",
+    },
+    {
+        "surface": "native_runtime_event_surface",
+        "current_owner": "MedDeepScientist controlled backend",
+        "target_owner": "MedAutoScience runtime adapter",
+        "strangler_stage": "promote_to_runtime_protocol",
+        "mas_consumable_contract": True,
+        "promotion_gate": RUNTIME_PROTOCOL_REF,
+        "parity_proof": "native runtime truth regression tests",
+        "rollback_surface": "quest-local runtime_event durable artifact",
+        "owner_authority": "runtime_protocol",
+    },
+    {
+        "surface": "runner_dispatch_selection",
+        "current_owner": "MedDeepScientist controlled backend",
+        "target_owner": "MedAutoScience runtime adapter",
+        "strangler_stage": "promote_to_runtime_protocol",
+        "mas_consumable_contract": True,
+        "promotion_gate": RUNTIME_PROTOCOL_REF,
+        "parity_proof": "runner metadata and runtime override regression tests",
+        "rollback_surface": "executor_kind and runner lane protocol",
+        "owner_authority": "runtime_protocol",
+    },
+    {
+        "surface": "prompt_prose_and_stage_skill_wording",
+        "current_owner": "MedDeepScientist behavior oracle",
+        "target_owner": "MedAutoScience parity oracle",
+        "strangler_stage": "oracle_only",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "prompt builder and stage skill regression tests",
+        "rollback_surface": "repo-local prompt and skill fixtures",
+        "owner_authority": "behavior_oracle",
+    },
+    {
+        "surface": "ui_tui_rendering_payload",
+        "current_owner": "MedDeepScientist behavior oracle",
+        "target_owner": "MedAutoScience parity oracle",
+        "strangler_stage": "oracle_only",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "TUI and UI source contract regression tests",
+        "rollback_surface": "UI/TUI rendering fixtures",
+        "owner_authority": "behavior_oracle",
+    },
+    {
+        "surface": "publication_readiness_authority",
+        "current_owner": "MedAutoScience product owner",
+        "target_owner": "MedAutoScience product owner",
+        "strangler_stage": "mas_owned_or_absorbed",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "MAS publication gate and controller decision proof",
+        "rollback_surface": "MDS oracle fixture only",
+        "owner_authority": "publication_readiness",
+    },
+    {
+        "surface": "submission_package_authority",
+        "current_owner": "MedAutoScience product owner",
+        "target_owner": "MedAutoScience product owner",
+        "strangler_stage": "mas_owned_or_absorbed",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "MAS submission package gate proof",
+        "rollback_surface": "MDS oracle fixture only",
+        "owner_authority": "submission_authority",
+    },
+    {
+        "surface": "user_visible_study_progress",
+        "current_owner": "MedAutoScience product owner",
+        "target_owner": "MedAutoScience product owner",
+        "strangler_stage": "mas_owned_or_absorbed",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "MAS study runtime status and controller progress proof",
+        "rollback_surface": "MDS runtime status oracle fixture only",
+        "owner_authority": "user_visible_research_progress",
+    },
+)
+
+
+def validate_promotion_ladder_stage(
+    strangler_stage: str,
+    *,
+    runtime_protocol_ref: str | None = None,
+) -> str:
+    normalized_stage = str(strangler_stage or "").strip()
+    if normalized_stage not in PROMOTION_LADDER_STAGES:
+        allowed = ", ".join(PROMOTION_LADDER_STAGES)
+        raise ValueError(f"Unknown MAS/MDS promotion ladder stage `{normalized_stage}`. Expected one of: {allowed}.")
+    if (
+        normalized_stage == "promote_to_runtime_protocol"
+        and str(runtime_protocol_ref or "").strip() != RUNTIME_PROTOCOL_REF
+    ):
+        raise ValueError(f"`promote_to_runtime_protocol` requires runtime protocol reference `{RUNTIME_PROTOCOL_REF}`.")
+    return normalized_stage
+
+
+def normalize_surface_record(record: Mapping[str, Any]) -> dict[str, Any]:
+    missing_fields = [field for field in _REQUIRED_SURFACE_FIELDS if field not in record]
+    if missing_fields:
+        raise ValueError(f"Strangler surface record is missing required fields: {', '.join(missing_fields)}.")
+
+    normalized = dict(record)
+    for field in _REQUIRED_SURFACE_FIELDS:
+        if field == "mas_consumable_contract":
+            normalized[field] = bool(record[field])
+            continue
+        normalized[field] = str(record[field] or "").strip()
+        if not normalized[field]:
+            raise ValueError(f"Strangler surface record field `{field}` must be non-empty.")
+
+    normalized["strangler_stage"] = validate_promotion_ladder_stage(
+        str(normalized["strangler_stage"]),
+        runtime_protocol_ref=str(normalized["promotion_gate"]),
+    )
+    if normalized["mas_consumable_contract"] and normalized["strangler_stage"] != "promote_to_runtime_protocol":
+        raise ValueError("MAS-consumable MDS surfaces must be promoted through the runtime protocol.")
+    if normalized["strangler_stage"] == "promote_to_runtime_protocol" and not normalized["mas_consumable_contract"]:
+        raise ValueError("Runtime protocol promoted surfaces must be marked as MAS-consumable contracts.")
+
+    owner_authority = str(record.get("owner_authority") or "").strip()
+    if owner_authority:
+        normalized["owner_authority"] = owner_authority
+    notes = record.get("notes")
+    if isinstance(notes, Sequence) and not isinstance(notes, str):
+        normalized["notes"] = [str(item).strip() for item in notes if str(item).strip()]
+    return normalized
+
+
+def default_strangler_registry() -> dict[str, dict[str, Any]]:
+    registry: dict[str, dict[str, Any]] = {}
+    for record in _BASE_SURFACES:
+        normalized = normalize_surface_record(record)
+        registry[normalized["surface"]] = normalized
+
+    from .artifact.service_parts import artifact_inventory
+
+    for surface in ("analysis_baseline_inventory", "paper_baseline_inventory"):
+        record = artifact_inventory.artifact_inventory_surface_audit(surface)
+        record.setdefault("owner_authority", "behavior_oracle")
+        normalized = normalize_surface_record(record)
+        registry[normalized["surface"]] = normalized
+    return registry
+
+
+def owner_reflux_issues(surfaces: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    issues: list[dict[str, Any]] = []
+    for raw_record in surfaces:
+        try:
+            record = normalize_surface_record(raw_record)
+        except ValueError as exc:
+            surface = str(raw_record.get("surface") or "<unknown>") if isinstance(raw_record, Mapping) else "<unknown>"
+            issues.append(
+                {
+                    "code": "surface_registry_error",
+                    "surface": surface,
+                    "message": str(exc),
+                }
+            )
+            continue
+        owner_authority = str(record.get("owner_authority") or "").strip()
+        if owner_authority in MAS_OWNER_AUTHORITIES and record["strangler_stage"] != "mas_owned_or_absorbed":
+            issues.append(
+                {
+                    "code": "owner_reflux_risk",
+                    "surface": record["surface"],
+                    "owner_authority": owner_authority,
+                    "strangler_stage": record["strangler_stage"],
+                    "current_owner": record["current_owner"],
+                    "target_owner": record["target_owner"],
+                    "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
+                }
+            )
+    return issues
+
+
+def oversized_file_issues(
+    root: Path,
+    *,
+    max_file_lines: int = 1500,
+    include_file_suffixes: Sequence[str] = DEFAULT_AUDIT_FILE_SUFFIXES,
+    skip_dir_names: Sequence[str] = DEFAULT_SKIP_DIR_NAMES,
+) -> list[dict[str, Any]]:
+    root_path = Path(root)
+    suffixes = tuple(str(suffix) for suffix in include_file_suffixes)
+    skip_names = set(skip_dir_names)
+    issues: list[dict[str, Any]] = []
+    for current_dir, dir_names, file_names in os.walk(root_path):
+        dir_names[:] = [name for name in dir_names if name not in skip_names]
+        current_path = Path(current_dir)
+        for file_name in file_names:
+            file_path = current_path / file_name
+            if suffixes and file_path.suffix not in suffixes:
+                continue
+            line_count = _count_file_lines(file_path)
+            if line_count <= max_file_lines:
+                continue
+            issues.append(
+                {
+                    "code": "oversized_file",
+                    "path": file_path.relative_to(root_path).as_posix(),
+                    "line_count": line_count,
+                    "max_file_lines": max_file_lines,
+                    "message": "File exceeds the MAS/MDS boundary guard line budget.",
+                }
+            )
+    return issues
+
+
+def boundary_guard_report(
+    root: Path,
+    *,
+    surfaces: Iterable[Mapping[str, Any]] | None = None,
+    max_file_lines: int = 1500,
+    include_file_suffixes: Sequence[str] = DEFAULT_AUDIT_FILE_SUFFIXES,
+    skip_dir_names: Sequence[str] = DEFAULT_SKIP_DIR_NAMES,
+) -> dict[str, Any]:
+    root_path = Path(root)
+    surface_records = list(surfaces) if surfaces is not None else list(default_strangler_registry().values())
+    issues = [
+        *owner_reflux_issues(surface_records),
+        *oversized_file_issues(
+            root_path,
+            max_file_lines=max_file_lines,
+            include_file_suffixes=include_file_suffixes,
+            skip_dir_names=skip_dir_names,
+        ),
+    ]
+    return {
+        "schema_version": 1,
+        "ok": not issues,
+        "root": str(root_path),
+        "issue_count": len(issues),
+        "issues": issues,
+    }
+
+
+def _count_file_lines(file_path: Path) -> int:
+    with file_path.open("r", encoding="utf-8", errors="ignore") as handle:
+        return sum(1 for _line in handle)
+
