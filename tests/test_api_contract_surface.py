@@ -538,6 +538,13 @@ def test_mas_mds_transition_contract_docs_define_backend_oracle_boundary() -> No
     assert "No physical migration" in transition_source
     assert "No new product entry" in transition_source
     assert "docs/policies/runtime_protocol.md" in transition_source
+    assert "Strangler 收缩阶梯" in transition_source
+    assert "retain_in_mds_backend" in transition_source
+    assert "oracle_only" in transition_source
+    assert "promote_to_runtime_protocol" in transition_source
+    assert "mas_owned_or_absorbed" in transition_source
+    assert "publication readiness" in transition_source
+    assert "parity proof" in transition_source
 
     assert "docs/policies/mas_mds_transition_contract.md" in runtime_protocol_source
     assert "controlled backend, behavior oracle, and upstream intake buffer" in runtime_protocol_source
