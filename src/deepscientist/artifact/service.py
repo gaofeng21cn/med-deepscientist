@@ -67,7 +67,7 @@ from .metrics import (
     validate_main_experiment_against_baseline_contract,
 )
 from .schemas import ARTIFACT_DIRS, guidance_for_kind, validate_artifact_payload
-from .service_parts import paper_live_paths
+from .service_parts import artifact_inventory, paper_live_paths
 from .service_parts.notifications import (
     append_notification_file_section,
     append_notification_section,
@@ -1830,30 +1830,13 @@ class ArtifactService:
         return normalized
 
     def _analysis_baseline_inventory_path(self, quest_root: Path) -> Path:
-        return ensure_dir(quest_root / "artifacts" / "baselines") / "analysis_inventory.json"
+        return artifact_inventory.analysis_baseline_inventory_path(quest_root)
 
     def _read_analysis_baseline_inventory(self, quest_root: Path) -> dict[str, Any]:
-        path = self._analysis_baseline_inventory_path(quest_root)
-        payload = read_json(path, {})
-        if not isinstance(payload, dict):
-            payload = {}
-        entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
-        return {
-            "schema_version": 1,
-            "entries": [dict(item) for item in entries if isinstance(item, dict)],
-            "updated_at": payload.get("updated_at"),
-        }
+        return artifact_inventory.read_analysis_baseline_inventory(quest_root)
 
     def _write_analysis_baseline_inventory(self, quest_root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-        path = self._analysis_baseline_inventory_path(quest_root)
-        normalized_entries = payload.get("entries") if isinstance(payload.get("entries"), list) else []
-        normalized = {
-            "schema_version": 1,
-            "entries": [dict(item) for item in normalized_entries if isinstance(item, dict)],
-            "updated_at": utc_now(),
-        }
-        write_json(path, normalized)
-        return normalized
+        return artifact_inventory.write_analysis_baseline_inventory(quest_root, payload)
 
     def _normalize_baseline_root_rel_path(
         self,
@@ -1974,61 +1957,14 @@ class ArtifactService:
 
     @staticmethod
     def _analysis_inventory_entry_key(payload: dict[str, Any]) -> tuple[str, str, str, str, str, str]:
-        origin = dict(payload.get("origin") or {}) if isinstance(payload.get("origin"), dict) else {}
-        return (
-            str(payload.get("baseline_id") or "").strip(),
-            str(payload.get("variant_id") or "").strip(),
-            str(origin.get("campaign_id") or "").strip(),
-            str(origin.get("slice_id") or "").strip(),
-            str(payload.get("benchmark") or "").strip(),
-            str(payload.get("split") or "").strip(),
-        )
+        return artifact_inventory.analysis_inventory_entry_key(payload)
 
     @staticmethod
     def _merge_analysis_inventory_entry(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
-        merged = dict(existing)
-        for key, value in incoming.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            if isinstance(value, (list, dict)) and not value:
-                continue
-            merged[key] = value
-        merged["updated_at"] = utc_now()
-        merged.setdefault("created_at", existing.get("created_at") or incoming.get("created_at") or utc_now())
-        return merged
+        return artifact_inventory.merge_analysis_inventory_entry(existing, incoming)
 
     def _upsert_analysis_baseline_inventory(self, quest_root: Path, entries: list[dict[str, Any]]) -> dict[str, Any]:
-        inventory = self._read_analysis_baseline_inventory(quest_root)
-        existing_entries = [dict(item) for item in (inventory.get("entries") or []) if isinstance(item, dict)]
-        by_key = {
-            self._analysis_inventory_entry_key(item): dict(item)
-            for item in existing_entries
-            if str(item.get("baseline_id") or "").strip()
-        }
-        for raw in entries:
-            if not isinstance(raw, dict):
-                continue
-            entry = dict(raw)
-            if not str(entry.get("baseline_id") or "").strip():
-                continue
-            key = self._analysis_inventory_entry_key(entry)
-            current = by_key.get(key)
-            if current is None:
-                stamped = dict(entry)
-                stamped.setdefault("created_at", utc_now())
-                stamped["updated_at"] = utc_now()
-                by_key[key] = stamped
-                continue
-            by_key[key] = self._merge_analysis_inventory_entry(current, entry)
-        normalized = self._write_analysis_baseline_inventory(
-            quest_root,
-            {
-                "entries": list(by_key.values()),
-            },
-        )
-        return normalized
+        return artifact_inventory.upsert_analysis_baseline_inventory(quest_root, entries)
 
     def _paper_root(
         self,
@@ -2507,20 +2443,11 @@ class ArtifactService:
 
     def _write_paper_baseline_inventory(self, quest_root: Path, *, workspace_root: Path | None = None) -> dict[str, Any]:
         quest_yaml = self.quest_service.read_quest_yaml(quest_root)
-        confirmed_baseline_ref = (
-            dict(quest_yaml.get("confirmed_baseline_ref") or {})
-            if isinstance(quest_yaml.get("confirmed_baseline_ref"), dict)
-            else None
-        )
         analysis_inventory = self._read_analysis_baseline_inventory(quest_root)
-        payload = {
-            "schema_version": 1,
-            "canonical_baseline_ref": confirmed_baseline_ref,
-            "supplementary_baselines": [
-                dict(item) for item in (analysis_inventory.get("entries") or []) if isinstance(item, dict)
-            ],
-            "updated_at": utc_now(),
-        }
+        payload = artifact_inventory.build_paper_baseline_inventory_payload(
+            quest_yaml=quest_yaml,
+            analysis_inventory=analysis_inventory,
+        )
         source_root = quest_root
         returned: dict[str, Any] | None = None
         active_root = self._workspace_root_for(quest_root, workspace_root)
