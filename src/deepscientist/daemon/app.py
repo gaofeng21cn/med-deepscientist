@@ -3053,6 +3053,19 @@ class DaemonApp:
                         )
                         return
                     exhausted_summary = f"{failure_summary} Retry budget exhausted after {attempt_index} attempt(s)."
+                    diagnosis = self._runner_failure_diagnosis(
+                        runner_name=runner_name,
+                        summary=exhausted_summary,
+                        stderr_text=str(exc),
+                        output_text="",
+                    )
+                    if diagnosis is not None and diagnosis.retriable:
+                        self.quest_service.update_runtime_state(
+                            quest_root=quest_root,
+                            continuation_policy="wait_for_user_or_resume",
+                            continuation_reason=self._retry_exhausted_continuation_reason(diagnosis),
+                            continuation_updated_at=utc_now(),
+                        )
                     self._append_retry_event(
                         quest_id,
                         event_type="runner.turn_retry_exhausted",
@@ -3074,6 +3087,8 @@ class DaemonApp:
                         model=model,
                         summary=exhausted_summary,
                         retry_state=None,
+                        diagnosis_code=diagnosis.code if diagnosis is not None else None,
+                        guidance=list(diagnosis.guidance) if diagnosis is not None else None,
                     )
                     return
 
@@ -3245,6 +3260,19 @@ class DaemonApp:
                     return
 
                 exhausted_summary = f"{failure_summary} Retry budget exhausted after {attempt_index} attempt(s)."
+                diagnosis = self._runner_failure_diagnosis(
+                    runner_name=runner_name,
+                    summary=exhausted_summary,
+                    stderr_text=result.stderr_text,
+                    output_text=result.output_text,
+                )
+                if diagnosis is not None and diagnosis.retriable:
+                    self.quest_service.update_runtime_state(
+                        quest_root=quest_root,
+                        continuation_policy="wait_for_user_or_resume",
+                        continuation_reason=self._retry_exhausted_continuation_reason(diagnosis),
+                        continuation_updated_at=utc_now(),
+                    )
                 self._append_retry_event(
                     quest_id,
                     event_type="runner.turn_retry_exhausted",
@@ -3266,6 +3294,8 @@ class DaemonApp:
                     model=model,
                     summary=exhausted_summary,
                     retry_state=None,
+                    diagnosis_code=diagnosis.code if diagnosis is not None else None,
+                    guidance=list(diagnosis.guidance) if diagnosis is not None else None,
                 )
                 return
             finally:
@@ -3938,6 +3968,21 @@ class DaemonApp:
         )
 
     @staticmethod
+    def _runner_failure_diagnosis(
+        *,
+        runner_name: str,
+        summary: str,
+        stderr_text: str,
+        output_text: str,
+    ) -> FailureDiagnosis | None:
+        return diagnose_runner_failure(
+            runner_name=runner_name,
+            summary=summary,
+            stderr_text=stderr_text,
+            output_text=output_text,
+        )
+
+    @staticmethod
     def _non_retryable_failure_diagnosis(
         *,
         runner_name: str,
@@ -3945,7 +3990,7 @@ class DaemonApp:
         stderr_text: str,
         output_text: str,
     ) -> FailureDiagnosis | None:
-        diagnosis = diagnose_runner_failure(
+        diagnosis = DaemonApp._runner_failure_diagnosis(
             runner_name=runner_name,
             summary=summary,
             stderr_text=stderr_text,
@@ -3954,6 +3999,12 @@ class DaemonApp:
         if diagnosis is None or diagnosis.retriable:
             return None
         return diagnosis
+
+    @staticmethod
+    def _retry_exhausted_continuation_reason(diagnosis: FailureDiagnosis) -> str:
+        if diagnosis.code == "codex_upstream_provider_error":
+            return "external_codex_upstream_provider_error"
+        return "runner_retry_budget_exhausted"
 
     def _record_turn_postprocess_warning(
         self,
