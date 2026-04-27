@@ -99,6 +99,11 @@
       "commit": "1a8139c17a2b84d4090838c18bcd9bf4cfca3356",
       "kind": "tui_bugfix",
       "summary": "Avoid double arrow handling in the TUI quest browser"
+    },
+    {
+      "commit": "df714e6b3831e044f9f56100412089d1c74a1f7f",
+      "kind": "runtime_intake",
+      "summary": "Absorb latest DeepScientist file-search, start-setup planning, manuscript-coverage, and bounded-await slices"
     }
   ],
   "lock_policy": {

@@ -165,6 +165,22 @@ Remote semantics are explicit:
   - `npm --prefix src/tui run build`
   - `uv run pytest -q tests/test_api_contract_surface.py -k tui_client_and_git_canvas_follow_same_protocol_contract`
 
+### Round 4 latest-update learning intake
+
+- local_commit: `df714e6b3831e044f9f56100412089d1c74a1f7f`
+- upstream_bundle:
+  - `87c1e93` `fix: improve quest file search path matching`
+  - `b3823a0` `start-setup: recover form patch fallback across runners`
+  - `4a8c86a` `feat: add artifact baseline overwrite and paper coverage flows`
+  - `069b9cc` `feat: expose artifact planning tools through MCP`
+  - `13d3fc7` `test: align paper checkpoint connector milestone`
+  - `990ca6e` `bash_exec: bound await waits without killing sessions`
+- kind: `runtime_intake`
+- reason: current upstream added several bounded runtime lessons that strengthen this fork without importing broad provider or product-shell churn: path-aware workspace search, durable start-setup planning state, manuscript-vs-submission coverage truth, ready duplicate paper evidence selection, and bounded long-run await discipline.
+- verification:
+  - `uv run pytest -q tests/test_init_and_quest.py::test_search_files_matches_paths_and_normalizes_simple_globs tests/test_mcp_servers.py::test_start_setup_profile_artifact_server_exposes_prepare_form_only tests/test_mcp_servers.py::test_artifact_mcp_server_tools_cover_core_flows tests/test_memory_and_artifact.py::test_validate_manuscript_coverage_blocks_short_memo_as_full_paper tests/test_memory_and_artifact.py::test_get_paper_contract_health_prefers_ready_duplicate_ledger_item tests/test_prompt_builder.py::test_prompt_builder_includes_paper_contract_health_block tests/test_skill_contracts.py::test_system_prompt_strengthens_bash_exec_only_terminal_contract tests/test_skill_contracts.py::test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitoring`
+  - `git diff --check`
+
 ## Lock Policy
 
 - mode: `regenerate_in_fork`
