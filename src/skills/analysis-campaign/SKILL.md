@@ -417,11 +417,12 @@ For slices that run longer than a quick smoke check:
 - launch long slices with a structured `comment` such as `{stage, goal, action, expected_signal, next_check}`
 - use `silent_seconds`, `progress_age_seconds`, `signal_age_seconds`, and `watchdog_overdue` from `bash_exec(mode='list'|'read', ...)` as the default stall checks
 - use an explicit wait-and-check cadence of about `60s`, `120s`, `300s`, `600s`, `1800s`, then every `1800s` while still running
-- if needed, use an explicit bounded wait such as `bash_exec(command='sleep 60', mode='await', timeout_seconds=70)` or `bash_exec(mode='await', id=..., timeout_seconds=...)` between checks
+- if needed, use an explicit bounded wait such as `bash_exec(command='sleep 60', mode='await', timeout_seconds=70)` or `bash_exec(mode='await', id=..., wait_timeout_seconds=1800)` between checks
 - canonical sleep choice:
   - if you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)`
   - keep a real buffer on that sleep timeout; do not set `timeout_seconds` exactly equal to `N`
-  - if you are waiting on an already running managed session, prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command
+  - if you are waiting on an already running managed session, prefer `bash_exec(mode='await', id=..., wait_timeout_seconds=1800)` instead of starting a new sleep command
+  - if that bounded await returns while the session is still `running`, read logs and inspect real progress before deciding whether another `1800s` wait is justified
 - after the first meaningful signal and then at real checkpoints (e.g., completion, blocker, recovery, or a materially changed evidence frontier), send `artifact.interact(kind='progress', ...)` so the user sees the newest real state
 - after each completed sleep / await monitoring cycle for an active slice, inspect state first; only send another `artifact.interact(kind='progress', ...)` update if the user-visible state materially changed
 - include the estimated next reply time or next check time in those monitoring updates

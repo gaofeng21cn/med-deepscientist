@@ -37,6 +37,8 @@ It is a cross-cutting control skill that should be used whenever the quest must 
 - whether to stop
 - whether to ask the user for a structured decision
 
+Do not choose `finalize` for a paper line unless `artifact.validate_manuscript_coverage(detail='full')` reports `submission_ready=true`.
+
 ## Use when
 
 - the next stage is not obvious
@@ -77,6 +79,7 @@ Use the following canonical actions:
 - `attach_baseline`
 - `publish_baseline`
 - `write`
+- `review`
 - `finalize`
 - `iterate`
 - `reset`

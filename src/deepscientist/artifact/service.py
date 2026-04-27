@@ -108,6 +108,32 @@ _ASCII_COMPLETION_APPROVAL_TERMS = tuple(term for term in _COMPLETION_APPROVAL_T
 _ASCII_COMPLETION_REJECTION_TERMS = tuple(term for term in _COMPLETION_REJECTION_TERMS if term.isascii())
 _NON_ASCII_COMPLETION_APPROVAL_TERMS = tuple(term for term in _COMPLETION_APPROVAL_TERMS if not term.isascii())
 _NON_ASCII_COMPLETION_REJECTION_TERMS = tuple(term for term in _COMPLETION_REJECTION_TERMS if not term.isascii())
+_START_SETUP_FORM_META_KEYS = {"form_patch", "session_patch"}
+
+
+def _normalize_start_setup_payload_parts(
+    form_patch: dict[str, Any] | None,
+    session_patch: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    next_form_patch = dict(form_patch or {}) if isinstance(form_patch, dict) else {}
+    next_session_patch = dict(session_patch or {}) if isinstance(session_patch, dict) else {}
+    nested_form_patch = next_form_patch.get("form_patch")
+    nested_session_patch = next_form_patch.get("session_patch")
+    nested_suggested_form = next_form_patch.get("suggested_form")
+    if isinstance(nested_suggested_form, dict):
+        if not isinstance(nested_form_patch, dict) and isinstance(nested_suggested_form.get("form_patch"), dict):
+            nested_form_patch = nested_suggested_form.get("form_patch")
+        if not isinstance(nested_session_patch, dict) and isinstance(nested_suggested_form.get("session_patch"), dict):
+            nested_session_patch = nested_suggested_form.get("session_patch")
+    if isinstance(nested_form_patch, dict):
+        next_form_patch = dict(nested_form_patch)
+    else:
+        next_form_patch = {
+            key: value for key, value in next_form_patch.items() if key not in _START_SETUP_FORM_META_KEYS
+        }
+    if isinstance(nested_session_patch, dict):
+        next_session_patch = {**dict(nested_session_patch), **next_session_patch}
+    return next_form_patch, next_session_patch
 
 
 class ArtifactService:
@@ -2020,6 +2046,9 @@ class ArtifactService:
     def _paper_line_state_path(self, quest_root: Path, *, workspace_root: Path | None = None) -> Path:
         return self._paper_root(quest_root, workspace_root=workspace_root, create=True) / "paper_line_state.json"
 
+    def _paper_manuscript_coverage_path(self, quest_root: Path, *, workspace_root: Path | None = None) -> Path:
+        return self._paper_root(quest_root, workspace_root=workspace_root, create=True) / "manuscript_coverage.json"
+
     def _paper_outline_root(
         self,
         quest_root: Path,
@@ -2218,7 +2247,69 @@ class ArtifactService:
     @staticmethod
     def _paper_ready_status(status: object) -> bool:
         normalized = str(status or "").strip().lower()
-        return normalized in {"ready", "completed", "analyzed", "written", "recorded", "supported"}
+        return normalized in {"ready", "completed", "analyzed", "written", "recorded", "supported"} or normalized.startswith("supported_")
+
+    @staticmethod
+    def _normalize_paper_bundle_package_type(value: object, *, strict: bool = True) -> str:
+        normalized = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "": "draft_checkpoint",
+            "draft": "draft_checkpoint",
+            "memo": "draft_checkpoint",
+            "paper_memo": "draft_checkpoint",
+            "checkpoint": "draft_checkpoint",
+            "draft_checkpoint": "draft_checkpoint",
+            "review": "review_package",
+            "review_bundle": "review_package",
+            "review_package": "review_package",
+            "final": "submission_package",
+            "final_bundle": "submission_package",
+            "submission": "submission_package",
+            "submission_bundle": "submission_package",
+            "submission_package": "submission_package",
+        }
+        resolved = aliases.get(normalized)
+        if resolved:
+            return resolved
+        if strict:
+            raise ValueError(
+                "`package_type` must be one of `draft_checkpoint`, `review_package`, or `submission_package`."
+            )
+        return "draft_checkpoint"
+
+    def _resolve_paper_material_path(
+        self,
+        quest_root: Path,
+        raw_path: object,
+        *,
+        workspace_root: Path | None = None,
+    ) -> Path | None:
+        raw = str(raw_path or "").strip()
+        if not raw:
+            return None
+        candidate = Path(raw)
+        if candidate.is_absolute():
+            return candidate
+        roots = [self._workspace_root_for(quest_root, workspace_root), quest_root]
+        seen: set[str] = set()
+        fallback: Path | None = None
+        for root in roots:
+            key = str(root.resolve())
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved = (root / candidate).resolve()
+            fallback = fallback or resolved
+            if resolved.exists():
+                return resolved
+        return fallback
+
+    @staticmethod
+    def _read_text_sample(path: Path, *, max_chars: int = 200_000) -> str:
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore")[:max_chars]
+        except OSError:
+            return ""
 
     def _normalize_outline_evidence_contract(self, payload: object) -> dict[str, Any]:
         if not isinstance(payload, dict):
@@ -3949,6 +4040,225 @@ class ArtifactService:
             "ledger_item_count": int(health.get("ledger_item_count") or 0),
             "unresolved_required_items": unresolved_required_items,
             "unmapped_completed_items": unmapped_completed_items,
+        }
+
+    def _paper_manuscript_coverage_payload(
+        self,
+        quest_root: Path,
+        *,
+        workspace_root: Path | None = None,
+        evidence_gate: dict[str, Any] | None = None,
+        pending_slices: int | None = None,
+        minimum_sections: int = 5,
+        minimum_analysis_groups: int = 5,
+    ) -> dict[str, Any]:
+        workspace = self._workspace_root_for(quest_root, workspace_root)
+        paper_root = self._paper_root(quest_root, workspace_root=workspace, create=True)
+        manifest_path = self._paper_bundle_manifest_path(quest_root, workspace_root=workspace)
+        manifest = read_json(manifest_path, {}) if manifest_path.exists() else {}
+        manifest = manifest if isinstance(manifest, dict) else {}
+        package_type = self._normalize_paper_bundle_package_type(manifest.get("package_type"), strict=False)
+
+        draft_path = self._resolve_paper_material_path(
+            quest_root,
+            manifest.get("draft_path") or "paper/draft.md",
+            workspace_root=workspace,
+        )
+        pdf_path = self._resolve_paper_material_path(
+            quest_root,
+            manifest.get("pdf_path") or "paper/paper.pdf",
+            workspace_root=workspace,
+        )
+        compile_report_path = self._resolve_paper_material_path(
+            quest_root,
+            manifest.get("compile_report_path") or "paper/build/compile_report.json",
+            workspace_root=workspace,
+        )
+        latex_root = self._resolve_paper_material_path(
+            quest_root,
+            manifest.get("latex_root_path") or "paper/latex",
+            workspace_root=workspace,
+        )
+        if latex_root and latex_root.is_file():
+            latex_root = latex_root.parent
+        if (not latex_root or not latex_root.exists()) and (paper_root / "latex").exists():
+            latex_root = paper_root / "latex"
+
+        tex_paths: list[Path] = []
+        if latex_root and latex_root.exists():
+            if latex_root.is_file() and latex_root.suffix == ".tex":
+                tex_paths = [latex_root]
+            elif latex_root.is_dir():
+                tex_paths = sorted(path for path in latex_root.rglob("*.tex") if path.is_file())[:80]
+
+        draft_text = self._read_text_sample(draft_path) if draft_path and draft_path.exists() and draft_path.is_file() else ""
+        tex_texts = [self._read_text_sample(path) for path in tex_paths]
+        manuscript_text = "\n".join([draft_text, *tex_texts])
+        normalized_text = manuscript_text.lower()
+
+        section_titles: list[str] = []
+        for text in tex_texts:
+            section_titles.extend(
+                match.strip()
+                for match in re.findall(r"\\(?:section|subsection)\*?\{([^{}]{1,160})\}", text)
+                if match.strip()
+            )
+        section_titles.extend(
+            match.strip()
+            for match in re.findall(r"(?m)^#{1,3}\s+(.{1,160})$", draft_text)
+            if match.strip()
+        )
+        if tex_paths:
+            section_titles.extend(
+                path.stem.replace("_", " ").replace("-", " ")
+                for path in tex_paths
+                if path.stem.lower() not in {"main", "preamble", "macros"}
+            )
+        normalized_titles = {
+            re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+            for title in section_titles
+            if title.strip()
+        }
+        section_like_count = len(normalized_titles)
+        if tex_paths:
+            section_like_count = max(
+                section_like_count,
+                len([path for path in tex_paths if path.stem.lower() not in {"main", "preamble", "macros"}]),
+            )
+
+        canonical_patterns = {
+            "introduction": ("introduction", "intro"),
+            "related_work": ("related work", "background", "prior work"),
+            "method": ("method", "approach", "algorithm", "model", "design"),
+            "experiments": ("experiment", "evaluation", "result"),
+            "analysis": ("analysis", "ablation", "robustness", "sensitivity", "failure"),
+            "limitations": ("limitation", "discussion"),
+            "conclusion": ("conclusion", "future work"),
+        }
+        title_blob = "\n".join(sorted(normalized_titles)) + "\n" + normalized_text
+        canonical_sections = {
+            key: any(pattern in title_blob for pattern in patterns)
+            for key, patterns in canonical_patterns.items()
+        }
+        core_section_keys = ("introduction", "method", "experiments", "conclusion")
+        missing_core_sections = [key for key in core_section_keys if not canonical_sections.get(key)]
+
+        figure_count = len(re.findall(r"\\begin\{figure\}|\\includegraphics|!\[[^\]]*\]\(", manuscript_text))
+        table_count = len(re.findall(r"\\begin\{table\}|\\begin\{tabular\}", manuscript_text))
+        table_count += len(re.findall(r"^\s*\|.+\|\s*$", manuscript_text, flags=re.MULTILINE))
+        display_count = figure_count + table_count
+
+        matrix_path = paper_root / "paper_experiment_matrix.json"
+        matrix = read_json(matrix_path, {}) if matrix_path.exists() else {}
+        matrix = matrix if isinstance(matrix, dict) else {}
+        matrix_rows = [dict(item) for item in (matrix.get("rows") or []) if isinstance(item, dict)]
+        ready_analysis_keys: set[tuple[str, str, str, str, str, str]] = set()
+        analysis_keys: set[tuple[str, str, str, str, str, str]] = set()
+        for row in matrix_rows:
+            item_id = str(row.get("item_id") or "").strip()
+            if not item_id:
+                continue
+            key = (
+                str(row.get("section_id") or "").strip(),
+                item_id,
+                str(row.get("kind") or "").strip(),
+                str(row.get("campaign_id") or "").strip(),
+                str(row.get("slice_id") or "").strip(),
+                str(row.get("run_id") or "").strip(),
+            )
+            analysis_keys.add(key)
+            if self._paper_ready_status(row.get("status")):
+                ready_analysis_keys.add(key)
+
+        gate = evidence_gate if isinstance(evidence_gate, dict) else self._paper_bundle_gate_status(quest_root, workspace_root=workspace)
+        evidence_ready = bool(gate.get("ok"))
+        normalized_pending_slices = max(0, int(pending_slices or 0))
+        analysis_ready = evidence_ready and normalized_pending_slices == 0
+        draft_present = bool(draft_path and draft_path.exists() and draft_path.is_file()) or bool(tex_paths)
+        pdf_present = bool(pdf_path and pdf_path.exists() and pdf_path.is_file())
+        compile_report_present = bool(compile_report_path and compile_report_path.exists())
+        compile_report = read_json(compile_report_path, {}) if compile_report_present and compile_report_path else {}
+        compile_report = compile_report if isinstance(compile_report, dict) else {}
+        compile_ok = bool(compile_report.get("ok") or compile_report.get("success")) if compile_report_present else False
+
+        analysis_group_count = len(analysis_keys)
+        ready_analysis_group_count = len(ready_analysis_keys)
+        draft_checkpoint_ready = draft_present or manifest_path.exists()
+        manuscript_blockers: list[str] = []
+        if not analysis_ready:
+            manuscript_blockers.append("paper evidence or required analysis is not ready")
+        if not draft_present:
+            manuscript_blockers.append("no draft or LaTeX source detected")
+        if section_like_count < minimum_sections:
+            manuscript_blockers.append(f"manuscript has fewer than {minimum_sections} section-like units")
+        if missing_core_sections:
+            manuscript_blockers.append("missing core paper sections: " + ", ".join(missing_core_sections))
+        if display_count <= 0:
+            manuscript_blockers.append("no paper-facing figures or tables detected")
+        if ready_analysis_group_count < minimum_analysis_groups:
+            manuscript_blockers.append(
+                f"fewer than {minimum_analysis_groups} ready paper-facing experiment/analysis groups recorded"
+            )
+        manuscript_ready = not manuscript_blockers
+
+        checklist_path = paper_root / "review" / "submission_checklist.json"
+        checklist = read_json(checklist_path, {}) if checklist_path.exists() else {}
+        checklist = checklist if isinstance(checklist, dict) else {}
+        checklist_status = str(checklist.get("overall_status") or checklist.get("status") or manifest.get("status") or "").strip().lower()
+        checklist_ready = checklist_status in {
+            "ready",
+            "passed",
+            "complete",
+            "completed",
+            "submission_ready",
+            "ready_for_submission",
+            "accepted",
+            "delivered",
+        }
+        submission_blockers = list(manuscript_blockers)
+        if package_type != "submission_package":
+            submission_blockers.append("bundle package_type is not submission_package")
+        if not pdf_present:
+            submission_blockers.append("compiled PDF is missing")
+        if not checklist_ready:
+            submission_blockers.append("submission checklist is missing or not ready")
+        submission_ready = not submission_blockers
+
+        return {
+            "schema_version": 1,
+            "package_type": package_type,
+            "paper_root": str(paper_root),
+            "manifest_path": str(manifest_path) if manifest_path.exists() else None,
+            "draft_path": str(draft_path) if draft_path and draft_path.exists() else None,
+            "latex_root_path": str(latex_root) if latex_root and latex_root.exists() else None,
+            "pdf_path": str(pdf_path) if pdf_path and pdf_path.exists() else None,
+            "compile_report_path": str(compile_report_path) if compile_report_present and compile_report_path else None,
+            "draft_present": draft_present,
+            "pdf_present": pdf_present,
+            "compile_report_present": compile_report_present,
+            "compile_ok": compile_ok,
+            "tex_file_count": len(tex_paths),
+            "tex_files": [self._paper_bundle_relative_path(quest_root, path, workspace_root=workspace) for path in tex_paths[:40]],
+            "section_like_count": section_like_count,
+            "minimum_section_count": minimum_sections,
+            "one_section_only": section_like_count <= 1,
+            "canonical_sections": canonical_sections,
+            "missing_core_sections": missing_core_sections,
+            "figure_count": figure_count,
+            "table_count": table_count,
+            "display_count": display_count,
+            "analysis_group_count": analysis_group_count,
+            "ready_analysis_group_count": ready_analysis_group_count,
+            "minimum_analysis_group_count": minimum_analysis_groups,
+            "analysis_quantity_ready": ready_analysis_group_count >= minimum_analysis_groups,
+            "evidence_ready": evidence_ready,
+            "analysis_ready": analysis_ready,
+            "draft_checkpoint_ready": draft_checkpoint_ready,
+            "manuscript_ready": manuscript_ready,
+            "submission_ready": submission_ready,
+            "manuscript_blockers": manuscript_blockers,
+            "submission_blockers": submission_blockers,
+            "updated_at": utc_now(),
         }
 
     def _paper_contract_health_payload(
@@ -6220,6 +6530,37 @@ class ArtifactService:
             "paper_contract_health": payload,
         }
 
+    def validate_manuscript_coverage(
+        self,
+        quest_root: Path,
+        *,
+        detail: str = "summary",
+        minimum_sections: int = 5,
+        minimum_analysis_groups: int = 5,
+    ) -> dict[str, Any]:
+        normalized_detail = str(detail or "summary").strip().lower() or "summary"
+        if normalized_detail not in {"summary", "full"}:
+            raise ValueError("validate_manuscript_coverage detail must be `summary` or `full`.")
+        workspace_root = self.quest_service.active_workspace_root(quest_root)
+        coverage = self._paper_manuscript_coverage_payload(
+            quest_root,
+            workspace_root=workspace_root,
+            minimum_sections=minimum_sections,
+            minimum_analysis_groups=minimum_analysis_groups,
+        )
+        coverage_path = self._paper_manuscript_coverage_path(quest_root, workspace_root=workspace_root)
+        write_json(coverage_path, coverage)
+        payload = dict(coverage)
+        if normalized_detail == "summary":
+            payload.pop("tex_files", None)
+        return {
+            "ok": True,
+            "detail": normalized_detail,
+            "active_workspace_root": str(workspace_root),
+            "manuscript_coverage_path": str(coverage_path),
+            "manuscript_coverage": payload,
+        }
+
     def _artifact_surface_paper_contract_health(
         self,
         quest_root: Path,
@@ -7403,6 +7744,49 @@ class ArtifactService:
             self._write_paper_line_state(quest_root, workspace_root=target_workspace)
         except Exception:
             return
+
+    def apply_start_setup_form_patch(
+        self,
+        quest_root: Path,
+        *,
+        form_patch: dict[str, Any] | None = None,
+        session_patch: dict[str, Any] | None = None,
+        message: str | None = None,
+    ) -> dict[str, Any]:
+        form_patch, session_patch = _normalize_start_setup_payload_parts(form_patch, session_patch)
+        if not form_patch and not session_patch:
+            raise ValueError("At least one of `form_patch` or `session_patch` must include supported fields.")
+        quest_yaml = self.quest_service.read_quest_yaml(quest_root)
+        startup_contract = (
+            dict(quest_yaml.get("startup_contract") or {})
+            if isinstance(quest_yaml.get("startup_contract"), dict)
+            else {}
+        )
+        start_setup_session = (
+            dict(startup_contract.get("start_setup_session") or {})
+            if isinstance(startup_contract.get("start_setup_session"), dict)
+            else {}
+        )
+        suggested_form = (
+            dict(start_setup_session.get("suggested_form") or {})
+            if isinstance(start_setup_session.get("suggested_form"), dict)
+            else {}
+        )
+        suggested_form.update(form_patch)
+        start_setup_session["suggested_form"] = suggested_form
+        for key, value in session_patch.items():
+            start_setup_session[key] = value
+        start_setup_session["updated_at"] = utc_now()
+        startup_contract["start_setup_session"] = start_setup_session
+        self.quest_service.update_startup_context(quest_root, startup_contract=startup_contract)
+        return {
+            "ok": True,
+            "form_patch": dict(form_patch),
+            "session_patch": dict(session_patch),
+            "suggested_form": suggested_form,
+            "start_setup_session": start_setup_session,
+            "message": str(message or "").strip() or None,
+        }
 
     def checkpoint(self, quest_root: Path, message: str, *, allow_empty: bool = False) -> dict:
         result = checkpoint_repo(quest_root, message, allow_empty=allow_empty)

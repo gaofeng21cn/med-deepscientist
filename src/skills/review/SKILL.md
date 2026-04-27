@@ -79,6 +79,7 @@ Do not treat “looks polished” as “is defensible”.
 
 Use, in roughly this order:
 
+- `artifact.validate_manuscript_coverage(detail='full')` for paper bundles, memos, or alleged near-final manuscripts
 - the current paper or report draft
 - the selected outline if one exists
 - the claim-evidence map if one exists
@@ -131,6 +132,7 @@ Before writing the review itself, make the audit explicit.
 
 Identify:
 
+- whether the package is only a draft checkpoint, reviewable manuscript, or truly submission-ready
 - 1 to 3 core claims such as `C1`, `C2`, `C3`
 - the strongest current evidence
 - the weakest current evidence

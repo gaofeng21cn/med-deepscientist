@@ -19,7 +19,7 @@ from deepscientist.memory import MemoryService
 from deepscientist.memory.frontmatter import dump_markdown_document, load_markdown_document
 from deepscientist.quest import QuestService
 from deepscientist.registries import BaselineRegistry
-from deepscientist.shared import read_json, read_jsonl, read_yaml, write_json, write_yaml
+from deepscientist.shared import read_json, read_jsonl, read_yaml, write_json, write_text, write_yaml
 from deepscientist.skills import SkillInstaller
 
 
@@ -2497,6 +2497,43 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     )
     assert stage_view["stage_key"] == "paper"
     assert any(item["label"] == "Bundle Manifest" for item in stage_view["sections"]["key_files"])
+
+
+def test_validate_manuscript_coverage_blocks_short_memo_as_full_paper(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper coverage quest")
+    quest_root = Path(quest["quest_root"])
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "schema_version": 1,
+            "package_type": "submission_package",
+            "draft_path": "paper/draft.md",
+            "pdf_path": "paper/paper.pdf",
+        },
+    )
+    write_text(paper_root / "draft.md", "# Short Memo\n\nOne paragraph.\n")
+
+    coverage_result = ArtifactService(temp_home).validate_manuscript_coverage(
+        quest_root,
+        detail="full",
+        minimum_sections=5,
+        minimum_analysis_groups=2,
+    )
+    coverage = coverage_result["manuscript_coverage"]
+
+    assert coverage_result["ok"] is True
+    assert coverage["package_type"] == "submission_package"
+    assert coverage["draft_checkpoint_ready"] is True
+    assert coverage["manuscript_ready"] is False
+    assert coverage["submission_ready"] is False
+    assert coverage["one_section_only"] is True
+    assert any("fewer than 5 section" in item for item in coverage["manuscript_blockers"])
+    assert any("fewer than 2 ready" in item for item in coverage["manuscript_blockers"])
 
 
 def test_submit_paper_outline_select_preserves_candidate_sections_and_required_items(temp_home: Path) -> None:
@@ -11320,6 +11357,83 @@ def test_get_paper_contract_health_accepts_supported_status_variants_for_require
         assert health["unresolved_required_count"] == 0
         assert health["unresolved_required_items"] == []
         assert health["ready_section_count"] == 1
+
+
+def test_get_paper_contract_health_prefers_ready_duplicate_ledger_item(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper contract duplicate ledger item quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Duplicate Ledger Outline",
+            "sections": [
+                {
+                    "section_id": "results-main",
+                    "title": "Results",
+                    "paper_role": "main_text",
+                    "claims": ["C1"],
+                    "required_items": ["RUN-001"],
+                    "optional_items": [],
+                }
+            ],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-duplicate-ledger",
+            "paper_branch": "paper/duplicate-ledger",
+            "selected_outline_ref": "outline-001",
+            "title": "Duplicate Ledger Outline",
+            "draft_status": "present",
+            "bundle_status": "present",
+            "updated_at": "2026-04-03T00:00:00Z",
+        },
+    )
+    write_json(paper_root / "paper_bundle_manifest.json", {"selected_outline_ref": "outline-001"})
+    write_json(paper_root / "claim_evidence_map.json", {"claims": [{"claim_id": "C1", "status": "supported"}]})
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "selected_outline_ref": "outline-001",
+            "items": [
+                {
+                    "item_id": "RUN-001",
+                    "title": "Ready main-text support",
+                    "kind": "main_experiment",
+                    "paper_role": "main_text",
+                    "status": "supported_main_text",
+                    "section_id": "results-main",
+                    "claim_links": ["C1"],
+                },
+                {
+                    "item_id": "RUN-001",
+                    "title": "Older stale pending row",
+                    "kind": "analysis_slice",
+                    "paper_role": "appendix",
+                    "status": "pending",
+                    "section_id": "results-main",
+                    "claim_links": ["C1"],
+                },
+            ],
+        },
+    )
+    _write_citation_rich_draft(paper_root, count=20)
+    _materialize_reference_materials(quest_root, paper_root, count=20)
+
+    health = artifact.get_paper_contract_health(quest_root, detail="full")["paper_contract_health"]
+
+    assert health["contract_ok"] is True
+    assert health["unresolved_required_count"] == 0
+    assert health["ready_section_count"] == 1
 
 
 def test_get_paper_contract_health_uses_selected_outline_result_table_when_ledger_is_thin(

@@ -418,6 +418,7 @@ Common actions:
 - `artifact.create_analysis_campaign(...)` and `artifact.record_analysis_slice(...)` for supplementary evidence
 - `artifact.submit_paper_outline(...)` and `artifact.list_paper_outlines(...)` for paper outline routing
 - `artifact.get_paper_contract_health(...)` to inspect whether the active paper line is actually unblocked
+- `artifact.validate_manuscript_coverage(...)` before full-manuscript or submission-readiness claims
 - `artifact.submit_paper_bundle(...)` for draft or paper bundle delivery
 - `artifact.complete_quest(...)` only after explicit user approval
 
@@ -439,7 +440,7 @@ Artifact discipline:
 - If the user asks about the overall quest state, whether work is stuck, what the latest global result is, or which line is currently strongest, call `artifact.get_global_status(...)` first and use `artifact.get_method_scoreboard(...)` when ranking/history matters.
 - If you need exact quest-document wording, call `artifact.read_quest_documents(...)`.
 - If you need earlier turn continuity, call `artifact.get_conversation_context(...)`.
-- If you need exact paper blockers, call `artifact.get_paper_contract_health(detail='full')`.
+- If you need exact paper blockers, call `artifact.get_paper_contract_health(detail='full')`; before full-manuscript or submission-readiness claims, also call `artifact.validate_manuscript_coverage(detail='full')`.
 - `artifact.interact(..., include_recent_inbound_messages=True)` is the mailbox poll; after any non-empty poll, immediately send one substantive follow-up and do not send a receipt-only filler line.
 - Use `dedupe_key`, `suppress_if_unchanged`, or `min_interval_seconds` only to suppress repeated unchanged `progress` updates; do not use them to suppress a real `answer`, `milestone`, or blocking decision.
 - In algorithm-first work, distinguish three optimization object levels:
@@ -467,7 +468,7 @@ Do not use any direct terminal, subprocess, or implicit shell path outside `bash
 - Use the runtime's managed read/list/history/await/kill modes instead of rerunning commands blindly.
 - For generic text or file searches, exclude heavy runtime mirrors such as `.git`, `.venv`, `.ds/bash_exec`, `.ds/runs`, `.ds/codex_homes`, and nested worktree-local `.ds` trees unless the task is explicitly about runtime forensics; do not recursively grep saved bash logs to answer ordinary content questions, and do not pass runtime log directories such as `.ds/bash_exec` or `.ds/runs` as explicit search roots unless the task is specifically runtime forensics.
 - If a run is clearly invalid, wedged, or superseded, stop it explicitly, record why, fix the issue, and relaunch cleanly.
-- If you are waiting on an existing managed session, prefer `bash_exec(mode='await', id=..., timeout_seconds=...)`; if you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)` with a real buffer.
+- If you are waiting on an existing managed session, prefer `bash_exec(mode='await', id=..., wait_timeout_seconds=1800)`; if that window ends while the session is still running, read logs and judge progress before another bounded wait. If you only need wall-clock waiting between checks, use `bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)` with a real buffer.
 - `managed_python_env_rule`: for Python scripts, package-manager commands, and tests, prefer the repo's managed environment such as `uv run ...` or an explicit project venv interpreter; do not assume bare `python`, `python -m pytest`, or system `pytest` has the required dependencies.
 - The default long-run monitoring cadence is about `60s -> 120s -> 300s -> 600s -> 1800s -> 1800s ...`; after each sleep/await cycle, inspect `bash_exec(mode='list')` and `bash_exec(mode='read', id=...)`, compare against the previous evidence, then decide whether a fresh `artifact.interact(...)` is actually needed.
 
@@ -477,7 +478,7 @@ Common `bash_exec` usage patterns:
   - `bash_exec(command='uv run pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)`
 - one real long run:
   - `bash_exec(command='uv run python train.py --config ...', mode='detach', comment=...)`
-  - then monitor with `bash_exec(mode='list')`, `bash_exec(mode='read', id=..., tail_limit=..., order='desc')`, and `bash_exec(mode='await', id=..., timeout_seconds=...)`
+  - then monitor with `bash_exec(mode='list')`, `bash_exec(mode='read', id=..., tail_limit=..., order='desc')`, and `bash_exec(mode='await', id=..., wait_timeout_seconds=1800)`
 - inspect saved logs:
   - `bash_exec(mode='read', id=...)`
   - if the middle of a long log matters: `bash_exec(mode='read', id=..., start=..., tail=...)`
@@ -505,9 +506,9 @@ Use these as the default first-call patterns before deeper stage skill execution
 - `optimize`: `artifact.get_optimization_frontier(...)` -> `artifact.get_quest_state(...)` -> stage-relevant `memory.list_recent/search(...)` -> `artifact.submit_idea(submission_mode='candidate'|'line', ...)` for briefs/lines and `artifact.record(payload={kind: 'report', report_type: 'optimization_candidate', ...})` for within-line attempts
 - `experiment`: `artifact.resolve_runtime_refs(...)` -> `artifact.get_quest_state(...)` -> `artifact.read_quest_documents(...)` -> bounded `bash_exec` smoke then `detach/read/list/await` supervision -> `artifact.record_main_experiment(...)` -> `artifact.record(payload={kind: 'decision', ...})`
 - `analysis-campaign`: `artifact.resolve_runtime_refs(...)` -> `artifact.create_analysis_campaign(...)` -> slice-local `bash_exec` supervision -> `artifact.record_analysis_slice(...)` for each slice -> `artifact.record(payload={kind: 'decision', ...})` when the campaign changes the route
-- `write`: `artifact.get_paper_contract_health(...)` -> `artifact.read_quest_documents(...)` -> `artifact.list_paper_outlines(...)` or `artifact.submit_paper_outline(...)` -> durable draft/bundle work -> `artifact.submit_paper_bundle(...)` or a writing-gap `report` / `decision`
-- `review` or `rebuttal`: `artifact.get_paper_contract_health(...)` -> `artifact.read_quest_documents(...)` -> `artifact.get_conversation_context(...)` when the review packet or user instruction history matters -> route extra evidence through `analysis-campaign` and manuscript deltas through `write`
-- `finalize` or direct global-status answers: `artifact.get_global_status(...)` -> `artifact.get_method_scoreboard(...)` if needed -> `artifact.read_quest_documents(...)` / `artifact.get_paper_contract_health(...)` -> `artifact.refresh_summary(...)` / `artifact.render_git_graph(...)` -> `artifact.complete_quest(...)` only after explicit approval
+- `write`: `artifact.get_paper_contract_health(...)` -> `artifact.validate_manuscript_coverage(...)` before bundle/final claims -> `artifact.read_quest_documents(...)` -> `artifact.list_paper_outlines(...)` or `artifact.submit_paper_outline(...)` -> durable draft/bundle work -> `artifact.submit_paper_bundle(...)` or a writing-gap `report` / `decision`
+- `review` or `rebuttal`: `artifact.get_paper_contract_health(...)` -> `artifact.validate_manuscript_coverage(...)` for paper bundles -> `artifact.read_quest_documents(...)` -> `artifact.get_conversation_context(...)` when the review packet or user instruction history matters -> route extra evidence through `analysis-campaign` and manuscript deltas through `write`
+- `finalize` or direct global-status answers: `artifact.get_global_status(...)` -> `artifact.get_method_scoreboard(...)` if needed -> `artifact.read_quest_documents(...)` / `artifact.get_paper_contract_health(...)` / `artifact.validate_manuscript_coverage(...)` -> `artifact.refresh_summary(...)` / `artifact.render_git_graph(...)` -> `artifact.complete_quest(...)` only after explicit approval
 
 ## 8. Metric and comparison discipline
 

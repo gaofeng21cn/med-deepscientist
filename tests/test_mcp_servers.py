@@ -300,6 +300,7 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
             "list_research_branches",
             "resolve_runtime_refs",
             "get_paper_contract_health",
+            "validate_manuscript_coverage",
             "get_quest_state",
             "get_global_status",
             "get_benchstore_catalog",
@@ -768,6 +769,15 @@ def test_start_setup_profile_artifact_server_exposes_prepare_form_only(temp_home
                         "goal": "Prepare a faithful launch form.",
                         "need_research_paper": True,
                     },
+                    "session_patch": {
+                        "recommended_workspace_mode": "copilot",
+                        "launch_readiness": "needs_confirmation",
+                        "missing_confirmations": ["Clarify paid API usage."],
+                        "fit_assessment": {
+                            "verdict": "copilot_recommended",
+                            "summary": "The task needs repeated human judgment before autonomous launch.",
+                        },
+                    },
                     "message": "已更新表单草案。",
                 },
             )
@@ -777,8 +787,11 @@ def test_start_setup_profile_artifact_server_exposes_prepare_form_only(temp_home
         assert result["form_patch"]["title"] == "Vision Demo Setup"
         assert result["form_patch"]["goal"] == "Prepare a faithful launch form."
         assert result["form_patch"]["need_research_paper"] is True
+        assert result["session_patch"]["recommended_workspace_mode"] == "copilot"
+        assert result["session_patch"]["fit_assessment"]["verdict"] == "copilot_recommended"
         assert result["ui_effects"][0]["name"] == "start_setup:patch"
         assert result["ui_effects"][0]["data"]["patch"]["title"] == "Vision Demo Setup"
+        assert result["ui_effects"][0]["data"]["session_patch"]["launch_readiness"] == "needs_confirmation"
 
     asyncio.run(scenario())
 

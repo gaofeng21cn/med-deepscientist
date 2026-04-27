@@ -70,6 +70,28 @@ START_SETUP_FORM_FIELDS: tuple[str, ...] = (
     "custom_brief",
     "need_research_paper",
 )
+START_SETUP_SESSION_FIELDS: tuple[str, ...] = (
+    "fit_assessment",
+    "recommended_workspace_mode",
+    "launch_readiness",
+    "missing_confirmations",
+    "preview_plan",
+    "materials_summary",
+)
+
+
+def _split_nested_start_setup_payload(payload: dict[str, Any] | None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    if not isinstance(payload, dict):
+        return None, None
+    form_patch = payload.get("form_patch") if isinstance(payload.get("form_patch"), dict) else None
+    session_patch = payload.get("session_patch") if isinstance(payload.get("session_patch"), dict) else None
+    suggested_form = payload.get("suggested_form") if isinstance(payload.get("suggested_form"), dict) else None
+    if isinstance(suggested_form, dict):
+        if form_patch is None and isinstance(suggested_form.get("form_patch"), dict):
+            form_patch = suggested_form.get("form_patch")
+        if session_patch is None and isinstance(suggested_form.get("session_patch"), dict):
+            session_patch = suggested_form.get("session_patch")
+    return form_patch, session_patch
 
 
 def _normalize_bash_exec_command_input(raw_command: Any) -> str:
@@ -112,6 +134,8 @@ def _coerce_prepare_bool(value: Any, *, field_name: str) -> bool:
 
 
 def _sanitize_start_setup_form_patch(form_patch: dict[str, Any] | None) -> dict[str, Any]:
+    if form_patch is None:
+        return {}
     if not isinstance(form_patch, dict):
         raise ValueError("`form_patch` must be an object.")
     patch: dict[str, Any] = {}
@@ -128,16 +152,53 @@ def _sanitize_start_setup_form_patch(form_patch: dict[str, Any] | None) -> dict[
             patch[key] = str(value).strip() if not isinstance(value, bool) else value
             continue
         raise ValueError(f"`form_patch.{key}` must be a string or boolean.")
-    if not patch:
-        raise ValueError("`form_patch` must include at least one supported field.")
     return patch
 
 
-def _start_setup_patch_effect(form_patch: dict[str, Any], *, message: str | None = None) -> dict[str, Any]:
+def _sanitize_start_setup_session_patch(session_patch: dict[str, Any] | None) -> dict[str, Any]:
+    if session_patch is None:
+        return {}
+    if not isinstance(session_patch, dict):
+        raise ValueError("`session_patch` must be an object.")
+    patch: dict[str, Any] = {}
+    for key in START_SETUP_SESSION_FIELDS:
+        if key not in session_patch:
+            continue
+        value = session_patch.get(key)
+        if value is None:
+            continue
+        if key in {"recommended_workspace_mode", "launch_readiness"}:
+            patch[key] = str(value).strip()
+            continue
+        if key == "missing_confirmations":
+            if not isinstance(value, list):
+                raise ValueError("`session_patch.missing_confirmations` must be an array of strings.")
+            patch[key] = [str(item).strip() for item in value if str(item).strip()]
+            continue
+        if key in {"fit_assessment", "preview_plan"}:
+            if not isinstance(value, dict):
+                raise ValueError(f"`session_patch.{key}` must be an object.")
+            patch[key] = dict(value)
+            continue
+        if key == "materials_summary":
+            if not isinstance(value, list):
+                raise ValueError("`session_patch.materials_summary` must be an array.")
+            patch[key] = [dict(item) for item in value if isinstance(item, dict)]
+            continue
+    return patch
+
+
+def _start_setup_patch_effect(
+    form_patch: dict[str, Any],
+    *,
+    session_patch: dict[str, Any] | None = None,
+    message: str | None = None,
+) -> dict[str, Any]:
     return {
         "name": "start_setup:patch",
         "data": {
             "patch": dict(form_patch),
+            "session_patch": dict(session_patch or {}),
             "message": str(message or "").strip() or None,
         },
     }
@@ -660,17 +721,33 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             ),
         )
         def prepare_start_setup_form(
-            form_patch: dict[str, Any],
+            form_patch: dict[str, Any] | None = None,
+            session_patch: dict[str, Any] | None = None,
             message: str = "",
             comment: str | dict[str, Any] | None = None,
         ) -> dict[str, Any]:
+            nested_form_patch, nested_session_patch = _split_nested_start_setup_payload(form_patch)
+            if nested_form_patch is not None:
+                form_patch = nested_form_patch
+            if session_patch is None and nested_session_patch is not None:
+                session_patch = nested_session_patch
             sanitized_patch = _sanitize_start_setup_form_patch(form_patch)
-            result = {
-                "ok": True,
-                "form_patch": sanitized_patch,
-                "message": str(message or "").strip() or None,
-                "ui_effects": [_start_setup_patch_effect(sanitized_patch, message=message)],
-            }
+            sanitized_session_patch = _sanitize_start_setup_session_patch(session_patch)
+            if not sanitized_patch and not sanitized_session_patch:
+                raise ValueError("At least one of `form_patch` or `session_patch` must include supported fields.")
+            result = service.apply_start_setup_form_patch(
+                context.require_quest_root(),
+                form_patch=sanitized_patch,
+                session_patch=sanitized_session_patch,
+                message=message,
+            )
+            result["ui_effects"] = [
+                _start_setup_patch_effect(
+                    sanitized_patch,
+                    session_patch=sanitized_session_patch,
+                    message=message,
+                )
+            ]
             return result
 
         return server
@@ -853,6 +930,27 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         return service.get_paper_contract_health(
             context.require_quest_root(),
             detail=detail,
+        )
+
+    @server.tool(
+        name="validate_manuscript_coverage",
+        description=(
+            "Validate whether the current paper is only a draft checkpoint or a full manuscript/submission package. "
+            "Checks section coverage, figures/tables, ready analysis groups, PDF, and submission checklist state."
+        ),
+        annotations=_read_only_tool_annotations(title="Validate manuscript coverage"),
+    )
+    def validate_manuscript_coverage(
+        detail: str = "summary",
+        minimum_sections: int = 5,
+        minimum_analysis_groups: int = 5,
+        comment: str | dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return service.validate_manuscript_coverage(
+            context.require_quest_root(),
+            detail=detail,
+            minimum_sections=minimum_sections,
+            minimum_analysis_groups=minimum_analysis_groups,
         )
 
     @server.tool(

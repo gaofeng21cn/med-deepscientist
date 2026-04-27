@@ -69,6 +69,25 @@ def _write_managed_publication_eval_latest(
     return latest_path
 
 
+def test_search_files_matches_paths_and_normalizes_simple_globs(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("file search path quest")
+    workspace_root = quest_service.active_workspace_root(Path(quest["quest_root"]))
+    target = workspace_root / "paper" / "analysis_plan.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_text(target, "# Plan\n\nThis file intentionally omits the filename from body text.\n")
+
+    result = quest_service.search_files(quest["quest_id"], "*analysis_plan*", limit=10)
+
+    assert result["query"] == "analysis_plan"
+    assert result["items"]
+    item = next(item for item in result["items"] if item["path"] == "paper/analysis_plan.md")
+    assert item["line_number"] == 0
+    assert item["line_text"] == "paper/analysis_plan.md"
+
+
 def _materialize_ready_paper_line_for_publication_gate(
     quest_root: Path,
     *,

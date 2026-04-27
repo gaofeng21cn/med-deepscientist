@@ -170,6 +170,7 @@ def test_system_prompt_strengthens_bash_exec_only_terminal_contract() -> None:
     assert "Common `bash_exec` usage patterns:" in text
     assert "Terminal-command mapping examples:" in text
     assert "bash_exec(command='uv run pytest tests/test_x.py', mode='await', timeout_seconds=120, comment=...)" in text
+    assert "bash_exec(mode='await', id=..., wait_timeout_seconds=1800)" in text
     assert "bash_exec(mode='history')" in text
     assert "bash_exec(mode='kill', id=..., wait=true, timeout_seconds=...)" in text
 
@@ -677,7 +678,8 @@ def test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitorin
         assert "canonical sleep choice" in text
         assert "bash_exec(command='sleep N', mode='await', timeout_seconds=N+buffer, ...)" in text
         assert "do not set `timeout_seconds` exactly equal to `N`" in text
-        assert "prefer `bash_exec(mode='await', id=..., timeout_seconds=...)` instead of starting a new sleep command" in text
+        assert "prefer `bash_exec(mode='await', id=..., wait_timeout_seconds=1800)` instead of starting a new sleep command" in text
+        assert "if that bounded await returns while the session is still `running`" in text
 
     assert "smoke test" in baseline_text
     assert "bash_exec(mode='detach', ...)" in baseline_text

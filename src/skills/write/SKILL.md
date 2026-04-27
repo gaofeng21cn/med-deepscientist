@@ -154,6 +154,7 @@ For paper-facing work, use this hard order instead of drifting between surfaces:
 
 Do not draft first and promise to repair the paper contract later.
 If the current blocker set is not obvious from files, call `artifact.get_paper_contract_health(detail='full')` before deciding whether to keep writing or to return to contract repair / supplementary work.
+Before submitting a full manuscript or treating a bundle as submission-ready, call `artifact.validate_manuscript_coverage(detail='full')`; a short memo or thin bundle is a draft checkpoint, not a final paper package.
 If the active quest status, current workspace, recent durable runs, or pending interaction state is unclear after a restart, call `artifact.get_quest_state(detail='summary')` first.
 If the exact current brief/plan/status/summary wording matters for the current drafting decision, call `artifact.read_quest_documents(...)` instead of relying on prompt-injected excerpts.
 If you need earlier user/assistant continuity to interpret the current writing request, call `artifact.get_conversation_context(...)` before changing the route.

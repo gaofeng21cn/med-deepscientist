@@ -45,6 +45,7 @@ _BUILTIN_MCP_TOOL_APPROVALS: dict[str, tuple[str, ...]] = {
         "list_research_branches",
         "resolve_runtime_refs",
         "get_paper_contract_health",
+        "validate_manuscript_coverage",
         "get_quest_state",
         "get_global_status",
         "get_method_scoreboard",

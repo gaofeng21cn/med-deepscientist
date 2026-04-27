@@ -302,6 +302,7 @@ def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) ->
     assert "paper_recommendation_scope: paper_line_local_only" in prompt
     assert "paper_global_stage_authority: publication_gate" in prompt
     assert "paper_health_tool:" in prompt
+    assert "paper_coverage_tool:" in prompt
     assert "paper_status_narration_mode: ai_first" in prompt
     assert "paper_status_answer_checklist: milestone_status, review_readiness, submission_readiness, remaining_scope" in prompt
     assert "paper_status_narration_rule:" in prompt

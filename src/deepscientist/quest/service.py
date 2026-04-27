@@ -3928,11 +3928,33 @@ class QuestService:
         evidence_items = [
             dict(item) for item in ((paper_evidence or {}).get("items") or []) if isinstance(item, dict)
         ]
-        ledger_by_item = {
-            str(item.get("item_id") or "").strip(): item
-            for item in evidence_items
-            if str(item.get("item_id") or "").strip()
-        }
+        ledger_by_item: dict[str, list[dict[str, Any]]] = {}
+        for item in evidence_items:
+            item_id = str(item.get("item_id") or "").strip()
+            if item_id:
+                ledger_by_item.setdefault(item_id, []).append(item)
+
+        def ready_ledger_item(item_id: str) -> dict[str, Any] | None:
+            candidates = ledger_by_item.get(item_id) or []
+            ready_statuses = {"ready", "completed", "analyzed", "written", "recorded"}
+            ready = [
+                item
+                for item in candidates
+                if (
+                    str(item.get("status") or "").strip().lower() in ready_statuses
+                    or str(item.get("status") or "").strip().lower().startswith("supported_")
+                    or str(item.get("status") or "").strip().lower() == "supported"
+                )
+            ]
+            if ready:
+                main = [
+                    item
+                    for item in ready
+                    if str(item.get("paper_role") or "").strip().lower() == "main_text"
+                ]
+                return main[0] if main else ready[0]
+            return candidates[0] if candidates else None
+
         outline_result_table_by_item: dict[str, dict[str, Any]] = {}
         for section in paper_contract.get("sections") or []:
             if not isinstance(section, dict):
@@ -3956,7 +3978,7 @@ class QuestService:
             required_items = [str(item).strip() for item in (section.get("required_items") or []) if str(item).strip()]
             section_ready = True
             for item_id in required_items:
-                ledger_item = ledger_by_item.get(item_id) or outline_result_table_by_item.get(item_id)
+                ledger_item = ready_ledger_item(item_id) or outline_result_table_by_item.get(item_id)
                 status = str((ledger_item or {}).get("status") or "").strip().lower()
                 status_counts_as_supported = status == "supported" or status.startswith("supported_")
                 if status not in {"ready", "completed", "analyzed", "written", "recorded"} and not status_counts_as_supported:
@@ -6545,7 +6567,7 @@ class QuestService:
         }
 
     def search_files(self, quest_id: str, term: str, limit: int = 50) -> dict[str, Any]:
-        query = term.strip()
+        query = self._normalize_explorer_search_query(term)
         normalized_query = query.casefold()
         workspace_root = self.active_workspace_root(self._quest_root(quest_id))
         resolved_limit = max(1, min(limit, 200))
@@ -6571,6 +6593,40 @@ class QuestService:
             except OSError:
                 continue
 
+            relative = path.relative_to(workspace_root).as_posix()
+            scope, writable = self._classify_path_scope(workspace_root, path)
+            path_haystack = relative.casefold()
+            name_haystack = path.name.casefold()
+            if normalized_query in path_haystack or normalized_query in name_haystack:
+                match_spans: list[dict[str, int]] = []
+                start = 0
+                while True:
+                    found = path_haystack.find(normalized_query, start)
+                    if found < 0:
+                        break
+                    match_spans.append({"start": found, "end": found + len(query)})
+                    start = found + max(1, len(query))
+                renderer_hint, mime_type = self._renderer_hint_for(path)
+                items.append(
+                    {
+                        "id": f"{relative}:path",
+                        "document_id": f"path::{relative}",
+                        "title": path.name,
+                        "path": relative,
+                        "scope": scope,
+                        "writable": writable,
+                        "line_number": 0,
+                        "line_text": relative,
+                        "snippet": relative[:320],
+                        "match_spans": match_spans,
+                        "open_kind": renderer_hint,
+                        "mime_type": mime_type,
+                    }
+                )
+                if len(items) >= resolved_limit:
+                    truncated = True
+                    break
+
             renderer_hint, mime_type = self._renderer_hint_for(path)
             if not self._is_text_document(path, mime_type, renderer_hint):
                 continue
@@ -6593,8 +6649,6 @@ class QuestService:
                 continue
 
             files_scanned += 1
-            relative = path.relative_to(workspace_root).as_posix()
-            scope, writable = self._classify_path_scope(workspace_root, path)
 
             for line_index, line in enumerate(content.splitlines(), start=1):
                 haystack = line.casefold()
@@ -6640,6 +6694,15 @@ class QuestService:
             "truncated": truncated,
             "files_scanned": files_scanned,
         }
+
+    @staticmethod
+    def _normalize_explorer_search_query(term: str) -> str:
+        query = str(term or "").strip()
+        if len(query) >= 2 and query.startswith("*") and query.endswith("*"):
+            inner = query.strip("*").strip()
+            if inner and not any(marker in inner for marker in "*?[]"):
+                return inner
+        return query
 
     def open_document(self, quest_id: str, document_id: str) -> dict:
         quest_root = self._quest_root(quest_id)
