@@ -96,11 +96,54 @@ def _delta_aware_stdout_record(
     }
 
 
+def _parse_args_object(raw_args: object) -> dict[str, Any]:
+    if isinstance(raw_args, dict):
+        return dict(raw_args)
+    if not isinstance(raw_args, str) or not raw_args.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_args)
+    except json.JSONDecodeError:
+        return {}
+    return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _normalized_tool_result_args(event: dict[str, Any]) -> object:
+    args = _parse_args_object(event.get("args"))
+    if not args:
+        return str(event.get("args") or "").strip()
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    tool_name = str(event.get("tool_name") or "").strip().lower()
+    mcp_server = str(event.get("mcp_server") or metadata.get("mcp_server") or "").strip().lower()
+    mcp_tool = str(event.get("mcp_tool") or metadata.get("mcp_tool") or "").strip().lower()
+    normalized = {
+        key: value
+        for key, value in args.items()
+        if key
+        not in {
+            "comment",
+            "reason",
+        }
+    }
+    if tool_name == "bash_exec.bash_exec" or (mcp_server == "bash_exec" and mcp_tool == "bash_exec"):
+        mode = str(normalized.get("mode") or "detach").strip().lower() or "detach"
+        if mode == "create":
+            mode = "await"
+        normalized["mode"] = mode
+        if mode == "read":
+            return {
+                key: normalized.get(key)
+                for key in ("mode", "id", "workdir")
+                if normalized.get(key) is not None
+            }
+    return normalized
+
+
 def _tool_result_delta_key(event: dict[str, Any]) -> str:
     metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
     identity = {
         "tool_name": str(event.get("tool_name") or "").strip(),
-        "args": str(event.get("args") or "").strip(),
+        "args": _normalized_tool_result_args(event),
         "mcp_server": str(event.get("mcp_server") or metadata.get("mcp_server") or "").strip(),
         "mcp_tool": str(event.get("mcp_tool") or metadata.get("mcp_tool") or "").strip(),
         "command": str(metadata.get("command") or "").strip(),

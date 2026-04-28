@@ -14,6 +14,25 @@ _MAX_SUMMARY_CHARS = 900
 _MAX_BLOCKERS = 12
 _MAX_ITEMS = 12
 _SURFACE_CACHE_SCHEMA_VERSION = 1
+_HOT_TOOL_RESULT_THRESHOLDS_BYTES = {
+    "artifact.get_quest_state": 4_000,
+    "artifact.get_global_status": 4_000,
+    "artifact.get_paper_contract_health": 4_000,
+    "artifact.validate_manuscript_coverage": 4_000,
+    "artifact.list_paper_outlines": 2_000,
+    "artifact.resolve_runtime_refs": 4_000,
+    "artifact.read_quest_documents": 4_000,
+    "bash_exec.bash_exec": 2_000,
+}
+_FULL_DETAIL_FORCE_COMPACT_TOOLS = {
+    "artifact.get_quest_state",
+    "artifact.get_global_status",
+    "artifact.get_paper_contract_health",
+    "artifact.validate_manuscript_coverage",
+    "artifact.list_paper_outlines",
+    "artifact.resolve_runtime_refs",
+    "artifact.read_quest_documents",
+}
 
 
 def payload_json_bytes(payload: Any) -> bytes:
@@ -25,6 +44,37 @@ def payload_json_bytes(payload: Any) -> bytes:
 
 def payload_sha256(payload: Any) -> str:
     return hashlib.sha256(payload_json_bytes(payload)).hexdigest()
+
+
+def _normalized_tool_name(tool_name: str | None) -> str:
+    return str(tool_name or "").strip()
+
+
+def _compact_threshold_for_tool(tool_name: str, *, default_threshold: int) -> int:
+    normalized = _normalized_tool_name(tool_name)
+    hot_threshold = _HOT_TOOL_RESULT_THRESHOLDS_BYTES.get(normalized)
+    if hot_threshold is None:
+        return int(default_threshold)
+    return min(int(default_threshold), hot_threshold)
+
+
+def _tool_force_compaction(
+    *,
+    tool_name: str,
+    full_detail_requested: bool | None,
+    force: bool,
+) -> bool:
+    if force:
+        return True
+    return bool(full_detail_requested) and _normalized_tool_name(tool_name) in _FULL_DETAIL_FORCE_COMPACT_TOOLS
+
+
+def _safe_json_object(value: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _slug(value: str) -> str:
@@ -267,21 +317,23 @@ def compact_runner_tool_event(
     if str(event.get("type") or "") != "runner.tool_result":
         return event, {"compacted": False}
     output = str(event.get("output") or "")
-    tool_name = str(event.get("tool_name") or event.get("mcp_tool") or "tool").strip() or "tool"
+    tool_name = _normalized_tool_name(str(event.get("tool_name") or event.get("mcp_tool") or "tool")) or "tool"
     args = str(event.get("args") or "")
-    full_detail_requested = "detail" in args and "full" in args.lower()
-    force = full_detail_requested and tool_name in {
-        "artifact.get_quest_state",
-        "artifact.get_global_status",
-        "artifact.get_paper_contract_health",
-        "artifact.validate_manuscript_coverage",
-    }
+    parsed_args = _safe_json_object(args)
+    detail = str(parsed_args.get("detail") or "").strip().lower() or None
+    full_detail_requested = detail == "full" or ("detail" in args and "full" in args.lower())
+    effective_threshold = _compact_threshold_for_tool(tool_name, default_threshold=threshold_bytes)
+    force = _tool_force_compaction(
+        tool_name=tool_name,
+        full_detail_requested=full_detail_requested,
+        force=False,
+    )
     output_bytes = len(output.encode("utf-8", errors="replace"))
-    if not force and output_bytes <= max(1, int(threshold_bytes)):
+    if not force and output_bytes <= max(1, int(effective_threshold)):
         return event, {
             "compacted": False,
             "output_bytes": output_bytes,
-            "threshold_bytes": int(threshold_bytes),
+            "threshold_bytes": int(effective_threshold),
         }
 
     parsed_payload: Any
@@ -296,16 +348,30 @@ def compact_runner_tool_event(
         tool_name=tool_name,
         item_id=str(event.get("event_id") or event.get("tool_call_id") or ""),
         force=True,
-        threshold_bytes=threshold_bytes,
+        threshold_bytes=effective_threshold,
         reason="runner_tool_result_context_budget",
         full_detail_requested=full_detail_requested,
     )
     compacted_event = dict(event)
-    compacted_event["output"] = json.dumps(compacted_payload, ensure_ascii=False, indent=2)
+    compacted_output = json.dumps(compacted_payload, ensure_ascii=False, indent=2)
+    compacted_event["output"] = compacted_output
     compacted_event["output_bytes"] = output_bytes
     compacted_event["output_sha256"] = hashlib.sha256(output.encode("utf-8", errors="replace")).hexdigest()
     compacted_event["output_compacted"] = True
+    compacted_output_bytes = len(compacted_output.encode("utf-8", errors="replace"))
+    compacted_event["output_compaction"] = {
+        "reason": "runner_tool_result_context_budget",
+        "threshold_bytes": int(effective_threshold),
+        "original_output_bytes": output_bytes,
+        "compacted_output_bytes": compacted_output_bytes,
+        "saved_output_bytes": max(0, output_bytes - compacted_output_bytes),
+    }
     compacted_event["evidence_packet"] = compacted_payload.get("evidence_packet") if isinstance(compacted_payload, dict) else None
+    meta["output_bytes"] = output_bytes
+    meta["threshold_bytes"] = int(effective_threshold)
+    meta["compacted_output_bytes"] = compacted_output_bytes
+    meta["saved_output_bytes"] = max(0, output_bytes - compacted_output_bytes)
+    meta["reason"] = "runner_tool_result_context_budget"
     return compacted_event, meta
 
 
@@ -317,20 +383,31 @@ def compact_mcp_tool_result(
     tool_name: str,
     detail: str | None = None,
     force: bool = False,
-    threshold_bytes: int = DEFAULT_EVIDENCE_PACKET_THRESHOLD_BYTES,
+    threshold_bytes: int | None = None,
     reason: str | None = None,
     full_detail_requested: bool | None = None,
 ) -> dict[str, Any]:
+    normalized_detail = str(detail or "").strip().lower() or None
+    requested_full_detail = bool(full_detail_requested) or normalized_detail == "full"
+    default_threshold = DEFAULT_EVIDENCE_PACKET_THRESHOLD_BYTES if threshold_bytes is None else int(threshold_bytes)
+    if requested_full_detail or tool_name in {"artifact.list_paper_outlines", "bash_exec.bash_exec"}:
+        effective_threshold = _compact_threshold_for_tool(tool_name, default_threshold=default_threshold)
+    else:
+        effective_threshold = default_threshold
     compacted, _meta = compact_evidence_payload(
         payload,
         quest_root=quest_root,
         run_id=run_id,
         tool_name=tool_name,
         detail=detail,
-        force=force,
-        threshold_bytes=threshold_bytes,
+        force=_tool_force_compaction(
+            tool_name=tool_name,
+            full_detail_requested=requested_full_detail,
+            force=force,
+        ),
+        threshold_bytes=effective_threshold,
         reason=reason,
-        full_detail_requested=full_detail_requested,
+        full_detail_requested=requested_full_detail,
     )
     return compacted if isinstance(compacted, dict) else payload
 

@@ -2156,22 +2156,29 @@ def test_bash_exec_mcp_server_default_read_truncates_long_logs_with_hint(temp_ho
             )
         )
 
-        assert result["bash_id"] == "bash-long-preview"
-        assert result["log_truncated"] is True
-        assert result["log_is_partial"] is True
-        assert result["log_line_count"] == 2300
-        assert result["log_preview_head_lines"] == 500
-        assert result["log_preview_tail_lines"] == 1500
-        assert result["log_preview_omitted_lines"] == 300
-        assert "omitted 300 lines" in str(result["log_truncation_notice"] or "")
-        assert "2300 total rendered lines" in str(result["log_truncation_notice"] or "")
-        assert "line-1" in result["log"]
-        assert "line-500" in result["log"]
-        assert "line-501" not in result["log"]
-        assert "line-800" not in result["log"]
-        assert "line-801" in result["log"]
-        assert "line-2300" in result["log"]
-        assert "start=..., tail=..." in result["log_read_hint"]
+        assert result["compacted"] is True
+        packet = result["evidence_packet"]
+        assert packet["tool_name"] == "bash_exec.bash_exec"
+        assert packet["detail"] == "read"
+        assert packet["payload_bytes"] > 2_000
+        sidecar = read_json(Path(packet["sidecar_path"]), {})
+        payload = sidecar["payload"]
+        assert payload["bash_id"] == "bash-long-preview"
+        assert payload["log_truncated"] is True
+        assert payload["log_is_partial"] is True
+        assert payload["log_line_count"] == 2300
+        assert payload["log_preview_head_lines"] == 500
+        assert payload["log_preview_tail_lines"] == 1500
+        assert payload["log_preview_omitted_lines"] == 300
+        assert "omitted 300 lines" in str(payload["log_truncation_notice"] or "")
+        assert "2300 total rendered lines" in str(payload["log_truncation_notice"] or "")
+        assert "line-1" in payload["log"]
+        assert "line-500" in payload["log"]
+        assert "line-501" not in payload["log"]
+        assert "line-800" not in payload["log"]
+        assert "line-801" in payload["log"]
+        assert "line-2300" in payload["log"]
+        assert "start=..., tail=..." in payload["log_read_hint"]
 
     asyncio.run(scenario())
 

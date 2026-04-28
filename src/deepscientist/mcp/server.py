@@ -1714,6 +1714,15 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
         quest_root = context.require_quest_root().resolve()
 
         def finalize(payload: dict[str, Any]) -> dict[str, Any]:
+            if normalized_mode == "read":
+                payload = compact_mcp_tool_result(
+                    payload,
+                    quest_root=quest_root,
+                    run_id=context.run_id,
+                    tool_name="bash_exec.bash_exec",
+                    detail="read",
+                    reason="bash_exec_read_context_budget",
+                )
             quest_service.record_tool_activity(
                 quest_root,
                 tool_name=f"bash_exec.{normalized_mode}",
@@ -1824,14 +1833,6 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
             )
             payload.update(_build_default_bash_log_payload_from_path(service.terminal_log_path(quest_root, bash_id)))
             payload.update(_build_bash_log_truncation_metadata(payload))
-            payload = compact_mcp_tool_result(
-                payload,
-                quest_root=quest_root,
-                run_id=context.run_id,
-                tool_name="bash_exec.bash_exec",
-                detail="read",
-                reason="bash_exec_read_context_budget",
-            )
             return finalize(payload)
         if normalized_mode == "kill":
             bash_id = service.resolve_session_id(quest_root, id)

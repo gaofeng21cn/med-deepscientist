@@ -163,6 +163,41 @@ def test_codex_runner_tool_result_sidecars_large_output(temp_home: Path) -> None
     assert Path(packet["sidecar_path"]).exists()
     sidecar = read_json(Path(packet["sidecar_path"]), {})
     assert sidecar["payload"]["bash_id"] == "bash-large"
+    assert compacted["output_compaction"]["saved_output_bytes"] > 0
+    assert meta["saved_output_bytes"] == compacted["output_compaction"]["saved_output_bytes"]
+
+
+def test_codex_runner_compacts_hot_status_tool_below_default_threshold(temp_home: Path) -> None:
+    payload = {
+        "event_id": "evt-hot-status",
+        "type": "runner.tool_result",
+        "quest_id": "q-001",
+        "run_id": "run-001",
+        "tool_name": "artifact.get_quest_state",
+        "status": "completed",
+        "args": json.dumps({"detail": "summary"}),
+        "output": json.dumps(
+            {
+                "ok": True,
+                "quest_state": {
+                    "runtime_status": "running",
+                    "continuation_policy": "auto",
+                },
+                "recent_events": ["x" * 900 for _ in range(6)],
+            },
+            ensure_ascii=False,
+        ),
+    }
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True, exist_ok=True)
+
+    compacted, meta = compact_runner_tool_event(payload, quest_root=quest_root, run_id="run-001")
+
+    assert 4_000 < meta["output_bytes"] < 8_000
+    assert meta["threshold_bytes"] == 4_000
+    assert meta["compacted"] is True
+    rendered_output = json.loads(compacted["output"])
+    assert rendered_output["evidence_packet"]["tool_name"] == "artifact.get_quest_state"
 
 
 def test_codex_runner_writes_delta_marker_for_repeated_stdout_line(temp_home: Path) -> None:
@@ -203,6 +238,37 @@ def test_codex_runner_writes_delta_marker_for_repeated_report_tool_result(temp_h
     assert second["delta_marker"] is True
     assert second["delta_kind"] == "unchanged_tool_result"
     assert second["fingerprint"] == first["fingerprint"]
+    assert second["repeat_count"] == 2
+
+
+def test_codex_runner_delta_key_normalizes_bash_exec_read_windows(temp_home: Path) -> None:
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True)
+    output = json.dumps({"bash_id": "bash-001", "status": "running", "tail": ["same"]})
+    first_payload = {
+        "event_id": "evt-bash-read-1",
+        "type": "runner.tool_result",
+        "quest_id": "q-001",
+        "run_id": "run-001",
+        "tool_name": "bash_exec.bash_exec",
+        "status": "completed",
+        "args": json.dumps({"mode": "read", "id": "bash-001", "tail_limit": 100, "after_seq": 10}),
+        "output": output,
+        "metadata": {"mcp_server": "bash_exec", "mcp_tool": "bash_exec", "command": "pytest -q"},
+    }
+    second_payload = {
+        **first_payload,
+        "event_id": "evt-bash-read-2",
+        "run_id": "run-002",
+        "args": json.dumps({"mode": "read", "id": "bash-001", "tail_limit": 200, "after_seq": 20}),
+    }
+
+    first = _delta_aware_tool_result_event(first_payload, quest_root=quest_root, run_id="run-001")
+    second = _delta_aware_tool_result_event(second_payload, quest_root=quest_root, run_id="run-002")
+
+    assert "output" in first
+    assert "output" not in second
+    assert second["delta_kind"] == "unchanged_tool_result"
     assert second["repeat_count"] == 2
 
 

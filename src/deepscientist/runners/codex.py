@@ -801,6 +801,8 @@ class CodexRunner:
             "tool_result_count": 0,
             "tool_result_bytes_total": 0,
             "compacted_tool_result_count": 0,
+            "tool_result_bytes_after_compaction_total": 0,
+            "tool_result_bytes_saved_total": 0,
             "full_detail_tool_call_count": 0,
             "token_usage": {},
             "created_at": utc_now(),
@@ -945,6 +947,16 @@ class CodexRunner:
                             telemetry["compacted_tool_result_count"] = int(
                                 telemetry.get("compacted_tool_result_count") or 0
                             ) + 1
+                            telemetry["tool_result_bytes_after_compaction_total"] = int(
+                                telemetry.get("tool_result_bytes_after_compaction_total") or 0
+                            ) + int(compaction_meta.get("compacted_output_bytes") or 0)
+                            telemetry["tool_result_bytes_saved_total"] = int(
+                                telemetry.get("tool_result_bytes_saved_total") or 0
+                            ) + int(compaction_meta.get("saved_output_bytes") or 0)
+                        else:
+                            telemetry["tool_result_bytes_after_compaction_total"] = int(
+                                telemetry.get("tool_result_bytes_after_compaction_total") or 0
+                            ) + int(compaction_meta.get("output_bytes") or compaction_meta.get("payload_bytes") or 0)
                         tool_event = _delta_aware_tool_result_event(
                             tool_event,
                             quest_root=request.quest_root,
@@ -1019,6 +1031,10 @@ class CodexRunner:
                     "mcp_tool_call_count": telemetry.get("mcp_tool_call_count"),
                     "tool_result_bytes_total": telemetry.get("tool_result_bytes_total"),
                     "compacted_tool_result_count": telemetry.get("compacted_tool_result_count"),
+                    "tool_result_bytes_after_compaction_total": telemetry.get(
+                        "tool_result_bytes_after_compaction_total"
+                    ),
+                    "tool_result_bytes_saved_total": telemetry.get("tool_result_bytes_saved_total"),
                     "full_detail_tool_call_count": telemetry.get("full_detail_tool_call_count"),
                     "token_usage": telemetry.get("token_usage"),
                     "telemetry_path": str(telemetry_path),
