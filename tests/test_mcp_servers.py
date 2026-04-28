@@ -772,9 +772,21 @@ def test_artifact_mcp_server_materializes_compact_evidence_packet(temp_home: Pat
         assert set(packet_payload["surface_cache"]) >= {
             "publication_gate",
             "medical_publication_surface",
+            "submission_authority",
+            "medical_story",
+            "figure_semantics",
             "submission_minimal",
             "display_registry",
             "claim_evidence_map",
+        }
+        repair_hint = packet_payload["deterministic_package_repair_hint"]
+        assert repair_hint["repair_unit_kind"] == "deterministic_package_surfaces"
+        assert repair_hint["controller_hint"] == "combine_once"
+        assert set(repair_hint["surface_ids"]) >= {
+            "submission_authority",
+            "display_registry",
+            "medical_story",
+            "figure_semantics",
         }
         assert packet_payload["inventory"]["figures"]["generated_count"] == 1
         assert packet_payload["surface_cache"]["publication_gate"]["cache_hit"] is True

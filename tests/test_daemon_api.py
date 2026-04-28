@@ -6884,6 +6884,119 @@ def test_daemon_skips_parked_auto_continue_without_running_codex(temp_home: Path
     assert skipped[-1]["continuation_reason"] == "external_metadata_pending"
 
 
+def test_daemon_projects_repeated_auto_hold_before_running_codex(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("repeated auto hold projection quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="write",
+        reason="return_to_publishability_gate",
+    )
+    fingerprint = app._stage_state_fingerprint(app.quest_service.snapshot(quest_id))
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_stage_fingerprint=fingerprint,
+        same_fingerprint_auto_turn_count=2,
+    )
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("repeated auto hold should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "repeated_auto_hold_projection"
+    assert snapshot["same_fingerprint_auto_turn_count"] >= 3
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "deterministic_hold_projection"
+    assert skipped[-1]["hold_projection"]["anchor"] == "write"
+
+
+def test_new_user_message_bypasses_repeated_auto_hold_projection(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("user reactivates hold projection quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="write",
+        reason="return_to_publishability_gate",
+    )
+    fingerprint = app._stage_state_fingerprint(app.quest_service.snapshot(quest_id))
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_stage_fingerprint=fingerprint,
+        same_fingerprint_auto_turn_count=4,
+    )
+    user_message = app.quest_service.append_message(
+        quest_id,
+        role="user",
+        content="新的 revision intake：请按审稿意见继续修订。",
+        source="local",
+    )
+
+    class RecordingRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[dict[str, str]] = []
+
+        def run(self, request):  # noqa: ANN001
+            self.requests.append(
+                {
+                    "turn_reason": request.turn_reason,
+                    "message": request.message,
+                }
+            )
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="reactivated",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RecordingRunner()
+    app.runners["codex"] = runner
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "user_message", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    assert runner.requests == [
+        {
+            "turn_reason": "user_message",
+            "message": user_message["content"],
+        }
+    ]
+
+
 def test_auto_continue_parks_after_repeated_unchanged_publication_gate_state(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -7211,6 +7324,56 @@ def test_daemon_retries_failed_runner_attempt_and_continues_with_retry_context(t
         and str(item.get("content") or "") == "Partial answer before failure."
         for item in app.quest_service.history(quest_id, limit=20)
     )
+
+
+def test_codex_startup_noise_exhaustion_writes_bounded_external_status(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    app.runners_config["codex"].update(
+        {
+            "retry_on_failure": False,
+            "retry_max_attempts": 1,
+        }
+    )
+    quest = app.quest_service.create("startup noise bounded status quest")
+    quest_id = quest["quest_id"]
+    app.quest_service.append_message(
+        quest_id,
+        role="user",
+        content="continue current paper line",
+        source="local",
+    )
+
+    class StartupNoiseRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=False,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="",
+                exit_code=1,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="failed to load plugin mas-local: startup remote sync returned 403 Forbidden",
+            )
+
+    app.runners["codex"] = StartupNoiseRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "user_message", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["display_status"] == "external_upstream/startup-noise"
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "external_upstream/startup-noise"
+    assert snapshot["external_startup_noise"]["bounded"] is True
+    assert snapshot["external_startup_noise"]["diagnosis_code"] == "codex_external_startup_noise"
 
 
 def test_submit_user_message_preempts_waiting_retry_backoff(temp_home: Path) -> None:

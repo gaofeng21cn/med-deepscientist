@@ -5109,6 +5109,7 @@ class QuestService:
             "last_stage_fingerprint": runtime_state.get("last_stage_fingerprint"),
             "last_stage_fingerprint_at": runtime_state.get("last_stage_fingerprint_at"),
             "same_fingerprint_auto_turn_count": int(runtime_state.get("same_fingerprint_auto_turn_count") or 0),
+            "external_startup_noise": runtime_state.get("external_startup_noise"),
             "pending_decisions": pending_decisions,
             "waiting_interaction_id": waiting_interaction_id,
             "default_reply_interaction_id": default_reply_interaction_id,
@@ -5567,6 +5568,7 @@ class QuestService:
             "last_stage_fingerprint": runtime_state.get("last_stage_fingerprint"),
             "last_stage_fingerprint_at": runtime_state.get("last_stage_fingerprint_at"),
             "same_fingerprint_auto_turn_count": int(runtime_state.get("same_fingerprint_auto_turn_count") or 0),
+            "external_startup_noise": runtime_state.get("external_startup_noise"),
             "pending_decisions": pending_decisions,
             "active_interactions": active_interactions,
             "recent_reply_threads": recent_reply_threads,
@@ -7139,6 +7141,7 @@ class QuestService:
             "last_stage_fingerprint": None,
             "last_stage_fingerprint_at": None,
             "same_fingerprint_auto_turn_count": 0,
+            "external_startup_noise": None,
             "pending_user_message_count": pending_count,
             "last_delivered_batch_id": None,
             "last_delivered_at": None,
@@ -7219,6 +7222,11 @@ class QuestService:
         merged["last_stage_fingerprint"] = str(merged.get("last_stage_fingerprint") or "").strip() or None
         merged["last_stage_fingerprint_at"] = str(merged.get("last_stage_fingerprint_at") or "").strip() or None
         merged["same_fingerprint_auto_turn_count"] = int(merged.get("same_fingerprint_auto_turn_count") or 0)
+        merged["external_startup_noise"] = (
+            dict(merged.get("external_startup_noise") or {})
+            if isinstance(merged.get("external_startup_noise"), dict)
+            else None
+        )
         merged["retry_state"] = dict(merged.get("retry_state") or {}) if isinstance(merged.get("retry_state"), dict) else None
         return merged
 
@@ -7434,6 +7442,7 @@ class QuestService:
         last_stage_fingerprint: str | None | object = _UNSET,
         last_stage_fingerprint_at: str | None | object = _UNSET,
         same_fingerprint_auto_turn_count: int | object = _UNSET,
+        external_startup_noise: dict[str, Any] | None | object = _UNSET,
         pending_user_message_count: int | object = _UNSET,
         last_delivered_batch_id: str | None | object = _UNSET,
         last_delivered_at: str | None | object = _UNSET,
@@ -7523,6 +7532,10 @@ class QuestService:
                 state["last_stage_fingerprint_at"] = str(last_stage_fingerprint_at or "").strip() or None
             if same_fingerprint_auto_turn_count is not _UNSET:
                 state["same_fingerprint_auto_turn_count"] = max(0, int(same_fingerprint_auto_turn_count or 0))
+            if external_startup_noise is not _UNSET:
+                state["external_startup_noise"] = (
+                    dict(external_startup_noise) if isinstance(external_startup_noise, dict) else None
+                )
             if pending_user_message_count is not _UNSET:
                 state["pending_user_message_count"] = max(0, int(pending_user_message_count))
             if last_delivered_batch_id is not _UNSET:

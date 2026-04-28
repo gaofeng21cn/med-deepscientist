@@ -2824,6 +2824,13 @@ class DaemonApp:
         runner_cfg = self.runners_config.get(runner_name, {})
         turn_intent = self._turn_intent_for(latest_user_message, turn_reason=turn_reason)
         turn_mode = self._turn_mode_for(snapshot, latest_user_message, turn_reason=turn_reason)
+        if self._project_repeated_auto_hold_before_runner(
+            quest_id,
+            snapshot=snapshot,
+            turn_reason=turn_reason,
+            turn_mode=turn_mode,
+        ):
+            return
         if (
             str(turn_reason or "").strip() == "auto_continue"
             and turn_mode == "parked"
@@ -3102,12 +3109,22 @@ class DaemonApp:
                         output_text="",
                     )
                     if diagnosis is not None:
-                        self.quest_service.update_runtime_state(
-                            quest_root=quest_root,
-                            continuation_policy="wait_for_user_or_resume",
-                            continuation_reason=self._retry_exhausted_continuation_reason(diagnosis),
-                            continuation_updated_at=utc_now(),
+                        runtime_updates: dict[str, Any] = {
+                            "continuation_policy": "wait_for_user_or_resume",
+                            "continuation_reason": self._retry_exhausted_continuation_reason(diagnosis),
+                            "continuation_updated_at": utc_now(),
+                        }
+                        startup_noise_state = self._external_startup_noise_state(
+                            diagnosis=diagnosis,
+                            summary=exhausted_summary,
+                            run_id=current_run_id,
+                            attempt_index=attempt_index,
+                            max_attempts=max_attempts,
                         )
+                        if startup_noise_state is not None:
+                            runtime_updates["external_startup_noise"] = startup_noise_state
+                            runtime_updates["display_status"] = "external_upstream/startup-noise"
+                        self.quest_service.update_runtime_state(quest_root=quest_root, **runtime_updates)
                     self._append_retry_event(
                         quest_id,
                         event_type="runner.turn_retry_exhausted",
@@ -3129,6 +3146,11 @@ class DaemonApp:
                         skill_id=skill_id,
                         model=model,
                         summary=exhausted_summary,
+                        display_status=(
+                            "external_upstream/startup-noise"
+                            if diagnosis is not None and diagnosis.code == "codex_external_startup_noise"
+                            else "error"
+                        ),
                         retry_state=None,
                         diagnosis_code=diagnosis.code if diagnosis is not None else None,
                         guidance=list(diagnosis.guidance) if diagnosis is not None else None,
@@ -3310,12 +3332,22 @@ class DaemonApp:
                     output_text=result.output_text,
                 )
                 if diagnosis is not None:
-                    self.quest_service.update_runtime_state(
-                        quest_root=quest_root,
-                        continuation_policy="wait_for_user_or_resume",
-                        continuation_reason=self._retry_exhausted_continuation_reason(diagnosis),
-                        continuation_updated_at=utc_now(),
+                    runtime_updates = {
+                        "continuation_policy": "wait_for_user_or_resume",
+                        "continuation_reason": self._retry_exhausted_continuation_reason(diagnosis),
+                        "continuation_updated_at": utc_now(),
+                    }
+                    startup_noise_state = self._external_startup_noise_state(
+                        diagnosis=diagnosis,
+                        summary=exhausted_summary,
+                        run_id=result.run_id,
+                        attempt_index=attempt_index,
+                        max_attempts=max_attempts,
                     )
+                    if startup_noise_state is not None:
+                        runtime_updates["external_startup_noise"] = startup_noise_state
+                        runtime_updates["display_status"] = "external_upstream/startup-noise"
+                    self.quest_service.update_runtime_state(quest_root=quest_root, **runtime_updates)
                 self._append_retry_event(
                     quest_id,
                     event_type="runner.turn_retry_exhausted",
@@ -3337,6 +3369,11 @@ class DaemonApp:
                     skill_id=skill_id,
                     model=model,
                     summary=exhausted_summary,
+                    display_status=(
+                        "external_upstream/startup-noise"
+                        if diagnosis is not None and diagnosis.code == "codex_external_startup_noise"
+                        else "error"
+                    ),
                     retry_state=None,
                     diagnosis_code=diagnosis.code if diagnosis is not None else None,
                     guidance=list(diagnosis.guidance) if diagnosis is not None else None,
@@ -3423,6 +3460,97 @@ class DaemonApp:
             "continuation_reason": f"unchanged_{stage}_state",
             "continuation_updated_at": utc_now(),
         }
+
+    def _project_repeated_auto_hold_before_runner(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict,
+        turn_reason: str,
+        turn_mode: str,
+    ) -> bool:
+        if str(turn_reason or "").strip() != "auto_continue":
+            return False
+        if turn_mode != "stage_execution":
+            return False
+        if int(snapshot.get("pending_user_message_count") or 0) > 0:
+            return False
+        if str(snapshot.get("waiting_interaction_id") or "").strip():
+            return False
+        if str(snapshot.get("active_run_id") or "").strip():
+            return False
+        continuation_policy = str(snapshot.get("continuation_policy") or "auto").strip().lower() or "auto"
+        if continuation_policy != "auto":
+            return False
+        previous_fingerprint = str(snapshot.get("last_stage_fingerprint") or "").strip()
+        current_fingerprint = self._stage_state_fingerprint(snapshot)
+        if not previous_fingerprint or previous_fingerprint != current_fingerprint:
+            return False
+        same_count = int(snapshot.get("same_fingerprint_auto_turn_count") or 0)
+        if same_count < 2:
+            return False
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        active_anchor = str(snapshot.get("active_anchor") or "").strip().lower()
+        continuation_reason = str(snapshot.get("continuation_reason") or "").strip().lower()
+        recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+        blockers = [str(item).strip() for item in (paper_health.get("blocking_reasons") or []) if str(item).strip()]
+        hold_markers = (
+            "hold",
+            "block",
+            "return_to_publishability_gate",
+            "unchanged_",
+            "external_metadata_pending",
+        )
+        hold_like = (
+            active_anchor in {"decision", "finalize", "write"}
+            and (
+                any(marker in continuation_reason for marker in hold_markers)
+                or any(marker in recommended_action for marker in hold_markers)
+                or bool(blockers)
+            )
+        )
+        if not hold_like:
+            return False
+        projected_count = same_count + 1
+        quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
+        hold_projection = {
+            "anchor": active_anchor or None,
+            "recommended_action": recommended_action or None,
+            "blocking_reasons": blockers[:6],
+            "fingerprint": current_fingerprint,
+            "same_fingerprint_auto_turn_count": projected_count,
+        }
+        self.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            continuation_policy="wait_for_user_or_resume",
+            continuation_anchor="decision",
+            continuation_reason="repeated_auto_hold_projection",
+            continuation_updated_at=utc_now(),
+            same_fingerprint_auto_turn_count=projected_count,
+            last_stage_fingerprint=current_fingerprint,
+            last_stage_fingerprint_at=utc_now(),
+        )
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": generate_id("evt"),
+                "type": "runner.turn_skipped",
+                "quest_id": quest_id,
+                "source": "daemon_turn_worker",
+                "turn_reason": turn_reason,
+                "turn_mode": "deterministic_hold_projection",
+                "continuation_policy": "wait_for_user_or_resume",
+                "continuation_reason": "repeated_auto_hold_projection",
+                "hold_projection": hold_projection,
+                "summary": "Auto-continue skipped before runner launch because the same anchor/blocker fingerprint was already held.",
+                "created_at": utc_now(),
+            },
+        )
+        return True
 
     @staticmethod
     def _turn_intent_for(latest_user_message: dict | None, *, turn_reason: str = "user_message") -> str:
@@ -4090,9 +4218,33 @@ class DaemonApp:
 
     @staticmethod
     def _retry_exhausted_continuation_reason(diagnosis: FailureDiagnosis) -> str:
+        if diagnosis.code == "codex_external_startup_noise":
+            return "external_upstream/startup-noise"
         if diagnosis.code == "codex_upstream_provider_error":
             return "external_codex_upstream_provider_error"
         return "runner_retry_budget_exhausted"
+
+    @staticmethod
+    def _external_startup_noise_state(
+        *,
+        diagnosis: FailureDiagnosis | None,
+        summary: str,
+        run_id: str,
+        attempt_index: int,
+        max_attempts: int,
+    ) -> dict[str, Any] | None:
+        if diagnosis is None or diagnosis.code != "codex_external_startup_noise":
+            return None
+        return {
+            "status": "external_upstream/startup-noise",
+            "bounded": True,
+            "diagnosis_code": diagnosis.code,
+            "run_id": run_id,
+            "attempt_index": attempt_index,
+            "max_attempts": max_attempts,
+            "summary": summary,
+            "updated_at": utc_now(),
+        }
 
     def _record_turn_postprocess_warning(
         self,

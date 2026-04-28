@@ -62,6 +62,15 @@ _CODEX_UPSTREAM_STATUS_CODE_RE = re.compile(
     r"(?:unexpected status\s+|http_code[\"']?\s*[:=]\s*|status[\"']?\s*[:=]\s*)(401|403|429|5\d\d)\b"
 )
 
+_CODEX_EXTERNAL_STARTUP_NOISE_MARKERS = (
+    "failed to load plugin",
+    "failed-to-load-plugin",
+    "plugin startup",
+    "startup remote sync",
+    "remote plugin registry",
+    "remote sync auth",
+)
+
 
 def _build_haystack(*values: object) -> str:
     return "\n".join(str(value or "") for value in values if str(value or "").strip())
@@ -135,6 +144,27 @@ def diagnose_runner_failure(
             ),
             retriable=False,
             matched_text="invalid params",
+        )
+
+    if normalized_runner == "codex" and (
+        any(marker in lower for marker in _CODEX_EXTERNAL_STARTUP_NOISE_MARKERS)
+        and any(marker in lower for marker in ("plugin", "startup", "remote sync"))
+        and any(marker in lower for marker in ("403", "forbidden", "auth", "failed"))
+    ):
+        return FailureDiagnosis(
+            code="codex_external_startup_noise",
+            problem="Codex plugin startup produced external sync/auth noise.",
+            why=(
+                "The failure came from Codex plugin startup or remote plugin sync/auth, "
+                "not from the medical manuscript, evidence, or publication-quality surfaces."
+            ),
+            guidance=(
+                "Check Codex plugin registry/auth state outside the quest runtime.",
+                "Do not route this as a paper repair loop unless the runner later reports a manuscript or evidence blocker.",
+                "Resume after the external startup surface is healthy or after a fresh user/revision intake changes the task.",
+            ),
+            retriable=True,
+            matched_text="codex external startup noise",
         )
 
     if normalized_runner == "codex" and (

@@ -6,7 +6,12 @@ from pathlib import Path
 
 from deepscientist.evidence_packets import compact_runner_tool_event
 from deepscientist.runners import CodexRunner, RunRequest
-from deepscientist.runners.codex import _compact_tool_event_payload, _tool_event
+from deepscientist.runners.codex import (
+    _compact_tool_event_payload,
+    _delta_aware_stdout_record,
+    _delta_aware_tool_result_event,
+    _tool_event,
+)
 from deepscientist.shared import read_json
 
 
@@ -158,6 +163,47 @@ def test_codex_runner_tool_result_sidecars_large_output(temp_home: Path) -> None
     assert Path(packet["sidecar_path"]).exists()
     sidecar = read_json(Path(packet["sidecar_path"]), {})
     assert sidecar["payload"]["bash_id"] == "bash-large"
+
+
+def test_codex_runner_writes_delta_marker_for_repeated_stdout_line(temp_home: Path) -> None:
+    quest_root = temp_home / "quest"
+    run_root = quest_root / ".ds" / "runs" / "run-001"
+    run_root.mkdir(parents=True)
+    line = json.dumps({"type": "report", "status": "blocked", "fingerprint": "gate-001"})
+
+    first = _delta_aware_stdout_record(quest_root=quest_root, run_root=run_root, line=line, timestamp="t1")
+    second = _delta_aware_stdout_record(quest_root=quest_root, run_root=run_root, line=line, timestamp="t2")
+
+    assert first["line"] == line
+    assert "line" not in second
+    assert second["delta_marker"] is True
+    assert second["fingerprint"] == first["fingerprint"]
+    assert second["repeat_count"] == 2
+
+
+def test_codex_runner_writes_delta_marker_for_repeated_report_tool_result(temp_home: Path) -> None:
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True)
+    payload = {
+        "event_id": "evt-report",
+        "type": "runner.tool_result",
+        "quest_id": "q-001",
+        "run_id": "run-001",
+        "tool_name": "artifact.get_paper_contract_health",
+        "status": "completed",
+        "args": json.dumps({"detail": "summary"}),
+        "output": json.dumps({"gate": "blocked", "fingerprint": "paper-gate-001"}),
+    }
+
+    first = _delta_aware_tool_result_event(payload, quest_root=quest_root, run_id="run-001")
+    second = _delta_aware_tool_result_event(payload, quest_root=quest_root, run_id="run-002")
+
+    assert first["output"] == payload["output"]
+    assert "output" not in second
+    assert second["delta_marker"] is True
+    assert second["delta_kind"] == "unchanged_tool_result"
+    assert second["fingerprint"] == first["fingerprint"]
+    assert second["repeat_count"] == 2
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:

@@ -502,12 +502,27 @@ def _surface_candidates(*, quest_root: Path, workspace_root: Path) -> dict[str, 
             paper / "submission_minimal" / "manuscript.docx",
             paper / "submission_minimal" / "paper.pdf",
         ],
+        "submission_authority": [
+            paper / "review" / "submission_checklist.json",
+            paper / "submission_minimal" / "submission_manifest.json",
+        ],
         "display_registry": [
             paper / "display_registry.json",
             paper / "figure_catalog.json",
             paper / "figures" / "figure_catalog.json",
             paper / "table_catalog.json",
             paper / "tables" / "table_catalog.json",
+        ],
+        "medical_story": [
+            paper / "medical_story_contract.json",
+            paper / "story_contract.json",
+            paper / "paper_contract.json",
+        ],
+        "figure_semantics": [
+            paper / "figure_semantics_manifest.json",
+            paper / "figures" / "figure_semantics_manifest.json",
+            paper / "figure_catalog.json",
+            paper / "figures" / "figure_catalog.json",
         ],
         "claim_evidence_map": [
             paper / "claim_evidence_map.json",
@@ -608,6 +623,30 @@ def build_compact_quest_evidence_packet(
         "surface_cache": surface_cache,
         "gate_fingerprints": {
             surface_id: surface["input_fingerprint"] for surface_id, surface in surface_cache.items()
+        },
+        "deterministic_package_repair_hint": {
+            "repair_unit_kind": "deterministic_package_surfaces",
+            "controller_hint": "combine_once",
+            "surface_ids": [
+                "submission_authority",
+                "display_registry",
+                "medical_story",
+                "figure_semantics",
+            ],
+            "surface_fingerprints": {
+                surface_id: surface_cache[surface_id]["input_fingerprint"]
+                for surface_id in (
+                    "submission_authority",
+                    "display_registry",
+                    "medical_story",
+                    "figure_semantics",
+                )
+                if surface_id in surface_cache
+            },
+            "owner_boundary": (
+                "MDS supplies deterministic package facts only; MAS remains the owner for publication "
+                "readiness, medical interpretation, and submission authority."
+            ),
         },
         "key_blockers": list(dict.fromkeys(str(item) for item in blockers if str(item).strip()))[:_MAX_BLOCKERS],
         "ai_first_contract": (

@@ -24,6 +24,7 @@ from ..runtime_logs import JsonlLogger
 from ..shared import append_jsonl, ensure_dir, generate_id, read_yaml, resolve_runner_binary, utc_now, write_json, write_text
 from ..web_search import extract_web_search_payload
 from .base import RunRequest, RunResult
+from .codex_delta_history import _delta_aware_stdout_record, _delta_aware_tool_result_event
 
 _TOOL_EVENT_ARGS_TEXT_LIMIT = 8_000
 _TOOL_EVENT_OUTPUT_TEXT_LIMIT = 16_000
@@ -897,7 +898,15 @@ class CodexRunner:
                     telemetry["token_usage"] = usage_metrics
                 timestamp = utc_now()
                 append_jsonl(history_events, {"timestamp": timestamp, "event": payload})
-                append_jsonl(stdout_events, {"timestamp": timestamp, "line": line})
+                append_jsonl(
+                    stdout_events,
+                    _delta_aware_stdout_record(
+                        quest_root=request.quest_root,
+                        run_root=run_root,
+                        line=line,
+                        timestamp=timestamp,
+                    ),
+                )
                 try:
                     self.artifact_service.quest_service.schedule_projection_refresh(
                         request.quest_root,
@@ -936,6 +945,11 @@ class CodexRunner:
                             telemetry["compacted_tool_result_count"] = int(
                                 telemetry.get("compacted_tool_result_count") or 0
                             ) + 1
+                        tool_event = _delta_aware_tool_result_event(
+                            tool_event,
+                            quest_root=request.quest_root,
+                            run_id=request.run_id,
+                        )
                     append_jsonl(quest_events, tool_event)
                 message_events, message_output_parts = _message_events(
                     payload,

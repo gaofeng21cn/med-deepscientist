@@ -82,6 +82,22 @@ def test_retry_budget_exhaustion_gets_distinct_runner_diagnosis() -> None:
 
 
 @pytest.mark.parametrize(
+    "message",
+    [
+        "failed to load plugin mas-local: remote sync returned 403 Forbidden",
+        "Codex plugin startup auth failed while syncing remote plugin registry",
+        "failed-to-load-plugin: startup remote sync authentication failed",
+    ],
+)
+def test_codex_plugin_startup_noise_is_distinct_external_startup_noise(message: str) -> None:
+    diagnosis = diagnose_runner_failure(runner_name="codex", stderr_text=message)
+
+    assert diagnosis is not None
+    assert diagnosis.code == "codex_external_startup_noise"
+    assert diagnosis.retriable is True
+
+
+@pytest.mark.parametrize(
     ("summary", "expected_code"),
     [
         (
