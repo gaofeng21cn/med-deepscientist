@@ -155,7 +155,13 @@ def prune_cold_worktree_runtime_payloads(
         "pinned_worktrees": sorted(str(path) for path in pinned_roots),
         "worktrees_examined": 0,
         "worktrees_pruned": 0,
+        "directories_archived": 0,
         "directories_removed": 0,
+        "bytes_original": 0,
+        "bytes_archived": 0,
+        "files_archived": 0,
+        "restore_index_ref": None,
+        "archive_kind": "worktree_runtime_payloads",
         "removed": [],
         "skipped": [],
     }
@@ -195,16 +201,54 @@ def prune_cold_worktree_runtime_payloads(
                 }
             )
             continue
-        removed_directories: list[str] = []
+        archived_directories: list[dict[str, Any]] = []
         for runtime_dir in runtime_dirs:
-            removed_directories.append(str(runtime_dir.relative_to(resolved_root)))
+            relative_dir = _relative_ref(runtime_dir, root=resolved_root)
+            archive_path = _cold_archive_path(
+                resolved_root,
+                kind="worktree_runtime_payloads",
+                relative_path=f"{relative_dir}.tar.gz",
+                compress=False,
+            )
+            content_manifest = _directory_file_manifest(runtime_dir, root=resolved_root)
+            _archive_directory_tree_as_tar_gz(runtime_dir, archive_path, arcname=relative_dir)
+            try:
+                archive_bytes = archive_path.stat().st_size
+            except OSError:
+                archive_bytes = 0
+            archive_ref = _relative_ref(archive_path, root=resolved_root)
+            archive_entry = {
+                "schema_version": 1,
+                "kind": "worktree_runtime_payload",
+                "worktree_root": _relative_ref(worktree_root, root=resolved_root),
+                "source_path": relative_dir,
+                "archive_ref": archive_ref,
+                "archive_sha256": _sha256(archive_path),
+                "archive_bytes": archive_bytes,
+                "bytes_original": content_manifest["bytes_original"],
+                "file_count": content_manifest["file_count"],
+                "file_manifest": content_manifest["files"],
+                "archived_at": utc_now(),
+                "restore_command": f"tar -xzf {archive_ref} -C {resolved_root}",
+            }
+            archived_directories.append(archive_entry)
             shutil.rmtree(runtime_dir, ignore_errors=True)
         manifest["worktrees_pruned"] += 1
-        manifest["directories_removed"] += len(removed_directories)
+        manifest["directories_archived"] += len(archived_directories)
+        manifest["directories_removed"] += len(archived_directories)
+        manifest["bytes_original"] += sum(int(item.get("bytes_original") or 0) for item in archived_directories)
+        manifest["bytes_archived"] += sum(int(item.get("archive_bytes") or 0) for item in archived_directories)
+        manifest["files_archived"] += sum(int(item.get("file_count") or 0) for item in archived_directories)
+        if archived_directories:
+            manifest["restore_index_ref"] = _append_worktree_runtime_restore_index(
+                resolved_root,
+                entries=archived_directories,
+            )
         manifest["removed"].append(
             {
                 "worktree_root": str(worktree_root.relative_to(resolved_root)),
-                "directories": removed_directories,
+                "directories": [str(item["source_path"]) for item in archived_directories],
+                "archived_directories": archived_directories,
             }
         )
     return manifest
@@ -281,6 +325,60 @@ def _archive_directory_as_tar_gz(source_dir: Path, archive_path: Path) -> None:
     ensure_dir(archive_path.parent)
     with tarfile.open(archive_path, "w:gz") as archive:
         archive.add(source_dir, arcname=source_dir.name)
+
+
+def _archive_directory_tree_as_tar_gz(source_dir: Path, archive_path: Path, *, arcname: str) -> None:
+    ensure_dir(archive_path.parent)
+    with tarfile.open(archive_path, "w:gz") as archive:
+        archive.add(source_dir, arcname=arcname)
+
+
+def _directory_file_manifest(source_dir: Path, *, root: Path) -> dict[str, Any]:
+    files: list[dict[str, Any]] = []
+    total_bytes = 0
+    for path in sorted(item for item in source_dir.rglob("*") if item.is_file()):
+        try:
+            file_bytes = path.stat().st_size
+            digest = _sha256(path)
+        except OSError:
+            continue
+        total_bytes += file_bytes
+        files.append(
+            {
+                "path": _relative_ref(path, root=root),
+                "bytes": file_bytes,
+                "sha256": digest,
+            }
+        )
+    return {
+        "file_count": len(files),
+        "bytes_original": total_bytes,
+        "files": files,
+    }
+
+
+def _append_worktree_runtime_restore_index(
+    root: Path,
+    *,
+    entries: list[dict[str, Any]],
+) -> str:
+    index_path = root / ".ds" / "cold_archive" / "worktree_runtime_payloads" / "restore_index.json"
+    payload = read_json(index_path, {})
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        payload = {
+            "schema_version": 1,
+            "quest_root": str(root),
+            "index_path": _relative_ref(index_path, root=root),
+            "archives": [],
+        }
+    archives = payload.get("archives")
+    if not isinstance(archives, list):
+        archives = []
+    archives.extend(entries)
+    payload["archives"] = archives
+    payload["updated_at"] = utc_now()
+    write_json(index_path, payload)
+    return _relative_ref(index_path, root=root)
 
 
 def _collect_line_windows(path: Path, *, head_lines: int, tail_lines: int) -> tuple[list[str], list[str], int]:

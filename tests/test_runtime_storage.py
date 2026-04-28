@@ -703,7 +703,35 @@ def test_runtime_storage_maintenance_prunes_cold_unpinned_worktree_runtime_paylo
     assert (worktree_root / "brief.md").exists()
     prune_manifest = result["worktree_runtime_prune"]
     assert prune_manifest["worktrees_pruned"] == 1
+    assert prune_manifest["directories_archived"] == 5
     assert prune_manifest["directories_removed"] == 5
+    assert prune_manifest["files_archived"] == 5
+    assert prune_manifest["bytes_original"] > 0
+    assert prune_manifest["bytes_archived"] > 0
+    restore_index = quest_root / prune_manifest["restore_index_ref"]
+    assert restore_index.exists()
+    restore_payload = json.loads(restore_index.read_text(encoding="utf-8"))
+    assert len(restore_payload["archives"]) == 5
+    archived_by_source = {
+        item["source_path"]: item
+        for item in prune_manifest["removed"][0]["archived_directories"]
+    }
+    bash_archive = archived_by_source[".ds/worktrees/wt-cold/.ds/bash_exec"]
+    assert bash_archive["archive_sha256"]
+    assert bash_archive["restore_command"].startswith("tar -xzf .ds/cold_archive/worktree_runtime_payloads/")
+    assert len(bash_archive["file_manifest"]) == 1
+    bash_file = bash_archive["file_manifest"][0]
+    assert bash_file["path"] == ".ds/worktrees/wt-cold/.ds/bash_exec/bash-001/terminal.log"
+    assert bash_file["bytes"] == len("terminal\n".encode("utf-8"))
+    assert bash_file["sha256"]
+    archive_path = quest_root / bash_archive["archive_ref"]
+    assert archive_path.exists()
+    with tarfile.open(archive_path, "r:gz") as archive:
+        names = archive.getnames()
+        assert ".ds/worktrees/wt-cold/.ds/bash_exec/bash-001/terminal.log" in names
+        member = archive.extractfile(".ds/worktrees/wt-cold/.ds/bash_exec/bash-001/terminal.log")
+        assert member is not None
+        assert member.read().decode("utf-8") == "terminal\n"
 
 
 def test_runtime_storage_maintenance_keeps_pinned_worktree_runtime_payloads(tmp_path: Path) -> None:
