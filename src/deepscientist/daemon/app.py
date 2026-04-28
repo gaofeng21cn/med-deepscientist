@@ -2824,17 +2824,40 @@ class DaemonApp:
         runner_cfg = self.runners_config.get(runner_name, {})
         turn_intent = self._turn_intent_for(latest_user_message, turn_reason=turn_reason)
         turn_mode = self._turn_mode_for(snapshot, latest_user_message, turn_reason=turn_reason)
+        if (
+            str(turn_reason or "").strip() == "auto_continue"
+            and turn_mode == "parked"
+            and int(snapshot.get("pending_user_message_count") or 0) <= 0
+        ):
+            append_jsonl(
+                Path(snapshot["quest_root"]) / ".ds" / "events.jsonl",
+                {
+                    "event_id": generate_id("evt"),
+                    "type": "runner.turn_skipped",
+                    "quest_id": quest_id,
+                    "source": "daemon_turn_worker",
+                    "turn_reason": turn_reason,
+                    "turn_mode": turn_mode,
+                    "continuation_policy": snapshot.get("continuation_policy"),
+                    "continuation_reason": snapshot.get("continuation_reason"),
+                    "summary": "Auto-continue skipped because the quest is intentionally parked and has no queued user message.",
+                    "created_at": utc_now(),
+                },
+            )
+            return
         skill_id = self._turn_skill_for(snapshot, latest_user_message, turn_reason=turn_reason, turn_mode=turn_mode)
         run_id = generate_id("run")
         model = str(runner_cfg.get("model", "inherit"))
         run_message = ""
         claimed_message_id: str | None = None
+        claim_all_pending_messages = False
         if turn_reason != "auto_continue":
             run_message = str((latest_user_message or {}).get("content") or "").strip()
             claimed_message_id = (
                 str((latest_user_message or {}).get("id") or (latest_user_message or {}).get("message_id") or "").strip()
                 or None
             )
+            claim_all_pending_messages = str(turn_reason or "").strip() == "queued_user_messages"
             if not run_message:
                 return
 
@@ -2883,7 +2906,12 @@ class DaemonApp:
         with self._turn_lock:
             if bool((self._turn_state.get(quest_id) or {}).get("stop_requested")):
                 return
-        if claimed_message_id:
+        if claim_all_pending_messages:
+            self.quest_service.claim_all_pending_user_messages_for_turn(
+                quest_id,
+                run_id=run_id,
+            )
+        elif claimed_message_id:
             self.quest_service.claim_pending_user_message_for_turn(
                 quest_id,
                 message_id=claimed_message_id,
@@ -3532,15 +3560,42 @@ class DaemonApp:
     def _latest_runnable_user_message(self, quest_id: str, *, turn_reason: str) -> dict | None:
         latest_history_message = self._latest_user_message(quest_id)
         quest_root = self.quest_service._quest_root(quest_id)
-        queue_message = None
-        pending_messages = self.quest_service._read_message_queue(quest_root).get("pending") or []
-        for item in reversed(pending_messages):
-            if isinstance(item, dict):
-                queue_message = item
-                break
-        if queue_message is not None and (
-            str(turn_reason or "").strip() == "queued_user_messages" or latest_history_message is None
-        ):
+        pending_messages = [
+            dict(item)
+            for item in (self.quest_service._read_message_queue(quest_root).get("pending") or [])
+            if isinstance(item, dict)
+        ]
+        queue_message = pending_messages[-1] if pending_messages else None
+        if pending_messages and str(turn_reason or "").strip() == "queued_user_messages":
+            attachments: list[dict] = []
+            for item in pending_messages:
+                attachments.extend(
+                    dict(attachment)
+                    for attachment in (item.get("attachments") or [])
+                    if isinstance(attachment, dict)
+                )
+            if len(pending_messages) == 1:
+                content = str(pending_messages[0].get("content") or "")
+                message_id = str(pending_messages[0].get("message_id") or "").strip() or None
+            else:
+                lines = [f"Queued user message intake ({len(pending_messages)} messages):", ""]
+                for index, item in enumerate(pending_messages, start=1):
+                    source = str(item.get("source") or "local").strip() or "local"
+                    created_at = str(item.get("created_at") or "").strip() or "unknown"
+                    content_text = str(item.get("content") or "").strip()
+                    lines.append(f"{index}. [{source}] [{created_at}] {content_text}")
+                content = "\n".join(lines).strip()
+                message_id = None
+            return {
+                "id": message_id,
+                "role": "user",
+                "content": content,
+                "source": str((queue_message or {}).get("source") or "local"),
+                "created_at": (queue_message or {}).get("created_at"),
+                "reply_to_interaction_id": (queue_message or {}).get("reply_to_interaction_id"),
+                "attachments": attachments,
+            }
+        if queue_message is not None and latest_history_message is None:
             return {
                 "id": str(queue_message.get("message_id") or "").strip() or None,
                 "role": "user",

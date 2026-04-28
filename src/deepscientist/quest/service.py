@@ -7774,6 +7774,55 @@ class QuestService:
         )
         return claimed
 
+    def claim_all_pending_user_messages_for_turn(
+        self,
+        quest_id: str,
+        *,
+        run_id: str,
+    ) -> list[dict[str, Any]]:
+        quest_root = self._quest_root(quest_id)
+        queue_payload = self._read_message_queue(quest_root)
+        pending = [dict(item) for item in (queue_payload.get("pending") or [])]
+        if not pending:
+            self.update_runtime_state(
+                quest_root=quest_root,
+                pending_user_message_count=0,
+            )
+            return []
+
+        now = utc_now()
+        batch_id = generate_id("claim")
+        claimed = [
+            {
+                **item,
+                "status": "accepted_by_run",
+                "claimed_by_run_id": run_id,
+                "claimed_at": now,
+                "claimed_batch_id": batch_id,
+            }
+            for item in pending
+        ]
+        queue_payload["pending"] = []
+        queue_payload["completed"] = [*list(queue_payload.get("completed") or []), *claimed][-200:]
+        self._write_message_queue(quest_root, queue_payload)
+        self.update_runtime_state(
+            quest_root=quest_root,
+            pending_user_message_count=0,
+        )
+        append_jsonl(
+            self._interaction_journal_path(quest_root),
+            {
+                "event_id": generate_id("evt"),
+                "type": "user_batch_claimed_for_turn",
+                "quest_id": quest_id,
+                "batch_id": batch_id,
+                "message_ids": [item.get("message_id") for item in claimed],
+                "run_id": run_id,
+                "created_at": now,
+            },
+        )
+        return claimed
+
     def cancel_pending_user_messages(
         self,
         quest_id: str,

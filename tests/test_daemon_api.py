@@ -6229,6 +6229,88 @@ def test_resume_quest_prefers_pending_queue_message_over_stale_history_user_mess
     assert snapshot["pending_user_message_count"] == 0
 
 
+def test_queued_user_messages_are_coalesced_into_one_runner_turn(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("coalesced queue resume quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(quest_root, policy="none")
+
+    queue_payload = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+    queue_payload["pending"] = [
+        {
+            "message_id": "msg-queue-001",
+            "source": "web-react",
+            "conversation_id": "local:default",
+            "content": "First reviewer correction.",
+            "created_at": "2026-04-28T10:00:00Z",
+            "reply_to_interaction_id": None,
+            "attachments": [],
+            "status": "queued",
+        },
+        {
+            "message_id": "msg-queue-002",
+            "source": "web-react",
+            "conversation_id": "local:default",
+            "content": "Second reviewer correction.",
+            "created_at": "2026-04-28T10:01:00Z",
+            "reply_to_interaction_id": None,
+            "attachments": [],
+            "status": "queued",
+        },
+    ]
+    write_json(quest_root / ".ds" / "user_message_queue.json", queue_payload)
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        pending_user_message_count=2,
+    )
+
+    class QueueBatchRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[str] = []
+
+        def run(self, request):
+            self.requests.append(request.message)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="Processed queue batch.",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = QueueBatchRunner()
+    app.runners["codex"] = runner
+
+    payload = app.resume_quest(quest_id, source="runtime_watch")
+    assert payload["started"] is True
+
+    _wait_for(
+        lambda: runner.requests,
+        predicate=lambda requests: len(requests) == 1,
+        failure_message="queued messages were not coalesced into one runner turn",
+        render_last=lambda requests: requests,
+    )
+    assert "Queued user message intake (2 messages)" in runner.requests[0]
+    assert "First reviewer correction." in runner.requests[0]
+    assert "Second reviewer correction." in runner.requests[0]
+    queue_after = read_json(quest_root / ".ds" / "user_message_queue.json", {})
+    assert queue_after["pending"] == []
+    assert [item["message_id"] for item in queue_after["completed"][-2:]] == [
+        "msg-queue-001",
+        "msg-queue-002",
+    ]
+
+
 def test_run_quest_turn_clears_active_run_when_assistant_append_fails(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -6767,6 +6849,39 @@ def test_auto_continue_parks_after_repeated_unchanged_decision_state(temp_home: 
     assert second_snapshot["continuation_policy"] == "wait_for_user_or_resume"
     assert second_snapshot["continuation_anchor"] == "decision"
     assert second_snapshot["continuation_reason"] == "unchanged_decision_state"
+
+
+def test_daemon_skips_parked_auto_continue_without_running_codex(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("parked auto continue skip quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="wait_for_user_or_resume",
+        reason="external_metadata_pending",
+        anchor="decision",
+    )
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("parked auto_continue should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped
+    assert skipped[-1]["turn_mode"] == "parked"
+    assert skipped[-1]["continuation_reason"] == "external_metadata_pending"
 
 
 def test_auto_continue_parks_after_repeated_unchanged_publication_gate_state(temp_home: Path) -> None:

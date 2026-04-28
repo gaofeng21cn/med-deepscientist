@@ -4,8 +4,10 @@ import json
 import threading
 from pathlib import Path
 
+from deepscientist.evidence_packets import compact_runner_tool_event
 from deepscientist.runners import CodexRunner, RunRequest
 from deepscientist.runners.codex import _compact_tool_event_payload, _tool_event
+from deepscientist.shared import read_json
 
 
 def test_codex_tool_event_preserves_parseable_bash_exec_payload_and_metadata() -> None:
@@ -122,6 +124,40 @@ def test_codex_compacts_extreme_tool_result_payload_before_event_write() -> None
     assert rendered["output_bytes"] > 2_000_000
     assert len(str(rendered["output"])) < 20_000
     assert rendered["metadata"]["bash_id"] == "bash-extreme"
+
+
+def test_codex_runner_tool_result_sidecars_large_output(temp_home: Path) -> None:
+    payload = {
+        "event_id": "evt-large-tool",
+        "type": "runner.tool_result",
+        "quest_id": "q-001",
+        "run_id": "run-001",
+        "tool_name": "bash_exec.bash_exec",
+        "status": "completed",
+        "args": '{"mode":"read","id":"bash-large"}',
+        "output": json.dumps(
+            {
+                "ok": True,
+                "bash_id": "bash-large",
+                "status": "completed",
+                "log": "\n".join(f"line {index}: {'x' * 120}" for index in range(400)),
+            },
+            ensure_ascii=False,
+        ),
+    }
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True, exist_ok=True)
+
+    compacted, meta = compact_runner_tool_event(payload, quest_root=quest_root, run_id="run-001")
+
+    assert meta["compacted"] is True
+    rendered_output = json.loads(compacted["output"])
+    packet = rendered_output["evidence_packet"]
+    assert packet["tool_name"] == "bash_exec.bash_exec"
+    assert packet["payload_bytes"] > 8_000
+    assert Path(packet["sidecar_path"]).exists()
+    sidecar = read_json(Path(packet["sidecar_path"]), {})
+    assert sidecar["payload"]["bash_id"] == "bash-large"
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:
@@ -817,3 +853,8 @@ def test_codex_runner_drains_stderr_before_stdout_finishes(monkeypatch, temp_hom
 
     result = result_holder["result"]
     assert getattr(result, "output_text") == "done"
+    telemetry = read_json(quest_root / ".ds" / "runs" / "run-001" / "telemetry.json", {})
+    assert telemetry["prompt_bytes"] == len("prompt from builder".encode("utf-8"))
+    assert telemetry["stdout_event_count"] == 4
+    assert telemetry["model_inherited"] is False
+    assert telemetry["reasoning_effort"] == "xhigh"

@@ -723,6 +723,41 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_artifact_mcp_server_sidecars_full_quest_state(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp full quest state sidecar quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-full-state",
+            active_anchor="decision",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        result = _unwrap_tool_result(await server.call_tool("get_quest_state", {"detail": "full"}))
+
+        assert result["compacted"] is True
+        packet = result["evidence_packet"]
+        assert packet["tool_name"] == "artifact.get_quest_state"
+        assert packet["full_detail_requested"] is True
+        assert Path(packet["sidecar_path"]).exists()
+        sidecar = read_json(Path(packet["sidecar_path"]), {})
+        assert sidecar["payload"]["quest_state"]["quest_id"] == quest["quest_id"]
+
+    asyncio.run(scenario())
+
+
 def test_start_setup_profile_artifact_server_exposes_prepare_form_only(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)
@@ -2063,6 +2098,56 @@ def test_bash_exec_mcp_server_default_read_truncates_long_logs_with_hint(temp_ho
         assert "line-801" in result["log"]
         assert "line-2300" in result["log"]
         assert "start=..., tail=..." in result["log_read_hint"]
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_mcp_server_sidecars_very_large_default_read(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp bash huge log quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-mcp-bash-huge-log",
+            active_anchor="experiment",
+            conversation_id=f"quest:{quest['quest_id']}",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        _write_fake_bash_session(
+            temp_home,
+            quest_root,
+            "bash-huge-preview",
+            log_lines=[f"line-{index}: {'x' * 180}" for index in range(1, 2601)],
+        )
+        server = build_bash_exec_server(context)
+
+        result = _unwrap_tool_result(
+            await server.call_tool(
+                "bash_exec",
+                {
+                    "mode": "read",
+                    "id": "bash-huge-preview",
+                },
+            )
+        )
+
+        assert result["compacted"] is True
+        packet = result["evidence_packet"]
+        assert packet["tool_name"] == "bash_exec.bash_exec"
+        assert packet["payload_bytes"] > 48_000
+        assert Path(packet["sidecar_path"]).exists()
+        sidecar = read_json(Path(packet["sidecar_path"]), {})
+        assert sidecar["payload"]["bash_id"] == "bash-huge-preview"
+        assert sidecar["payload"]["log_line_count"] == 2600
 
     asyncio.run(scenario())
 

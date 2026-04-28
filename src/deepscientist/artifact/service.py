@@ -15,6 +15,7 @@ from ..bridges import register_builtin_connector_bridges
 from ..channels import get_channel_factory, register_builtin_channels
 from ..config import ConfigManager
 from ..connector_runtime import conversation_identity_key, infer_connector_transport, normalize_conversation_id
+from ..evidence_packets import payload_sha256
 from ..gitops import (
     branch_exists,
     canonical_worktree_root,
@@ -6507,16 +6508,45 @@ class ArtifactService:
                 "active_paper_line_ref": active_paper_line_ref,
                 "paper_lines": paper_lines,
             }
-        payload = self.quest_service._paper_contract_health_payload(
-            quest_root=quest_root,
-            paper_contract=paper_contract,
-            paper_evidence=paper_evidence,
-            analysis_inventory=analysis_inventory,
-            paper_lines=paper_lines,
-            active_paper_line_ref=active_paper_line_ref,
+        gate_input = {
+            "paper_contract": paper_contract,
+            "paper_evidence": paper_evidence,
+            "analysis_inventory": analysis_inventory,
+            "paper_lines": paper_lines,
+            "active_paper_line_ref": active_paper_line_ref,
+        }
+        gate_fingerprint = payload_sha256(gate_input)
+        gate_cache_path = quest_root / ".ds" / "gate_cache" / "paper_contract_health.json"
+        cached_gate = read_json(gate_cache_path, {})
+        cache_hit = (
+            isinstance(cached_gate, dict)
+            and int(cached_gate.get("schema_version") or 0) == 1
+            and cached_gate.get("input_fingerprint") == gate_fingerprint
+            and isinstance(cached_gate.get("payload"), dict)
         )
-        payload = dict(payload or {})
-        payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
+        if cache_hit:
+            payload = dict(cached_gate.get("payload") or {})
+        else:
+            payload = self.quest_service._paper_contract_health_payload(
+                quest_root=quest_root,
+                paper_contract=paper_contract,
+                paper_evidence=paper_evidence,
+                analysis_inventory=analysis_inventory,
+                paper_lines=paper_lines,
+                active_paper_line_ref=active_paper_line_ref,
+            )
+            payload = dict(payload or {})
+            payload["blocking_reasons"] = self._paper_line_display_blockers(payload)
+            ensure_dir(gate_cache_path.parent)
+            write_json(
+                gate_cache_path,
+                {
+                    "schema_version": 1,
+                    "generated_at": utc_now(),
+                    "input_fingerprint": gate_fingerprint,
+                    "payload": payload,
+                },
+            )
         self._write_paper_line_state(quest_root, workspace_root=workspace_root)
         if normalized_detail == "summary":
             payload.pop("unresolved_required_items", None)
@@ -6527,6 +6557,9 @@ class ArtifactService:
             "detail": normalized_detail,
             "active_paper_line_ref": active_paper_line_ref,
             "active_workspace_root": str(workspace_root),
+            "gate_fingerprint": gate_fingerprint,
+            "gate_cache_hit": cache_hit,
+            "gate_cache_path": str(gate_cache_path),
             "paper_contract_health": payload,
         }
 
