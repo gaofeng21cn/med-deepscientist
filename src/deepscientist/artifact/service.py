@@ -15,7 +15,7 @@ from ..bridges import register_builtin_connector_bridges
 from ..channels import get_channel_factory, register_builtin_channels
 from ..config import ConfigManager
 from ..connector_runtime import conversation_identity_key, infer_connector_transport, normalize_conversation_id
-from ..evidence_packets import payload_sha256
+from ..evidence_packets import materialize_compact_quest_evidence_packet, payload_sha256
 from ..gitops import (
     branch_exists,
     canonical_worktree_root,
@@ -6562,6 +6562,13 @@ class ArtifactService:
             "gate_cache_path": str(gate_cache_path),
             "paper_contract_health": payload,
         }
+
+    def get_compact_evidence_packet(self, quest_root: Path, *, run_id: str | None = None) -> dict[str, Any]:
+        return materialize_compact_quest_evidence_packet(
+            quest_root=quest_root,
+            workspace_root=self._workspace_root_for(quest_root),
+            run_id=run_id,
+        )
 
     def validate_manuscript_coverage(
         self,

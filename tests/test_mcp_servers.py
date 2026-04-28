@@ -300,6 +300,7 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
             "list_research_branches",
             "resolve_runtime_refs",
             "get_paper_contract_health",
+            "get_compact_evidence_packet",
             "validate_manuscript_coverage",
             "get_quest_state",
             "get_global_status",
@@ -719,6 +720,67 @@ def test_artifact_mcp_server_tools_cover_core_flows(temp_home: Path) -> None:
         )
         assert completion_result["ok"] is True
         assert completion_result["snapshot"]["status"] == "completed"
+
+    asyncio.run(scenario())
+
+
+def test_artifact_mcp_server_materializes_compact_evidence_packet(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "compact evidence packet quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        paper_root = quest_root / "paper"
+        (paper_root / "submission_minimal").mkdir(parents=True)
+        (paper_root / "figures" / "generated").mkdir(parents=True)
+        write_json(paper_root / "claim_evidence_map.json", {"claims": [{"claim_id": "C1", "status": "supported"}]})
+        write_json(paper_root / "figure_catalog.json", {"figures": [{"id": "F1", "status": "current"}]})
+        write_json(paper_root / "table_catalog.json", {"tables": [{"id": "T1", "status": "current"}]})
+        write_json(paper_root / "submission_minimal" / "submission_manifest.json", {"package_files": []})
+        (paper_root / "figures" / "generated" / "F1.png").write_bytes(b"figure")
+        write_json(
+            quest_root / "artifacts" / "reports" / "publishability_gate" / "latest.json",
+            {"status": "blocked", "blockers": ["submission_minimal_missing"]},
+        )
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-evidence-packet",
+            active_anchor="write",
+            conversation_id="quest:test",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        first = _unwrap_tool_result(await server.call_tool("get_compact_evidence_packet", {}))
+        second = _unwrap_tool_result(await server.call_tool("get_compact_evidence_packet", {}))
+
+        assert first["compacted"] is True
+        first_packet = first["evidence_packet"]
+        second_packet = second["evidence_packet"]
+        assert first_packet["tool_name"] == "artifact.compact_quest_evidence_packet"
+        assert Path(first_packet["sidecar_path"]).exists()
+        assert Path(second_packet["sidecar_path"]).exists()
+        sidecar_payload = read_json(Path(second_packet["sidecar_path"]), {})
+        packet_payload = sidecar_payload["payload"]
+        assert set(packet_payload["surface_cache"]) >= {
+            "publication_gate",
+            "medical_publication_surface",
+            "submission_minimal",
+            "display_registry",
+            "claim_evidence_map",
+        }
+        assert packet_payload["inventory"]["figures"]["generated_count"] == 1
+        assert packet_payload["surface_cache"]["publication_gate"]["cache_hit"] is True
+        assert packet_payload["surface_cache"]["claim_evidence_map"]["summary"]["status"] == "current"
+        assert packet_payload["surface_cache"]["submission_minimal"]["summary"]["status"] == "incomplete"
+        assert packet_payload["inventory"]["submission_minimal"]["ready"] is False
 
     asyncio.run(scenario())
 

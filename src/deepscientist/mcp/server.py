@@ -945,6 +945,18 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         )
 
     @server.tool(
+        name="get_compact_evidence_packet",
+        description=(
+            "Return a compact deterministic evidence packet for the active quest: file inventory, table/figure "
+            "inventory, submission-minimal completeness, surface fingerprints, cache status, and key blockers. "
+            "Use this before drilling into full artifacts."
+        ),
+        annotations=_read_only_tool_annotations(title="Get compact evidence packet"),
+    )
+    def get_compact_evidence_packet(comment: str | dict[str, Any] | None = None) -> dict[str, Any]:
+        return service.get_compact_evidence_packet(context.require_quest_root(), run_id=context.run_id)
+
+    @server.tool(
         name="validate_manuscript_coverage",
         description=(
             "Validate whether the current paper is only a draft checkpoint or a full manuscript/submission package. "

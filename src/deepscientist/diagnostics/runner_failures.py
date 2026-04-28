@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -57,9 +58,17 @@ _CODEX_UPSTREAM_STATUS_MARKERS = (
     "504 gateway timeout",
 )
 
+_CODEX_UPSTREAM_STATUS_CODE_RE = re.compile(
+    r"(?:unexpected status\s+|http_code[\"']?\s*[:=]\s*|status[\"']?\s*[:=]\s*)(401|403|429|5\d\d)\b"
+)
+
 
 def _build_haystack(*values: object) -> str:
     return "\n".join(str(value or "") for value in values if str(value or "").strip())
+
+
+def _has_codex_upstream_status_code(lower_haystack: str) -> bool:
+    return _CODEX_UPSTREAM_STATUS_CODE_RE.search(lower_haystack) is not None
 
 
 def diagnose_runner_failure(
@@ -153,6 +162,7 @@ def diagnose_runner_failure(
 
     if normalized_runner == "codex" and (
         any(marker in lower for marker in _CODEX_UPSTREAM_ERROR_MARKERS)
+        or _has_codex_upstream_status_code(lower)
         or (
             ("unexpected status" in lower or "http_code" in lower or "status" in lower)
             and any(marker in lower for marker in _CODEX_UPSTREAM_STATUS_MARKERS)

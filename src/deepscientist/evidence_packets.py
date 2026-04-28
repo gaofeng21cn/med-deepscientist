@@ -13,6 +13,7 @@ DEFAULT_RUNNER_TOOL_RESULT_THRESHOLD_BYTES = 8_000
 _MAX_SUMMARY_CHARS = 900
 _MAX_BLOCKERS = 12
 _MAX_ITEMS = 12
+_SURFACE_CACHE_SCHEMA_VERSION = 1
 
 
 def payload_json_bytes(payload: Any) -> bytes:
@@ -339,3 +340,305 @@ def compact_inventory(items: list[dict[str, Any]], *, keep_keys: tuple[str, ...]
     for item in items[:_MAX_ITEMS]:
         compacted.append({key: item.get(key) for key in keep_keys if key in item})
     return compacted
+
+
+def _relative_path(path: Path, root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except ValueError:
+        return str(path)
+
+
+def _file_fact(path: Path, *, root: Path) -> dict[str, Any]:
+    resolved = path.expanduser().resolve()
+    if not resolved.exists() or not resolved.is_file():
+        return {
+            "path": _relative_path(resolved, root),
+            "exists": False,
+        }
+    stat = resolved.stat()
+    return {
+        "path": _relative_path(resolved, root),
+        "exists": True,
+        "bytes": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
+        "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest(),
+    }
+
+
+def _first_existing(paths: list[Path]) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+
+def _paper_root(workspace_root: Path) -> Path:
+    return workspace_root / "paper" if (workspace_root / "paper").exists() else workspace_root
+
+
+def _catalog_items(catalog_path: Path, *, key: str) -> list[dict[str, Any]]:
+    payload = read_json(catalog_path, {}) if catalog_path.exists() else {}
+    raw_items: Any = []
+    if isinstance(payload, dict):
+        raw_items = payload.get(key) or payload.get("items") or payload.get("entries") or []
+    if not isinstance(raw_items, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for index, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("id") or item.get("figure_id") or item.get("table_id") or index).strip()
+        items.append(
+            {
+                "id": item_id,
+                "status": item.get("status"),
+                "path": item.get("path") or item.get("output_path") or item.get("source_path"),
+                "title": item.get("title") or item.get("caption"),
+            }
+        )
+    return items
+
+
+def _inventory_for_workspace(*, quest_root: Path, workspace_root: Path) -> dict[str, Any]:
+    root = workspace_root.expanduser().resolve()
+    paper = _paper_root(root)
+    figure_catalog = _first_existing(
+        [
+            paper / "figure_catalog.json",
+            paper / "figures" / "figure_catalog.json",
+            paper / "figures" / "catalog.json",
+        ]
+    )
+    table_catalog = _first_existing(
+        [
+            paper / "table_catalog.json",
+            paper / "tables" / "table_catalog.json",
+            paper / "tables" / "catalog.json",
+        ]
+    )
+    file_candidates = [
+        paper / "manuscript.md",
+        paper / "manuscript_submission.md",
+        paper / "manuscript.docx",
+        paper / "paper.pdf",
+        paper / "paper_contract.json",
+        paper / "paper_line_state.json",
+        paper / "claim_evidence_map.json",
+        paper / "display_registry.json",
+        paper / "submission_minimal" / "submission_manifest.json",
+        paper / "submission_minimal" / "manuscript.docx",
+        paper / "submission_minimal" / "paper.pdf",
+    ]
+    generated_figures = sorted(
+        path
+        for folder in (paper / "figures" / "generated", paper / "submission_minimal" / "figures")
+        if folder.exists()
+        for path in folder.iterdir()
+        if path.is_file()
+    )
+    generated_tables = sorted(
+        path
+        for folder in (paper / "tables" / "generated", paper / "submission_minimal" / "tables")
+        if folder.exists()
+        for path in folder.iterdir()
+        if path.is_file()
+    )
+    manifest_path = paper / "submission_minimal" / "submission_manifest.json"
+    missing_submission_files = [
+        item["path"]
+        for item in (
+            _file_fact(manifest_path, root=root),
+            _file_fact(paper / "submission_minimal" / "manuscript.docx", root=root),
+            _file_fact(paper / "submission_minimal" / "paper.pdf", root=root),
+        )
+        if not item["exists"]
+    ]
+    return {
+        "workspace_root": str(root),
+        "quest_root": str(quest_root.expanduser().resolve()),
+        "paper_root": str(paper),
+        "files": [_file_fact(path, root=root) for path in file_candidates],
+        "figures": {
+            "catalog_path": str(figure_catalog) if figure_catalog is not None else None,
+            "catalog_items": compact_inventory(
+                _catalog_items(figure_catalog, key="figures") if figure_catalog is not None else [],
+                keep_keys=("id", "status", "path", "title"),
+            ),
+            "generated_count": len(generated_figures),
+            "generated_samples": [_relative_path(path, root) for path in generated_figures[:_MAX_ITEMS]],
+        },
+        "tables": {
+            "catalog_path": str(table_catalog) if table_catalog is not None else None,
+            "catalog_items": compact_inventory(
+                _catalog_items(table_catalog, key="tables") if table_catalog is not None else [],
+                keep_keys=("id", "status", "path", "title"),
+            ),
+            "generated_count": len(generated_tables),
+            "generated_samples": [_relative_path(path, root) for path in generated_tables[:_MAX_ITEMS]],
+        },
+        "submission_minimal": {
+            "manifest_path": str(manifest_path) if manifest_path.exists() else None,
+            "missing_required_files": missing_submission_files,
+            "ready": not missing_submission_files,
+        },
+    }
+
+
+def _surface_candidates(*, quest_root: Path, workspace_root: Path) -> dict[str, list[Path]]:
+    paper = _paper_root(workspace_root.expanduser().resolve())
+    return {
+        "publication_gate": [
+            quest_root / "artifacts" / "reports" / "publishability_gate" / "latest.json",
+            quest_root / "artifacts" / "reports" / "publication_gate" / "latest.json",
+        ],
+        "medical_publication_surface": [
+            quest_root / "artifacts" / "reports" / "medical_publication_surface" / "latest.json",
+            quest_root / "artifacts" / "reports" / "medical_reporting_audit" / "latest.json",
+            paper / "medical_publication_surface.json",
+        ],
+        "submission_minimal": [
+            paper / "submission_minimal" / "submission_manifest.json",
+            paper / "submission_minimal" / "manuscript.docx",
+            paper / "submission_minimal" / "paper.pdf",
+        ],
+        "display_registry": [
+            paper / "display_registry.json",
+            paper / "figure_catalog.json",
+            paper / "figures" / "figure_catalog.json",
+            paper / "table_catalog.json",
+            paper / "tables" / "table_catalog.json",
+        ],
+        "claim_evidence_map": [
+            paper / "claim_evidence_map.json",
+        ],
+    }
+
+
+def _surface_cache_payload(
+    *,
+    quest_root: Path,
+    workspace_root: Path,
+    surface_id: str,
+    paths: list[Path],
+) -> dict[str, Any]:
+    root = workspace_root.expanduser().resolve()
+    file_facts = [_file_fact(path, root=root) for path in paths]
+    fingerprint = payload_sha256({"surface_id": surface_id, "files": file_facts})
+    cache_path = quest_root / ".ds" / "gate_cache" / f"{surface_id}.json"
+    cached = read_json(cache_path, {})
+    cache_hit = (
+        isinstance(cached, dict)
+        and int(cached.get("schema_version") or 0) == _SURFACE_CACHE_SCHEMA_VERSION
+        and cached.get("input_fingerprint") == fingerprint
+        and isinstance(cached.get("summary"), dict)
+    )
+    if cache_hit:
+        summary = dict(cached.get("summary") or {})
+    else:
+        existing = [item for item in file_facts if item.get("exists")]
+        missing = [item["path"] for item in file_facts if not item.get("exists")]
+        if surface_id == "submission_minimal":
+            status = "current" if not missing else "incomplete" if existing else "missing"
+            key_blockers = [f"{surface_id} missing {len(missing)} required evidence file(s)"] if missing else []
+        else:
+            status = "current" if existing else "missing"
+            key_blockers = [f"{surface_id} missing required evidence"] if not existing else []
+        summary = {
+            "surface_id": surface_id,
+            "status": status,
+            "existing_file_count": len(existing),
+            "missing_file_count": len(missing),
+            "missing_files": missing[:_MAX_ITEMS],
+            "primary_ref": existing[0]["path"] if existing else None,
+            "key_blockers": key_blockers,
+        }
+        ensure_dir(cache_path.parent)
+        write_json(
+            cache_path,
+            {
+                "schema_version": _SURFACE_CACHE_SCHEMA_VERSION,
+                "generated_at": utc_now(),
+                "surface_id": surface_id,
+                "input_fingerprint": fingerprint,
+                "summary": summary,
+            },
+        )
+    return {
+        "surface_id": surface_id,
+        "input_fingerprint": fingerprint,
+        "cache_hit": cache_hit,
+        "cache_path": str(cache_path),
+        "summary": summary,
+        "files": file_facts,
+    }
+
+
+def build_compact_quest_evidence_packet(
+    *,
+    quest_root: Path,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    resolved_quest_root = quest_root.expanduser().resolve()
+    resolved_workspace_root = (workspace_root or quest_root).expanduser().resolve()
+    inventory = _inventory_for_workspace(quest_root=resolved_quest_root, workspace_root=resolved_workspace_root)
+    surface_cache = {
+        surface_id: _surface_cache_payload(
+            quest_root=resolved_quest_root,
+            workspace_root=resolved_workspace_root,
+            surface_id=surface_id,
+            paths=paths,
+        )
+        for surface_id, paths in _surface_candidates(
+            quest_root=resolved_quest_root,
+            workspace_root=resolved_workspace_root,
+        ).items()
+    }
+    blockers: list[str] = []
+    blockers.extend(inventory["submission_minimal"]["missing_required_files"])
+    for surface in surface_cache.values():
+        blockers.extend(surface.get("summary", {}).get("key_blockers") or [])
+    packet = {
+        "version": 1,
+        "created_at": utc_now(),
+        "packet_kind": "compact_quest_evidence",
+        "workspace_root": str(resolved_workspace_root),
+        "quest_root": str(resolved_quest_root),
+        "inventory": inventory,
+        "surface_cache": surface_cache,
+        "gate_fingerprints": {
+            surface_id: surface["input_fingerprint"] for surface_id, surface in surface_cache.items()
+        },
+        "key_blockers": list(dict.fromkeys(str(item) for item in blockers if str(item).strip()))[:_MAX_BLOCKERS],
+        "ai_first_contract": (
+            "Controller supplies deterministic facts only. AI remains responsible for medical judgment, "
+            "claim boundaries, manuscript prose, and final publication-readiness interpretation."
+        ),
+        "drill_down_rule": (
+            "Open sidecar or source artifacts only when compact facts conflict, are ambiguous, "
+            "or expose a high-risk blocker requiring source inspection."
+        ),
+    }
+    packet["packet_sha256"] = payload_sha256(packet)
+    return packet
+
+
+def materialize_compact_quest_evidence_packet(
+    *,
+    quest_root: Path,
+    workspace_root: Path | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    packet = build_compact_quest_evidence_packet(quest_root=quest_root, workspace_root=workspace_root)
+    compacted, _meta = compact_evidence_payload(
+        packet,
+        quest_root=quest_root,
+        run_id=run_id,
+        tool_name="artifact.compact_quest_evidence_packet",
+        detail="summary",
+        item_id="compact-quest-evidence",
+        force=True,
+        reason="compact_quest_evidence_packet",
+        full_detail_requested=False,
+    )
+    return compacted if isinstance(compacted, dict) else packet

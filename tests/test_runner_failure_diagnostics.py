@@ -8,8 +8,12 @@ from deepscientist.diagnostics import diagnose_runner_failure
 @pytest.mark.parametrize(
     "message",
     [
+        "unexpected status 401 Unauthorized: invalid upstream token",
+        "unexpected status 403 Forbidden: upstream account temporarily blocked",
         "unexpected status 429 Too Many Requests: rate limit exceeded",
+        "unexpected status 500 Internal Server Error",
         "unexpected status 503 Service Unavailable",
+        '{"error":{"message":"Unauthorized upstream provider response","http_code":401}}',
         '{"error":{"message":"502 Bad Gateway from upstream provider","http_code":"502"}}',
     ],
 )
