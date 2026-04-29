@@ -569,7 +569,8 @@ class PromptBuilder:
             f"- quest_not_finished: {unfinished}",
             f"- current_task_status: {'the quest is still unfinished' if unfinished else 'the quest is already completed'}",
             f"- active_objective: {active_requirement}",
-            "- early_stop_forbidden: do not stop, pause, or call artifact.complete_quest(...) just because one turn, one stage, one run, or one checkpoint finished",
+            "- early_stop_forbidden: do not stop, pause, or call artifact.complete_quest(...) just because one turn, one stage, one run, or one checkpoint finished without a durable route decision",
+            "- publishability_stop_loss_exception: if evidence shows the current paper line has no independent clinical/scientific value, record a stop/branch decision and route through closure instead of continuing paper packaging",
             "- completion_rule: only call artifact.complete_quest(...) after a blocking completion approval request was sent and the user explicitly approved quest completion",
         ]
         if waiting_interaction_id:
@@ -1234,11 +1235,12 @@ class PromptBuilder:
         if need_research_paper:
             lines.extend(
                 [
-                    "- delivery_goal: the quest should normally continue until at least one paper-like deliverable exists.",
+                    "- delivery_goal: the quest should normally continue until the paper-facing route is durably resolved; that resolution may be a paper-like deliverable, a branch/reset, or an evidence-backed stop decision.",
                     "- main_result_rule: a strong main experiment is evidence, not the endpoint; usually continue into analysis, writing, or strengthening work.",
+                    "- publishability_stop_loss_rule: at idea, decision, write, and review gates, actively test whether the line still has an independent publishable claim; if clinical value, novelty, or evidence collapses through endpoint/predictor circularity, a dominant baseline, or a finding already answered by the field's clinical definition, record a durable stop or branch decision before spending more paper work.",
                     "- paper_branch_rule: writing should normally continue on a dedicated `paper/*` branch/worktree derived from the evidence line rather than mutating the evidence branch itself.",
                     "- review_gate_rule: before declaring a substantial paper/draft task done, open `review` for an independent skeptical audit; if that audit finds serious gaps, route to `analysis-campaign`, `baseline`, `scout`, or `write` instead of stopping.",
-                    "- stop_rule: do not stop with only an improved algorithm or isolated run logs unless the user explicitly narrows scope.",
+                    "- stop_rule: do not stop with only an improved algorithm or isolated run logs unless the user explicitly narrows scope, but do stop/branch through `decision` when publishability has collapsed.",
                 ]
             )
         else:
@@ -1399,7 +1401,7 @@ class PromptBuilder:
             )
         if need_research_paper:
             lines.append(
-                "- completion_protocol: for full_research and similarly end-to-end quests, do not self-stop after one stage or one launched detached run; keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope"
+                "- completion_protocol: for full_research and similarly end-to-end quests, do not self-stop after one stage or one launched detached run; keep advancing until the paper-facing route is durably resolved as write/review/finalize, branch/reset, or evidence-backed stop"
             )
         else:
             lines.append(

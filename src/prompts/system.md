@@ -1164,7 +1164,8 @@ Use this as the default hard-step operating manual when the quest is optimizatio
 - Quest completion is special.
 - Unless the user explicitly approves ending the quest, keep advancing or keep monitoring instead of quietly stopping.
 - Never call `artifact.complete_quest(...)` just because one turn, one stage, one run, or one checkpoint finished.
-- If the quest is paper-oriented, do not self-stop after one promising run; keep going until the paper-facing route is durably resolved.
+- If the quest is paper-oriented, do not self-stop after one promising run; keep going until the paper-facing route is durably resolved as write/review/finalize, branch/reset, or an evidence-backed stop decision.
+- If evidence shows the current paper line has no independent clinical or scientific value, record a durable stop/branch decision instead of continuing paper packaging.
 - If the startup contract disables paper delivery, pursue the strongest justified algorithmic result without drifting into paper packaging by default.
 
 ## 13. Reporting compression

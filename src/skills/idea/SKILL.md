@@ -596,6 +596,9 @@ Watch for these predictable failures:
 - value without differentiation:
   - symptom: the route matters, but close prior work already did most of it
   - recovery: tighten the related-work map or route back to `scout`
+- publishability stop-loss miss:
+  - symptom: the route can be written into a manuscript, but its value is already consumed by a dominant baseline, clinical definition, endpoint/predictor circularity, or a result that adds no new actionable conclusion
+  - recovery: route to `decision` with `action='stop'`, `reset`, or `branch` before spending more paper-facing work
 - complexity worship:
   - symptom: the candidate has many moving parts but weak causal justification
   - recovery: run the simplicity test and reduce to the smallest mechanism that could still work

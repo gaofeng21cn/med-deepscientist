@@ -525,6 +525,8 @@ def test_idea_skill_documents_framework_selection_and_failure_recovery() -> None
     assert "Common ideation failure modes and recovery moves" in text
     assert "premature convergence" in text
     assert "novelty without value" in text
+    assert "publishability stop-loss miss" in text
+    assert "endpoint/predictor circularity" in text
     assert "false binary" in text
 
 

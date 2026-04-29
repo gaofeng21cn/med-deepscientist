@@ -633,7 +633,7 @@ def test_prompt_builder_includes_progress_interact_cadence_guidance(temp_home: P
     assert "do not open or rewrite large binary assets" in prompt
 
 
-def test_prompt_builder_mentions_long_horizon_no_early_stop_rule(temp_home: Path) -> None:
+def test_prompt_builder_mentions_long_horizon_stop_loss_boundary(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
 
     prompt = builder.build(
@@ -643,8 +643,9 @@ def test_prompt_builder_mentions_long_horizon_no_early_stop_rule(temp_home: Path
         model="gpt-5.4",
     )
 
-    assert "keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope" in prompt
-    assert "publishability-gate decision concludes that the current line should stop or branch" not in prompt
+    assert "paper-facing route is durably resolved" in prompt
+    assert "publishability_stop_loss_rule:" in prompt
+    assert "evidence-backed stop" in prompt
     assert "do not self-stop after one stage or one launched detached run" in prompt
     assert "any new message or `/resume` will continue from the same quest" in prompt
     assert "standby_prefix_rule:" in prompt
@@ -728,7 +729,8 @@ def test_prompt_builder_ignores_legacy_publishability_gate_mode(temp_home: Path,
     assert "publishability_gate_rule:" not in prompt
     assert "paper_branch_admission_rule:" not in prompt
     assert "publishability_gate_advisory_rule:" not in prompt
-    assert "keep advancing until a paper-like deliverable exists unless the user explicitly stops or narrows scope" in prompt
+    assert "paper-facing route is durably resolved" in prompt
+    assert "publishability_stop_loss_rule:" in prompt
 
 
 def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) -> None:
