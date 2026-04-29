@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -169,6 +170,14 @@ def _compact_command(command: object, *, max_length: int = 140) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max(0, max_length - 3)].rstrip() + "..."
+
+
+def _command_fingerprint(command: object, *, cwd: object = "") -> str:
+    payload = {
+        "command": " ".join(str(command or "").split()),
+        "cwd": str(cwd or "").strip(),
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
 def _prepend_pythonpath(env: dict[str, str], path: Path) -> None:
@@ -752,6 +761,7 @@ class BashExecService:
             "stopped_by_user_id": None,
             "comment": comment,
             "command": command,
+            "command_fingerprint": _command_fingerprint(command, cwd=cwd),
             "launch_argv": list(launch_argv or []),
             "shell_family": shell_family,
             "shell_name": shell_name,
@@ -904,6 +914,7 @@ class BashExecService:
             "stopped_by_user_id": None,
             "label": label,
             "command": command,
+            "command_fingerprint": _command_fingerprint(command, cwd=cwd),
             "launch_argv": list(launch_argv or []),
             "shell_family": shell_family,
             "shell_name": shell_name,
@@ -1252,7 +1263,7 @@ class BashExecService:
             "ok": True,
             "session_id": bash_id,
             "status": session.get("status"),
-            "cwd": session.get("cwd"),
+            "cwd": session.get("cwd") or str(quest_root),
             "latest_commands": latest_commands,
             "tail": tail,
             "latest_seq": meta.get("latest_seq"),
@@ -1279,8 +1290,10 @@ class BashExecService:
             "comment": session.get("comment"),
             "label": session.get("label"),
             "command": session.get("command"),
+            "command_fingerprint": session.get("command_fingerprint")
+            or _command_fingerprint(session.get("command"), cwd=session.get("cwd")),
             "workdir": session.get("workdir"),
-            "cwd": session.get("cwd"),
+            "cwd": session.get("cwd") or str(quest_root),
             "started_at": session.get("started_at"),
             "finished_at": session.get("finished_at"),
             "exit_code": session.get("exit_code"),

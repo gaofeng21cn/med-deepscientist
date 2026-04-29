@@ -13,7 +13,7 @@ from ..artifact import ArtifactService
 from ..artifact.metrics import MetricContractValidationError
 from ..benchstore import BenchStoreRegistryService
 from ..bash_exec import BashExecService
-from ..evidence_packets import compact_mcp_tool_result
+from ..evidence_packets import cached_compact_mcp_tool_result, compact_mcp_tool_result
 from ..home import repo_root
 from ..memory import MemoryService
 from ..quest import QuestService
@@ -994,12 +994,13 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             detail=detail,
         )
         normalized_detail = str(detail or "summary").strip().lower() or "summary"
-        return compact_mcp_tool_result(
+        return cached_compact_mcp_tool_result(
             result,
             quest_root=context.require_quest_root(),
             run_id=context.run_id,
             tool_name="artifact.get_quest_state",
             detail=normalized_detail,
+            cache_key={"detail": normalized_detail},
             force=normalized_detail == "full",
             reason="artifact_full_detail_context_budget",
             full_detail_requested=normalized_detail == "full",
@@ -1318,12 +1319,13 @@ def build_artifact_server(context: McpContext) -> FastMCP:
         annotations=_read_only_tool_annotations(title="List paper outlines"),
     )
     def list_paper_outlines(comment: str | dict[str, Any] | None = None) -> dict[str, Any]:
-        return compact_mcp_tool_result(
+        return cached_compact_mcp_tool_result(
             service.list_paper_outlines(context.require_quest_root()),
             quest_root=context.require_quest_root(),
             run_id=context.run_id,
             tool_name="artifact.list_paper_outlines",
             detail="inventory",
+            cache_key={"detail": "inventory"},
             reason="artifact_inventory_context_budget",
         )
 
@@ -1715,12 +1717,25 @@ def build_bash_exec_server(context: McpContext) -> FastMCP:
 
         def finalize(payload: dict[str, Any]) -> dict[str, Any]:
             if normalized_mode == "read":
-                payload = compact_mcp_tool_result(
+                bash_id = str(payload.get("bash_id") or payload.get("id") or id or "")
+                payload = cached_compact_mcp_tool_result(
                     payload,
                     quest_root=quest_root,
                     run_id=context.run_id,
                     tool_name="bash_exec.bash_exec",
                     detail="read",
+                    cache_key={
+                        "mode": "read",
+                        "bash_id": bash_id,
+                        "start": start,
+                        "tail": tail,
+                        "tail_limit": tail_limit,
+                        "before_seq": before_seq,
+                        "after_seq": after_seq,
+                        "order": order,
+                        "include_log": include_log,
+                    },
+                    source_path=service.terminal_log_path(quest_root, bash_id) if bash_id else None,
                     reason="bash_exec_read_context_budget",
                 )
             quest_service.record_tool_activity(

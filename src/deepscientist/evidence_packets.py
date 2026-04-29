@@ -14,6 +14,7 @@ _MAX_SUMMARY_CHARS = 900
 _MAX_BLOCKERS = 12
 _MAX_ITEMS = 12
 _SURFACE_CACHE_SCHEMA_VERSION = 1
+_READ_CACHE_SCHEMA_VERSION = 1
 _HOT_TOOL_RESULT_THRESHOLDS_BYTES = {
     "artifact.get_quest_state": 4_000,
     "artifact.get_global_status": 4_000,
@@ -80,6 +81,41 @@ def _safe_json_object(value: str) -> dict[str, Any]:
 def _slug(value: str) -> str:
     normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(value or "").strip())
     return normalized.strip("-")[:80] or "payload"
+
+
+def _strip_read_cache_volatile(value: Any) -> Any:
+    volatile_keys = {
+        "created_at",
+        "updated_at",
+        "generated_at",
+        "completed_at",
+        "read_cache",
+        "run_age_seconds",
+        "status_age_seconds",
+        "silent_seconds",
+        "progress_age_seconds",
+        "signal_age_seconds",
+    }
+    if isinstance(value, dict):
+        return {
+            key: _strip_read_cache_volatile(item)
+            for key, item in value.items()
+            if str(key) not in volatile_keys and not str(key).endswith("_age_seconds")
+        }
+    if isinstance(value, list):
+        return [_strip_read_cache_volatile(item) for item in value]
+    return value
+
+
+def _read_cache_path(
+    *,
+    quest_root: Path,
+    tool_name: str,
+    detail: str | None,
+    cache_key: Any,
+) -> Path:
+    key_hash = payload_sha256({"tool_name": tool_name, "detail": detail, "cache_key": cache_key})[:20]
+    return quest_root / ".ds" / "read_cache" / f"{_slug(tool_name)}-{key_hash}.json"
 
 
 def _sidecar_path(
@@ -410,6 +446,99 @@ def compact_mcp_tool_result(
         full_detail_requested=requested_full_detail,
     )
     return compacted if isinstance(compacted, dict) else payload
+
+
+def cached_compact_mcp_tool_result(
+    payload: dict[str, Any],
+    *,
+    quest_root: Path,
+    run_id: str | None,
+    tool_name: str,
+    detail: str | None = None,
+    cache_key: Any = None,
+    source_path: Path | None = None,
+    force: bool = False,
+    threshold_bytes: int | None = None,
+    reason: str | None = None,
+    full_detail_requested: bool | None = None,
+) -> dict[str, Any]:
+    normalized_detail = str(detail or "").strip().lower() or None
+    resolved_source = source_path.expanduser().resolve() if source_path is not None else None
+    source_stat = resolved_source.stat() if resolved_source is not None and resolved_source.exists() else None
+    stable_payload = _strip_read_cache_volatile(payload)
+    payload_fingerprint = payload_sha256(stable_payload)
+    original_bytes = len(payload_json_bytes(payload))
+    resolved_cache_key = cache_key if cache_key is not None else {"detail": normalized_detail}
+    cache_path = _read_cache_path(
+        quest_root=quest_root,
+        tool_name=tool_name,
+        detail=normalized_detail,
+        cache_key=resolved_cache_key,
+    )
+    cached = read_json(cache_path, {})
+    cache_hit = (
+        isinstance(cached, dict)
+        and int(cached.get("schema_version") or 0) == _READ_CACHE_SCHEMA_VERSION
+        and cached.get("payload_fingerprint") == payload_fingerprint
+    )
+    read_cache = {
+        "schema_version": _READ_CACHE_SCHEMA_VERSION,
+        "cache_hit": cache_hit,
+        "cache_path": str(cache_path),
+        "payload_fingerprint": payload_fingerprint,
+        "payload_bytes": original_bytes,
+        "source_path": str(resolved_source) if resolved_source is not None else None,
+        "source_mtime_ns": getattr(source_stat, "st_mtime_ns", None) if source_stat is not None else None,
+        "source_size": getattr(source_stat, "st_size", None) if source_stat is not None else None,
+    }
+    if cache_hit:
+        saved_bytes = max(0, original_bytes)
+        read_cache["saved_bytes"] = saved_bytes
+        return {
+            "ok": bool(payload.get("ok")) if isinstance(payload.get("ok"), bool) else True,
+            "delta_marker": True,
+            "delta_kind": "unchanged_read_cache",
+            "tool_name": tool_name,
+            "detail": normalized_detail,
+            "fingerprint": payload_fingerprint,
+            "summary": cached.get("summary") or summarize_payload(payload, tool_name=tool_name),
+            "read_cache": read_cache,
+            "command_fingerprint": payload.get("command_fingerprint"),
+            "cwd": payload.get("cwd"),
+        }
+
+    compacted = compact_mcp_tool_result(
+        payload,
+        quest_root=quest_root,
+        run_id=run_id,
+        tool_name=tool_name,
+        detail=normalized_detail,
+        force=force,
+        threshold_bytes=threshold_bytes,
+        reason=reason,
+        full_detail_requested=full_detail_requested,
+    )
+    read_cache["saved_bytes"] = 0
+    compacted["read_cache"] = read_cache
+    ensure_dir(cache_path.parent)
+    write_json(
+        cache_path,
+        {
+            "schema_version": _READ_CACHE_SCHEMA_VERSION,
+            "created_at": utc_now(),
+            "updated_at": utc_now(),
+            "tool_name": tool_name,
+            "detail": normalized_detail,
+            "cache_key": resolved_cache_key,
+            "payload_fingerprint": payload_fingerprint,
+            "payload_bytes": original_bytes,
+            "summary": summarize_payload(payload, tool_name=tool_name),
+            "source_path": str(resolved_source) if resolved_source is not None else None,
+            "source_mtime_ns": getattr(source_stat, "st_mtime_ns", None) if source_stat is not None else None,
+            "source_size": getattr(source_stat, "st_size", None) if source_stat is not None else None,
+        },
+    )
+    return compacted
 
 
 def compact_inventory(items: list[dict[str, Any]], *, keep_keys: tuple[str, ...]) -> list[dict[str, Any]]:

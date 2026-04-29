@@ -10,6 +10,8 @@ from deepscientist.runners.codex import (
     _compact_tool_event_payload,
     _delta_aware_stdout_record,
     _delta_aware_tool_result_event,
+    _new_tool_budget_telemetry,
+    _record_tool_budget_event,
     _tool_event,
 )
 from deepscientist.shared import read_json
@@ -270,6 +272,65 @@ def test_codex_runner_delta_key_normalizes_bash_exec_read_windows(temp_home: Pat
     assert "output" not in second
     assert second["delta_kind"] == "unchanged_tool_result"
     assert second["repeat_count"] == 2
+
+
+def test_codex_runner_tool_budget_telemetry_counts_unique_commands_and_repeated_reads() -> None:
+    telemetry = _new_tool_budget_telemetry(tool_call_budget=3)
+
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "bash_exec.bash_exec",
+            "args": json.dumps({"mode": "read", "id": "bash-001", "tail_limit": 100}),
+            "metadata": {"command_fingerprint": "cmd-1"},
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_result",
+            "tool_name": "bash_exec.bash_exec",
+            "delta_marker": True,
+            "delta_kind": "unchanged_tool_result",
+            "metadata": {"command_fingerprint": "cmd-1"},
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "artifact.get_quest_state",
+            "args": json.dumps({"detail": "full"}),
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "bash_exec.bash_exec",
+            "args": json.dumps({"mode": "read", "id": "bash-001", "tail_limit": 200}),
+            "metadata": {"command_fingerprint": "cmd-1"},
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "artifact.list_paper_outlines",
+            "args": "{}",
+        },
+    )
+
+    assert telemetry["tool_call_budget"] == 3
+    assert telemetry["tool_call_count"] == 4
+    assert telemetry["tool_call_budget_remaining"] == 0
+    assert telemetry["tool_call_budget_exceeded"] is True
+    assert telemetry["unique_command_count"] == 1
+    assert telemetry["read_tool_call_count"] == 4
+    assert telemetry["repeated_read_result_count"] == 1
+    assert telemetry["repeated_read_ratio"] == 1 / 4
+    assert telemetry["full_detail_count"] == 1
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:

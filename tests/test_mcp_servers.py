@@ -797,6 +797,125 @@ def test_artifact_mcp_server_materializes_compact_evidence_packet(temp_home: Pat
     asyncio.run(scenario())
 
 
+def test_artifact_mcp_server_repeated_outline_read_returns_delta_marker(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp repeated outline read quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-read-cache",
+            active_anchor="write",
+            conversation_id="quest:test",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        first = _unwrap_tool_result(await server.call_tool("list_paper_outlines", {}))
+        second = _unwrap_tool_result(await server.call_tool("list_paper_outlines", {}))
+
+        assert first["ok"] is True
+        assert first.get("delta_marker") is not True
+        assert first["read_cache"]["cache_hit"] is False
+        assert second["ok"] is True
+        assert second["delta_marker"] is True
+        assert second["delta_kind"] == "unchanged_read_cache"
+        assert second["read_cache"]["cache_hit"] is True
+        assert second["read_cache"]["saved_bytes"] > 0
+
+    asyncio.run(scenario())
+
+
+def test_artifact_mcp_server_repeated_full_quest_state_uses_read_cache_delta(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp repeated full quest state read"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-full-state-cache",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        first = _unwrap_tool_result(await server.call_tool("get_quest_state", {"detail": "full"}))
+        second = _unwrap_tool_result(await server.call_tool("get_quest_state", {"detail": "full"}))
+
+        assert first["ok"] is True
+        assert first["compacted"] is True
+        assert first["evidence_packet"]["full_detail_requested"] is True
+        assert first["read_cache"]["cache_hit"] is False
+        assert second["ok"] is True
+        assert second["delta_marker"] is True
+        assert second["delta_kind"] == "unchanged_read_cache"
+        assert second["read_cache"]["cache_hit"] is True
+
+    asyncio.run(scenario())
+
+
+def test_bash_exec_read_result_records_fingerprint_and_cache_hit(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp repeated bash read quest"
+        )
+        quest_root = Path(quest["quest_root"])
+        _write_fake_bash_session(
+            temp_home,
+            quest_root,
+            "bash-001",
+            log_lines=["alpha", "beta"],
+            status="completed",
+        )
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-bash-read-cache",
+            active_anchor="baseline",
+            conversation_id="quest:test",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_bash_exec_server(context)
+
+        first = _unwrap_tool_result(await server.call_tool("bash_exec", {"mode": "read", "id": "bash-001"}))
+        second = _unwrap_tool_result(await server.call_tool("bash_exec", {"mode": "read", "id": "bash-001"}))
+
+        assert first["bash_id"] == "bash-001"
+        assert first["command_fingerprint"]
+        assert first["cwd"]
+        assert first["read_cache"]["cache_hit"] is False
+        assert first["read_cache"]["source_mtime_ns"] > 0
+        assert second["ok"] is True
+        assert second["delta_marker"] is True
+        assert second["read_cache"]["cache_hit"] is True
+        assert second["command_fingerprint"] == first["command_fingerprint"]
+
+    asyncio.run(scenario())
+
+
 def test_artifact_mcp_server_sidecars_full_quest_state(temp_home: Path) -> None:
     async def scenario() -> None:
         ensure_home_layout(temp_home)
