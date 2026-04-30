@@ -324,6 +324,7 @@ def test_codex_runner_tool_budget_telemetry_counts_unique_commands_and_repeated_
 
     assert telemetry["tool_call_budget"] == 3
     assert telemetry["tool_call_count"] == 4
+    assert telemetry["tool_count"] == 4
     assert telemetry["tool_call_budget_remaining"] == 0
     assert telemetry["tool_call_budget_exceeded"] is True
     assert telemetry["unique_command_count"] == 1
@@ -331,6 +332,40 @@ def test_codex_runner_tool_budget_telemetry_counts_unique_commands_and_repeated_
     assert telemetry["repeated_read_result_count"] == 1
     assert telemetry["repeated_read_ratio"] == 1 / 4
     assert telemetry["full_detail_count"] == 1
+    assert telemetry["saved_bytes"] == 0
+
+
+def test_codex_runner_tool_budget_telemetry_counts_embedded_read_cache_delta() -> None:
+    telemetry = _new_tool_budget_telemetry(tool_call_budget=4)
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "artifact.get_global_status",
+            "args": json.dumps({"detail": "full"}),
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_result",
+            "tool_name": "artifact.get_global_status",
+            "output": json.dumps(
+                {
+                    "structured_content": {
+                        "ok": True,
+                        "delta_marker": True,
+                        "delta_kind": "unchanged_read_cache",
+                        "read_cache": {"saved_bytes": 1234},
+                    }
+                }
+            ),
+        },
+    )
+
+    assert telemetry["repeated_read_result_count"] == 1
+    assert telemetry["repeated_read_ratio"] == 1.0
+    assert telemetry["saved_bytes"] == 1234
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:

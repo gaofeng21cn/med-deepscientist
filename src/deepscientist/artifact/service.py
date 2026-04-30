@@ -76,6 +76,7 @@ from .service_parts.notifications import (
     notification_block,
     notification_text,
 )
+from .service_parts.paper_artifact_delta import build_paper_artifact_delta_marker
 
 QUEST_COMPLETION_DECISION_TYPE = "quest_completion_approval"
 EXTERNAL_INPUT_DECISION_TYPE = "external_input_required"
@@ -10460,6 +10461,17 @@ class ArtifactService:
                 checkpoint=False,
                 workspace_root=workspace_root,
             )
+            artifact_delta = build_paper_artifact_delta_marker(
+                quest_root=quest_root,
+                workspace_root=workspace_root,
+                artifact_kind="paper_outline_candidate",
+                written_paths=[candidate_path, canonical_candidate_path],
+                payload={
+                    "outline_id": resolved_outline_id,
+                    "record": record,
+                    "artifact_id": artifact.get("artifact_id"),
+                },
+            )
             return {
                 "ok": True,
                 "mode": normalized_mode,
@@ -10467,6 +10479,7 @@ class ArtifactService:
                 "outline_path": str(candidate_path),
                 "record": record,
                 "artifact": artifact,
+                "artifact_delta": artifact_delta,
             }
 
         source_outline_id = str(outline_id or existing_selected.get("outline_id") or "").strip()
@@ -10605,6 +10618,27 @@ class ArtifactService:
                 }
             ],
         )
+        artifact_delta = build_paper_artifact_delta_marker(
+            quest_root=quest_root,
+            workspace_root=workspace_root,
+            artifact_kind="paper_outline_selected" if normalized_mode == "select" else "paper_outline_revised",
+            written_paths=[
+                selected_outline_path,
+                self._paper_outline_manifest_path(quest_root, workspace_root=workspace_root),
+                self._paper_line_state_path(quest_root, workspace_root=workspace_root),
+                outline_selection_path,
+                *([revised_outline_path] if revised_outline_path else []),
+                source_candidate_path,
+            ],
+            payload={
+                "outline_id": source_outline_id,
+                "mode": normalized_mode,
+                "record": resolved_record,
+                "paper_line_state": paper_line_state,
+                "artifact_id": artifact.get("artifact_id"),
+                "interaction_id": interaction.get("artifact_id") or interaction.get("interaction_id"),
+            },
+        )
         return {
             "ok": True,
             "mode": normalized_mode,
@@ -10618,6 +10652,7 @@ class ArtifactService:
             "paper_line_state": paper_line_state,
             "artifact": artifact,
             "interaction": interaction,
+            "artifact_delta": artifact_delta,
         }
 
     def submit_paper_bundle(
@@ -10956,6 +10991,45 @@ class ArtifactService:
                 }
             ],
         )
+        bundle_written_paths = [
+            manifest_path,
+            baseline_inventory_path,
+            evidence_ledger_path,
+            self._paper_line_state_path(quest_root, workspace_root=workspace_root),
+        ]
+        for optional_path in (
+            manifest.get("draft_path"),
+            manifest.get("writing_plan_path"),
+            manifest.get("references_path"),
+            manifest.get("claim_evidence_map_path"),
+            manifest.get("compile_report_path"),
+            manifest.get("pdf_path"),
+        ):
+            optional_text = str(optional_path or "").strip()
+            if not optional_text:
+                continue
+            optional_candidate = Path(optional_text)
+            candidates = (
+                [optional_candidate]
+                if optional_candidate.is_absolute()
+                else [workspace_root / optional_text, quest_root / optional_text]
+            )
+            for candidate in candidates:
+                if candidate.exists():
+                    bundle_written_paths.append(candidate)
+                    break
+        artifact_delta = build_paper_artifact_delta_marker(
+            quest_root=quest_root,
+            workspace_root=workspace_root,
+            artifact_kind="paper_bundle",
+            written_paths=bundle_written_paths,
+            payload={
+                "manifest": manifest,
+                "paper_line_state": paper_line_state,
+                "artifact_id": artifact.get("artifact_id"),
+                "interaction_id": interaction.get("artifact_id") or interaction.get("interaction_id"),
+            },
+        )
         return {
             "ok": True,
             "manifest_path": str(manifest_path),
@@ -10971,6 +11045,7 @@ class ArtifactService:
             ),
             "artifact": artifact,
             "interaction": interaction,
+            "artifact_delta": artifact_delta,
         }
 
     def record_analysis_slice(

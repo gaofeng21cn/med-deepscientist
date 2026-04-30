@@ -1025,12 +1025,13 @@ def build_artifact_server(context: McpContext) -> FastMCP:
             locale=locale,
         )
         normalized_detail = str(detail or "brief").strip().lower() or "brief"
-        return compact_mcp_tool_result(
+        return cached_compact_mcp_tool_result(
             result,
             quest_root=context.require_quest_root(),
             run_id=context.run_id,
             tool_name="artifact.get_global_status",
             detail=normalized_detail,
+            cache_key={"detail": normalized_detail, "locale": str(locale or "zh").strip().lower() or "zh"},
             force=normalized_detail == "full",
             reason="artifact_full_detail_context_budget",
             full_detail_requested=normalized_detail == "full",

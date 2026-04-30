@@ -492,10 +492,35 @@ def cached_compact_mcp_tool_result(
         "source_size": getattr(source_stat, "st_size", None) if source_stat is not None else None,
     }
     if cache_hit:
+        cached_evidence_packet = (
+            dict(cached.get("evidence_packet") or {})
+            if isinstance(cached.get("evidence_packet"), dict)
+            else None
+        )
+        if cached_evidence_packet is None:
+            sidecar_payload, _sidecar_meta = compact_evidence_payload(
+                payload,
+                quest_root=quest_root,
+                run_id=run_id,
+                tool_name=tool_name,
+                detail=normalized_detail,
+                force=True,
+                threshold_bytes=1,
+                reason="read_cache_sidecar_ref",
+                full_detail_requested=full_detail_requested,
+            )
+            if isinstance(sidecar_payload, dict) and isinstance(sidecar_payload.get("evidence_packet"), dict):
+                cached_evidence_packet = dict(sidecar_payload["evidence_packet"])
+                cached["evidence_packet"] = cached_evidence_packet
+                write_json(cache_path, cached)
         saved_bytes = max(0, original_bytes)
         read_cache["saved_bytes"] = saved_bytes
-        return {
+        if cached_evidence_packet:
+            read_cache["sidecar_path"] = cached_evidence_packet.get("sidecar_path")
+            read_cache["payload_sha256"] = cached_evidence_packet.get("payload_sha256")
+        result = {
             "ok": bool(payload.get("ok")) if isinstance(payload.get("ok"), bool) else True,
+            "compacted": True,
             "delta_marker": True,
             "delta_kind": "unchanged_read_cache",
             "tool_name": tool_name,
@@ -506,6 +531,9 @@ def cached_compact_mcp_tool_result(
             "command_fingerprint": payload.get("command_fingerprint"),
             "cwd": payload.get("cwd"),
         }
+        if cached_evidence_packet:
+            result["evidence_packet"] = cached_evidence_packet
+        return result
 
     compacted = compact_mcp_tool_result(
         payload,
@@ -518,8 +546,32 @@ def cached_compact_mcp_tool_result(
         reason=reason,
         full_detail_requested=full_detail_requested,
     )
+    evidence_packet = (
+        dict(compacted.get("evidence_packet") or {})
+        if isinstance(compacted, dict) and isinstance(compacted.get("evidence_packet"), dict)
+        else None
+    )
+    if evidence_packet is None:
+        sidecar_payload, _sidecar_meta = compact_evidence_payload(
+            payload,
+            quest_root=quest_root,
+            run_id=run_id,
+            tool_name=tool_name,
+            detail=normalized_detail,
+            force=True,
+            threshold_bytes=1,
+            reason="read_cache_sidecar_ref",
+            full_detail_requested=full_detail_requested,
+        )
+        if isinstance(sidecar_payload, dict) and isinstance(sidecar_payload.get("evidence_packet"), dict):
+            evidence_packet = dict(sidecar_payload["evidence_packet"])
     read_cache["saved_bytes"] = 0
+    if evidence_packet:
+        read_cache["sidecar_path"] = evidence_packet.get("sidecar_path")
+        read_cache["payload_sha256"] = evidence_packet.get("payload_sha256")
     compacted["read_cache"] = read_cache
+    if evidence_packet and "evidence_packet" not in compacted:
+        compacted["evidence_packet"] = evidence_packet
     ensure_dir(cache_path.parent)
     write_json(
         cache_path,
@@ -536,6 +588,7 @@ def cached_compact_mcp_tool_result(
             "source_path": str(resolved_source) if resolved_source is not None else None,
             "source_mtime_ns": getattr(source_stat, "st_mtime_ns", None) if source_stat is not None else None,
             "source_size": getattr(source_stat, "st_size", None) if source_stat is not None else None,
+            "evidence_packet": evidence_packet,
         },
     )
     return compacted

@@ -25,12 +25,17 @@ from ..shared import append_jsonl, ensure_dir, generate_id, read_yaml, resolve_r
 from ..web_search import extract_web_search_payload
 from .base import RunRequest, RunResult
 from .codex_delta_history import _delta_aware_stdout_record, _delta_aware_tool_result_event
+from .codex_telemetry import (
+    DEFAULT_TURN_TOOL_CALL_BUDGET,
+    _finalize_tool_budget_telemetry,
+    _new_tool_budget_telemetry,
+    _record_tool_budget_event,
+)
 
 _TOOL_EVENT_ARGS_TEXT_LIMIT = 8_000
 _TOOL_EVENT_OUTPUT_TEXT_LIMIT = 16_000
 _MAX_QUEST_EVENT_JSON_BYTES = 2_000_000
 _OVERSIZED_EVENT_PREVIEW_TEXT_LIMIT = 12_000
-DEFAULT_TURN_TOOL_CALL_BUDGET = 24
 _BUILTIN_MCP_TOOL_APPROVALS: dict[str, tuple[str, ...]] = {
     "memory": (
         "write",
@@ -115,85 +120,6 @@ def _usage_metrics_from_event(event: dict[str, Any]) -> dict[str, int]:
                     merged[target] = int(value)
                     break
     return merged
-
-
-def _parse_tool_args(raw_args: object) -> dict[str, Any]:
-    if isinstance(raw_args, dict):
-        return dict(raw_args)
-    if not isinstance(raw_args, str) or not raw_args.strip():
-        return {}
-    try:
-        parsed = json.loads(raw_args)
-    except json.JSONDecodeError:
-        return {}
-    return dict(parsed) if isinstance(parsed, dict) else {}
-
-
-def _is_read_tool_event(event: dict[str, Any]) -> bool:
-    tool_name = str(event.get("tool_name") or "").strip()
-    args = _parse_tool_args(event.get("args"))
-    mode = str(args.get("mode") or "").strip().lower()
-    return tool_name in {
-        "artifact.get_quest_state",
-        "artifact.list_paper_outlines",
-        "artifact.get_global_status",
-        "artifact.get_paper_contract_health",
-        "artifact.validate_manuscript_coverage",
-        "artifact.read_quest_documents",
-    } or (tool_name == "bash_exec.bash_exec" and mode == "read")
-
-
-def _new_tool_budget_telemetry(*, tool_call_budget: int = DEFAULT_TURN_TOOL_CALL_BUDGET) -> dict[str, Any]:
-    return {
-        "tool_call_budget": max(1, int(tool_call_budget)),
-        "tool_call_count": 0,
-        "tool_call_budget_remaining": max(1, int(tool_call_budget)),
-        "tool_call_budget_exceeded": False,
-        "unique_command_count": 0,
-        "read_tool_call_count": 0,
-        "repeated_read_result_count": 0,
-        "repeated_read_ratio": 0.0,
-        "full_detail_count": 0,
-        "_unique_command_fingerprints": set(),
-    }
-
-
-def _record_tool_budget_event(telemetry: dict[str, Any], event: dict[str, Any]) -> None:
-    event_type = str(event.get("type") or "")
-    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
-    command_fingerprint = str(event.get("command_fingerprint") or metadata.get("command_fingerprint") or "").strip()
-    fingerprints = telemetry.setdefault("_unique_command_fingerprints", set())
-    if command_fingerprint:
-        fingerprints.add(command_fingerprint)
-        telemetry["unique_command_count"] = len(fingerprints)
-    if event_type == "runner.tool_call":
-        telemetry["tool_call_count"] = int(telemetry.get("tool_call_count") or 0) + 1
-        budget = max(1, int(telemetry.get("tool_call_budget") or DEFAULT_TURN_TOOL_CALL_BUDGET))
-        remaining = max(0, budget - int(telemetry["tool_call_count"]))
-        telemetry["tool_call_budget_remaining"] = remaining
-        telemetry["tool_call_budget_exceeded"] = int(telemetry["tool_call_count"]) > budget
-        if _is_read_tool_event(event):
-            telemetry["read_tool_call_count"] = int(telemetry.get("read_tool_call_count") or 0) + 1
-        args_text = str(event.get("args") or "")
-        if "detail" in args_text and "full" in args_text.lower():
-            telemetry["full_detail_count"] = int(telemetry.get("full_detail_count") or 0) + 1
-        read_count = int(telemetry.get("read_tool_call_count") or 0)
-        repeated_count = int(telemetry.get("repeated_read_result_count") or 0)
-        telemetry["repeated_read_ratio"] = (repeated_count / read_count) if read_count else 0.0
-        return
-    if event_type == "runner.tool_result" and bool(event.get("delta_marker")):
-        if str(event.get("delta_kind") or "") in {"unchanged_tool_result", "unchanged_read_cache"}:
-            telemetry["repeated_read_result_count"] = int(telemetry.get("repeated_read_result_count") or 0) + 1
-    read_count = int(telemetry.get("read_tool_call_count") or 0)
-    repeated_count = int(telemetry.get("repeated_read_result_count") or 0)
-    telemetry["repeated_read_ratio"] = (repeated_count / read_count) if read_count else 0.0
-
-
-def _finalize_tool_budget_telemetry(telemetry: dict[str, Any]) -> None:
-    telemetry.pop("_unique_command_fingerprints", None)
-    read_count = int(telemetry.get("read_tool_call_count") or 0)
-    repeated_count = int(telemetry.get("repeated_read_result_count") or 0)
-    telemetry["repeated_read_ratio"] = (repeated_count / read_count) if read_count else 0.0
 
 
 def _compact_text(value: object, *, limit: int = 1200) -> str:
@@ -1041,6 +967,7 @@ class CodexRunner:
                             telemetry["tool_result_bytes_saved_total"] = int(
                                 telemetry.get("tool_result_bytes_saved_total") or 0
                             ) + int(compaction_meta.get("saved_output_bytes") or 0)
+                            telemetry["saved_bytes"] = int(telemetry.get("saved_bytes") or 0) + int(compaction_meta.get("saved_output_bytes") or 0)
                         else:
                             telemetry["tool_result_bytes_after_compaction_total"] = int(
                                 telemetry.get("tool_result_bytes_after_compaction_total") or 0
@@ -1121,6 +1048,7 @@ class CodexRunner:
                     "mcp_tool_call_count": telemetry.get("mcp_tool_call_count"),
                     "tool_call_budget": telemetry.get("tool_call_budget"),
                     "tool_call_count": telemetry.get("tool_call_count"),
+                    "tool_count": telemetry.get("tool_count"),
                     "tool_call_budget_remaining": telemetry.get("tool_call_budget_remaining"),
                     "tool_call_budget_exceeded": telemetry.get("tool_call_budget_exceeded"),
                     "unique_command_count": telemetry.get("unique_command_count"),
@@ -1133,6 +1061,7 @@ class CodexRunner:
                         "tool_result_bytes_after_compaction_total"
                     ),
                     "tool_result_bytes_saved_total": telemetry.get("tool_result_bytes_saved_total"),
+                    "saved_bytes": telemetry.get("saved_bytes"),
                     "full_detail_tool_call_count": telemetry.get("full_detail_tool_call_count"),
                     "full_detail_count": telemetry.get("full_detail_count"),
                     "token_usage": telemetry.get("token_usage"),

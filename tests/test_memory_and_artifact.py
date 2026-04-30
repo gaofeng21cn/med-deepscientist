@@ -2469,6 +2469,11 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     assert Path(result["baseline_inventory_path"]).exists()
     assert Path(result["evidence_ledger_path"]).exists()
     assert Path(result["paper_line_state_path"]).exists()
+    bundle_delta = result["artifact_delta"]
+    assert bundle_delta["marker"] == "artifact-delta"
+    assert bundle_delta["source_signature_marker"] == "source-signature"
+    assert Path(bundle_delta["sidecar_path"]).exists()
+    assert any(item["path"].endswith("paper_bundle_manifest.json") for item in bundle_delta["written_paths"])
     assert result["open_source_manifest_path"] is None
     baseline_inventory = read_json(Path(result["baseline_inventory_path"]), {})
     assert baseline_inventory["schema_version"] == 1
@@ -2578,6 +2583,14 @@ def test_submit_paper_outline_select_preserves_candidate_sections_and_required_i
         ["main_transportability_run", "ranking_robustness"],
         ["collapse_attribution"],
     ]
+    candidate_delta = candidate["artifact_delta"]
+    assert candidate_delta["marker"] == "artifact-delta"
+    assert candidate_delta["source_signature_marker"] == "source-signature"
+    assert candidate_delta["source_signature"]
+    assert Path(candidate_delta["sidecar_path"]).exists()
+    candidate_sidecar = read_json(Path(candidate_delta["sidecar_path"]), {})
+    assert candidate_sidecar["source_signature"] == candidate_delta["source_signature"]
+    assert any(item["path"].endswith(f"{candidate['outline_id']}.json") for item in candidate_delta["written_paths"])
 
     selected = artifact.submit_paper_outline(
         quest_root,
@@ -2591,6 +2604,11 @@ def test_submit_paper_outline_select_preserves_candidate_sections_and_required_i
         ["main_transportability_run", "ranking_robustness"],
         ["collapse_attribution"],
     ]
+    selected_delta = selected["artifact_delta"]
+    assert selected_delta["marker"] == "artifact-delta"
+    assert selected_delta["source_signature_marker"] == "source-signature"
+    assert Path(selected_delta["sidecar_path"]).exists()
+    assert any(item["path"].endswith("selected_outline.json") for item in selected_delta["written_paths"])
 
 
 def test_submit_paper_bundle_syncs_authoritative_contract_surface_into_thin_paper_workspace(temp_home: Path) -> None:

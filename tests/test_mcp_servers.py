@@ -867,6 +867,46 @@ def test_artifact_mcp_server_repeated_full_quest_state_uses_read_cache_delta(tem
         assert second["delta_marker"] is True
         assert second["delta_kind"] == "unchanged_read_cache"
         assert second["read_cache"]["cache_hit"] is True
+        assert Path(second["evidence_packet"]["sidecar_path"]).exists()
+
+    asyncio.run(scenario())
+
+
+def test_artifact_mcp_server_repeated_global_status_uses_read_cache_sidecar_ref(temp_home: Path) -> None:
+    async def scenario() -> None:
+        ensure_home_layout(temp_home)
+        ConfigManager(temp_home).ensure_files()
+        quest = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home)).create(
+            "mcp repeated global status read"
+        )
+        quest_root = Path(quest["quest_root"])
+        context = McpContext(
+            home=temp_home,
+            quest_id=quest["quest_id"],
+            quest_root=quest_root,
+            run_id="run-global-status-cache",
+            active_anchor="decision",
+            conversation_id="quest:test",
+            agent_role="pi",
+            worker_id="worker-main",
+            worktree_root=None,
+            team_mode="single",
+        )
+        server = build_artifact_server(context)
+
+        first = _unwrap_tool_result(await server.call_tool("get_global_status", {"detail": "full"}))
+        second = _unwrap_tool_result(await server.call_tool("get_global_status", {"detail": "full"}))
+
+        assert first["ok"] is True
+        assert first["compacted"] is True
+        assert first["read_cache"]["cache_hit"] is False
+        assert Path(first["evidence_packet"]["sidecar_path"]).exists()
+        assert second["ok"] is True
+        assert second["delta_marker"] is True
+        assert second["delta_kind"] == "unchanged_read_cache"
+        assert second["read_cache"]["cache_hit"] is True
+        assert Path(second["evidence_packet"]["sidecar_path"]).exists()
+        assert second["evidence_packet"]["sidecar_path"] == first["evidence_packet"]["sidecar_path"]
 
     asyncio.run(scenario())
 
@@ -912,6 +952,7 @@ def test_bash_exec_read_result_records_fingerprint_and_cache_hit(temp_home: Path
         assert second["delta_marker"] is True
         assert second["read_cache"]["cache_hit"] is True
         assert second["command_fingerprint"] == first["command_fingerprint"]
+        assert Path(second["evidence_packet"]["sidecar_path"]).exists()
 
     asyncio.run(scenario())
 
