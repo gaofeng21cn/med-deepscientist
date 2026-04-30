@@ -16,6 +16,7 @@ This workflow exists to filter occasional upstream changes. It is not the primar
 - [`docs/upstream_intake_round_2026_04_20.md`](./upstream_intake_round_2026_04_20.md): UI build alignment, quest lazy-load intake, zombie-turn reconciliation, and branch cleanup on `main`
 - [`docs/upstream_intake_round_2026_04_20_followup.md`](./upstream_intake_round_2026_04_20_followup.md): follow-up classification confirming the remaining valuable slices as frontend circular-safe serialization and TUI quest-browser key handling
 - [`docs/upstream_intake_round_2026_04_28.md`](./upstream_intake_round_2026_04_28.md): latest-update learning round for path-aware file search, durable start-setup planning patches, manuscript coverage validation, duplicate evidence ledger selection, and bounded await discipline
+- [`docs/upstream_intake_round_2026_04_30.md`](./upstream_intake_round_2026_04_30.md): latest-update learning round for academic outline gates, paper-outline workflow, paper-quality review prompts, runner evidence packets, log hygiene, and provider/UI deferrals
 
 ## Remote Convention
 
