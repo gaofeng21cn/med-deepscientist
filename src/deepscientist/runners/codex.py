@@ -1055,6 +1055,15 @@ class CodexRunner:
                     "read_tool_call_count": telemetry.get("read_tool_call_count"),
                     "repeated_read_result_count": telemetry.get("repeated_read_result_count"),
                     "repeated_read_ratio": telemetry.get("repeated_read_ratio"),
+                    "read_churn_ratio": telemetry.get("read_churn_ratio"),
+                    "same_result_reinjection_count": telemetry.get("same_result_reinjection_count"),
+                    "meaningful_artifact_delta_at": telemetry.get("meaningful_artifact_delta_at"),
+                    "meaningful_artifact_delta_kind": telemetry.get("meaningful_artifact_delta_kind"),
+                    "meaningful_artifact_delta_source_signature": telemetry.get(
+                        "meaningful_artifact_delta_source_signature"
+                    ),
+                    "turn_progress_kind": telemetry.get("turn_progress_kind"),
+                    "stage_intent": telemetry.get("stage_intent"),
                     "tool_result_bytes_total": telemetry.get("tool_result_bytes_total"),
                     "compacted_tool_result_count": telemetry.get("compacted_tool_result_count"),
                     "tool_result_bytes_after_compaction_total": telemetry.get(

@@ -365,7 +365,49 @@ def test_codex_runner_tool_budget_telemetry_counts_embedded_read_cache_delta() -
 
     assert telemetry["repeated_read_result_count"] == 1
     assert telemetry["repeated_read_ratio"] == 1.0
+    assert telemetry["read_churn_ratio"] == 1.0
+    assert telemetry["same_result_reinjection_count"] == 1
     assert telemetry["saved_bytes"] == 1234
+
+
+def test_codex_runner_tool_budget_telemetry_records_meaningful_artifact_delta() -> None:
+    telemetry = _new_tool_budget_telemetry(tool_call_budget=4)
+
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "artifact.record",
+            "args": json.dumps({"stage_intent": "publication_gate_repair"}),
+        },
+    )
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_result",
+            "tool_name": "artifact.record",
+            "created_at": "2026-04-30T12:00:00+00:00",
+            "output": json.dumps(
+                {
+                    "structured_content": {
+                        "ok": True,
+                        "artifact_delta": {
+                            "marker": "artifact-delta",
+                            "artifact_kind": "paper-writeback",
+                            "source_signature": "source-signature-001",
+                            "created_at": "2026-04-30T12:00:01+00:00",
+                        },
+                    }
+                }
+            ),
+        },
+    )
+
+    assert telemetry["stage_intent"] == "publication_gate_repair"
+    assert telemetry["meaningful_artifact_delta_at"] == "2026-04-30T12:00:01+00:00"
+    assert telemetry["meaningful_artifact_delta_kind"] == "paper-writeback"
+    assert telemetry["meaningful_artifact_delta_source_signature"] == "source-signature-001"
+    assert telemetry["turn_progress_kind"] == "meaningful_artifact_delta"
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:
