@@ -5116,6 +5116,7 @@ class QuestService:
             "pending_user_message_count": int(runtime_state.get("pending_user_message_count") or 0),
             "stop_reason": runtime_state.get("stop_reason"),
             "active_interaction_id": runtime_state.get("active_interaction_id"),
+            "retry_state": runtime_state.get("retry_state"),
             "last_artifact_interact_at": runtime_state.get("last_artifact_interact_at"),
             "last_tool_activity_at": runtime_state.get("last_tool_activity_at"),
             "last_tool_activity_name": runtime_state.get("last_tool_activity_name"),

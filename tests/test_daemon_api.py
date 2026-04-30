@@ -4838,6 +4838,65 @@ def test_quest_control_resume_schedules_auto_continue_turn(temp_home: Path, monk
     assert scheduled == [(quest_id, "auto_continue")]
 
 
+def test_resume_quest_control_path_uses_compact_snapshot(temp_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume quest avoids full snapshot")
+    quest_id = quest["quest_id"]
+
+    app.quest_service.set_status(quest_id, "paused")
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    def _fail_full_snapshot(target_quest_id: str) -> dict[str, object]:
+        raise AssertionError(f"resume control path must not require full snapshot for {target_quest_id}")
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+    monkeypatch.setattr(app.quest_service, "snapshot", _fail_full_snapshot)
+
+    payload = app.resume_quest(quest_id, source="runtime_watch")
+
+    assert payload["ok"] is True
+    assert payload["snapshot"]["status"] == "active"
+    assert scheduled == [(quest_id, "auto_continue")]
+
+
+def test_schedule_turn_uses_compact_snapshot_before_worker_launch(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("schedule turn avoids full snapshot")
+    quest_id = quest["quest_id"]
+    drained: list[str] = []
+
+    def _fail_full_snapshot(target_quest_id: str) -> dict[str, object]:
+        raise AssertionError(f"schedule_turn must not require full snapshot before launch for {target_quest_id}")
+
+    monkeypatch.setattr(app.quest_service, "snapshot", _fail_full_snapshot)
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: drained.append(target_quest_id))
+
+    payload = app.schedule_turn(quest_id, reason="auto_continue")
+
+    assert payload == {
+        "scheduled": True,
+        "started": True,
+        "queued": False,
+        "reason": "auto_continue",
+    }
+
+
 def test_resume_quest_preserves_waiting_completion_approval_without_auto_continue(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,

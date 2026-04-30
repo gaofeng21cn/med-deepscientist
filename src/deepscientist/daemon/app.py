@@ -1699,8 +1699,7 @@ class DaemonApp:
         return snapshot
 
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:
-        snapshot = self.quest_service.snapshot(quest_id)
-        snapshot = self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+        snapshot = self._compact_snapshot_with_reconciled_turn_state(quest_id)
         recovery = self._recover_stalled_running_turn(quest_id, snapshot=snapshot, turn_reason=reason)
         if recovery.get("blocked"):
             return {
@@ -2402,7 +2401,7 @@ class DaemonApp:
         return stopped
 
     def resume_quest(self, quest_id: str, *, source: str = "local") -> dict:
-        previous_snapshot = self.quest_service.snapshot(quest_id)
+        previous_snapshot = self.quest_service.snapshot_fast(quest_id)
         with self._turn_lock:
             state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
             state["stop_requested"] = False
@@ -2411,7 +2410,7 @@ class DaemonApp:
             quest_root,
             closing_artifact_id=generate_id("runtime"),
         )
-        snapshot = self.quest_service.snapshot(quest_id)
+        snapshot = self.quest_service.snapshot_fast(quest_id)
         startup_contract_snapshot = (
             snapshot.get("startup_contract")
             if isinstance(snapshot.get("startup_contract"), dict)
@@ -2436,13 +2435,14 @@ class DaemonApp:
             next_status = "waiting_for_user"
         else:
             next_status = "active"
-        snapshot = self.quest_service.set_status(
-            quest_id,
-            next_status,
+        self.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            status=next_status,
             event_source="quest_control",
             event_kind="runtime_control_applied",
             event_summary=f"Quest {quest_id} resumed via `{source}`.",
         )
+        snapshot = self.quest_service.snapshot_fast(quest_id)
         recovery_abandoned_run_id = None
         recovery_summary = None
         if source.startswith("auto:daemon-recovery"):
@@ -2471,11 +2471,11 @@ class DaemonApp:
                 ),
             )
         self.quest_service.update_runtime_state(
-            quest_root=self.quest_service._quest_root(quest_id),
+            quest_root=quest_root,
             **runtime_state_updates,
         )
         if continuation_updates:
-            snapshot = self.quest_service.snapshot(quest_id)
+            snapshot = self.quest_service.snapshot_fast(quest_id)
         summary = f"Quest {quest_id} resumed."
         event = self._append_control_event(
             quest_id,
