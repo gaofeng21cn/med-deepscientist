@@ -2454,7 +2454,15 @@ class DaemonApp:
         )
         snapshot = self.quest_service.snapshot_fast(quest_id)
         controller_snapshot = snapshot
-        if not preserve_waiting_state and pending_user_message_count == 0:
+        controller_snapshot_hint = (
+            str(snapshot.get("continuation_reason") or "").strip().lower() == "controller_work_unit_pending"
+            or (
+                str(snapshot.get("continuation_anchor") or "").strip().lower() == "decision"
+                and isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            )
+            or str(snapshot.get("active_anchor") or "").strip().lower() == "decision"
+        )
+        if not preserve_waiting_state and pending_user_message_count == 0 and controller_snapshot_hint:
             controller_snapshot = self.quest_service.snapshot(quest_id)
         recovery_abandoned_run_id = None
         recovery_summary = None
