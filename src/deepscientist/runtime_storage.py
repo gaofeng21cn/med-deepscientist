@@ -39,6 +39,23 @@ _WORKTREE_RUNTIME_DIR_NAMES = (
     "codex_homes",
     "slim_backups",
 )
+_EXPANDED_WORKTREE_RECENCY_IGNORED_DIR_NAMES = {
+    ".ds",
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".cache",
+    "cache",
+}
+_EXPANDED_WORKTREE_RECENCY_IGNORED_FILE_NAMES = {
+    ".DS_Store",
+    ".git",
+    ".gitignore",
+    "retention_manifest.json",
+    "retention_manifest.ledger.json.gz",
+}
 _REPORT_RETENTION_KEEP_FILENAMES = {
     "latest.json",
     "state.json",
@@ -140,6 +157,42 @@ def _path_tree_is_cold(path: Path, *, now: datetime, older_than_seconds: int) ->
     return True
 
 
+def _expanded_worktree_checkout_is_cold(worktree_root: Path, *, now: datetime, older_than_seconds: int) -> bool:
+    cutoff = now.timestamp() - max(0, older_than_seconds)
+    saw_content = False
+    for current_root, dirnames, filenames in os.walk(worktree_root):
+        current = Path(current_root)
+        relative_parts = current.relative_to(worktree_root).parts
+        if relative_parts[:2] == (".codex", "skills"):
+            dirnames[:] = []
+            continue
+        dirnames[:] = [name for name in dirnames if name not in _EXPANDED_WORKTREE_RECENCY_IGNORED_DIR_NAMES]
+        for filename in filenames:
+            if filename in _EXPANDED_WORKTREE_RECENCY_IGNORED_FILE_NAMES or filename.endswith((".pyc", ".pyo")):
+                continue
+            candidate = current / filename
+            candidate_parts = candidate.relative_to(worktree_root).parts
+            if candidate_parts[:2] == (".codex", "skills"):
+                continue
+            saw_content = True
+            try:
+                if candidate.stat().st_mtime > cutoff:
+                    return False
+            except OSError:
+                continue
+    if saw_content:
+        return True
+    try:
+        return worktree_root.stat().st_mtime <= cutoff
+    except OSError:
+        return True
+
+
+def _worktree_has_codex_sessions(worktree_root: Path) -> bool:
+    sessions_root = worktree_root / ".codex" / "sessions"
+    return sessions_root.exists()
+
+
 def _archive_expanded_worktree_checkout(
     resolved_root: Path,
     worktree_root: Path,
@@ -232,7 +285,19 @@ def prune_cold_worktree_runtime_payloads(
                     }
                 )
                 continue
-            if not _path_tree_is_cold(worktree_root, now=now, older_than_seconds=older_than_seconds):
+            if _worktree_has_codex_sessions(worktree_root):
+                manifest["skipped"].append(
+                    {
+                        "worktree_root": str(worktree_root.relative_to(resolved_root)),
+                        "reason": "codex_sessions_present",
+                    }
+                )
+                continue
+            if not _expanded_worktree_checkout_is_cold(
+                worktree_root,
+                now=now,
+                older_than_seconds=older_than_seconds,
+            ):
                 manifest["skipped"].append(
                     {
                         "worktree_root": str(worktree_root.relative_to(resolved_root)),

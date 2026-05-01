@@ -874,3 +874,40 @@ def test_runtime_storage_maintenance_keeps_pinned_and_recent_expanded_worktrees_
     skip_reasons = {item["worktree_root"]: item["reason"] for item in prune_manifest["skipped"]}
     assert skip_reasons[".ds/worktrees/paper-active"] == "pinned"
     assert skip_reasons[".ds/worktrees/analysis-recent"] == "recent_worktree"
+
+
+def test_runtime_storage_maintenance_ignores_generated_metadata_when_pruning_expanded_worktree(
+    tmp_path: Path,
+) -> None:
+    quest_root = tmp_path / "quest"
+    worktree_root = quest_root / ".ds" / "worktrees" / "analysis-generated-metadata"
+    source_path = worktree_root / "src" / "analysis.py"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text("print('old content')\n", encoding="utf-8")
+    generated_paths = [
+        worktree_root / ".ds" / "events" / "manifest.json",
+        worktree_root / ".codex" / "skills" / "medical-research-scout" / "SKILL.md",
+        worktree_root / "artifacts" / "reports" / "retention_manifest.json",
+        worktree_root / "src" / "__pycache__" / "analysis.cpython-312.pyc",
+    ]
+    for path in generated_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("generated\n", encoding="utf-8")
+    _mark_tree_old(worktree_root)
+    now = time.time()
+    for path in generated_paths:
+        os.utime(path, (now, now))
+        os.utime(path.parent, (now, now))
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=None,
+    )
+
+    assert not worktree_root.exists()
+    prune_manifest = result["worktree_runtime_prune"]
+    assert prune_manifest["expanded_worktrees_removed"] == 1
+    archived_worktree = prune_manifest["removed"][0]["archived_worktree"]
+    assert archived_worktree["kind"] == "worktree_expanded_checkout"
