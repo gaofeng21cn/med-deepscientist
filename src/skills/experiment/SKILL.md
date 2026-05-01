@@ -85,6 +85,7 @@ Treat this as the short run-order summary. The detailed run contract, execution 
 
 - Do not fabricate metrics, logs, claims, or improvement narratives.
 - Do not introduce a new dataset or silently change splits or evaluation protocol.
+- Do not fetch large public datasets opportunistically; keep them as remote metadata until the experiment contract states the exact analysis use, storage budget, and cleanup/retention policy.
 - Do not change metric definitions or evaluation logic unless the change is explicitly justified and durably recorded.
 - Do not stop after a quick sanity run if the agreed goal is a real experiment.
 - Do not claim success before durable artifacts exist and the acceptance gate passes.

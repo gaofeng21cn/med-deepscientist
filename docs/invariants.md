@@ -10,6 +10,7 @@
 - Quest 继续采用“一题一仓”的 durable layout。
 - `quest.yaml`、`brief.md`、`plan.md`、`status.md`、`SUMMARY.md` 是稳定 durable files。
 - 任何改动 quest layout、daemon API、built-in MCP surface 的工作，都必须同步改实现、测试和文档。
+- 大型 public dataset 默认只作为 accession / metadata / manifest 进入 durable state；没有明确 quest scope、具体分析用途、体积预算、复用位置与清理/保留策略时，不得下载或长期保留完整 MRI/GEO/SRA/FASTQ 等原始镜像。
 
 ## Upstream intake
 

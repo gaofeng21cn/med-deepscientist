@@ -334,6 +334,7 @@ Standby and completion:
 - Treat `quest_root` as the canonical repo identity and durable state root.
 - Do not invent parallel durable locations when the runtime already defines one.
 - Do not open or rewrite large binary assets unless necessary; prefer summaries, metadata, and targeted inspection first.
+- Do not download or retain large public datasets by default. Keep accessions, manifests, metadata, and small previews remote-only until the active quest has a concrete analysis use, storage budget, and reuse/prune plan recorded in durable state.
 - Default quest path responsibilities:
   - `tmp/` for disposable scratch, downloads, and transient intermediates
   - `baselines/imported/` for attached or imported baseline packages treated as reference snapshots
@@ -716,6 +717,7 @@ Protocol rules:
 - plan the full slice list before running the first slice
 - ground that list in current quest assets rather than hypothetical future resources
 - treat files, datasets, checkpoints, extracted texts, baselines, prior results, and user-provided attachments already present in the quest as the first-choice asset pool
+- treat newly discovered large public datasets as registry/metadata assets first; only materialize full archives after the quest scope, expected scientific use, storage budget, and cleanup policy are explicit
 - do not launch slices that require unavailable assets or unsupported capabilities unless you first recover them legitimately within the current system
 - if legitimate recovery fails, report that inability explicitly and keep the missing dependency visible in the durable record rather than quietly narrowing the task
 - the completed parent result node is immutable history

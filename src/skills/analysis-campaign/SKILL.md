@@ -90,6 +90,7 @@ Treat this as the compressed campaign map. The authoritative slice protocol and 
 - Every analysis run must be code-based and fully automatable.
 - Do not introduce human evaluation or subjective assessment into a campaign.
 - Do not bring in a new dataset unless the quest scope explicitly changed.
+- Do not download or materialize a large new public dataset unless the campaign plan names its concrete use, storage budget, reuse location, and cleanup/retention policy.
 - Every analysis slice must have a specific research question and a falsifiable or at least decision-relevant expectation.
 - If the campaign is supporting a paper or paper-like report, do not launch it until a selected outline exists.
 - When a selected outline exists, every slice should map to a named `research_question` and `experimental_design` from that outline.
