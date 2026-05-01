@@ -2103,6 +2103,8 @@ class DaemonApp:
         active_run_id = str(snapshot.get("active_run_id") or "").strip()
         if not active_run_id:
             self._refresh_turn_worker_state(quest_id)
+            if self._record_latest_completed_parked_auto_continue_closeout_if_missing(quest_id):
+                return self.quest_service.snapshot(quest_id)
             return snapshot
         turn_state = self._refresh_turn_worker_state(quest_id)
         stale_live_turn_reconciled = False
@@ -4421,6 +4423,29 @@ class DaemonApp:
             },
         )
         return True
+
+    def _record_latest_completed_parked_auto_continue_closeout_if_missing(self, quest_id: str) -> bool:
+        quest_root = self.quest_service._quest_root(quest_id)
+        runs_root = quest_root / ".ds" / "runs"
+        if not runs_root.exists():
+            return False
+        run_roots = sorted(
+            (item for item in runs_root.iterdir() if item.is_dir()),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for run_root in run_roots:
+            run_id = run_root.name
+            if self._completed_parked_auto_continue_payload(quest_id, run_id=run_id) is None:
+                continue
+            telemetry = read_json(run_root / "telemetry.json", {}) if (run_root / "telemetry.json").exists() else {}
+            if (
+                isinstance(telemetry, dict)
+                and str(telemetry.get("turn_progress_kind") or "").strip() == "parked_no_artifact_delta"
+            ):
+                return False
+            return self._record_completed_parked_auto_continue_closeout(quest_id, run_id=run_id)
+        return False
 
     def _normalize_status_after_turn(self, quest_id: str, *, turn_reason: str = "user_message") -> None:
         with self._turn_lock:

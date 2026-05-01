@@ -6995,6 +6995,64 @@ def test_daemon_reconciles_completed_parked_auto_continue_even_if_turn_state_say
     assert telemetry["meaningful_artifact_delta_at"] is None
 
 
+def test_daemon_backfills_completed_parked_auto_continue_telemetry_after_active_run_cleared(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("completed parked run missing telemetry quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-parked-missing-telemetry-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run_root / "command.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "parked",
+            "turn_intent": "continue_stage",
+        },
+    )
+    write_json(
+        run_root / "result.json",
+        {
+            "run_id": run_id,
+            "exit_code": 0,
+            "output_text": "No new user message or /resume; staying parked.",
+            "completed_at": "2026-05-01T01:35:55+00:00",
+        },
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="active",
+        active_run_id=None,
+        worker_running=False,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_anchor="decision",
+    )
+
+    audit = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot(quest_id)
+
+    assert audit["active_run_id"] is None
+    assert audit["worker_running"] is False
+    assert snapshot["active_run_id"] is None
+    assert snapshot["status"] == "active"
+    assert snapshot["continuation_reason"] == "parked_after_checkpoint_no_new_message"
+    telemetry = read_json(run_root / "telemetry.json", {})
+    assert telemetry["turn_progress_kind"] == "parked_no_artifact_delta"
+    assert telemetry["completed_at"] == "2026-05-01T01:35:55+00:00"
+
+    app.quest_runtime_audit(quest_id)
+    events = [
+        item
+        for item in read_jsonl(quest_root / ".ds" / "events.jsonl")
+        if item.get("type") == "runner.parked_turn_closeout"
+    ]
+    assert len(events) == 1
+
+
 def test_daemon_projects_repeated_auto_hold_before_running_codex(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
