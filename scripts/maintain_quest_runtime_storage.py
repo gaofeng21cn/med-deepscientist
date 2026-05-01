@@ -14,6 +14,7 @@ def main() -> None:
     parser.add_argument("--no-worktrees", action="store_true", help="Only maintain the quest root itself")
     parser.add_argument("--no-slim-oversized-jsonl", action="store_true", help="Skip quest-local backup + placeholder compaction for oversized JSONL entries")
     parser.add_argument("--no-dedupe-worktrees", action="store_true", help="Skip hardlink dedupe for duplicated cold files under .ds/worktrees")
+    parser.add_argument("--no-prune-expanded-worktrees", action="store_true", help="Keep cold expanded .ds/worktrees checkouts even when they have no runtime payloads")
     parser.add_argument("--older-than-hours", type=int, default=6, help="Only compact finished runtime files older than this many hours")
     parser.add_argument("--jsonl-max-mb", type=int, default=64, help="Compact completed JSONL logs at or above this size")
     parser.add_argument("--text-max-mb", type=int, default=16, help="Compact completed text logs at or above this size")
@@ -33,6 +34,7 @@ def main() -> None:
         event_segment_max_mb=max(1, args.event_segment_max_mb),
         slim_jsonl_threshold_mb=None if args.no_slim_oversized_jsonl else max(1, args.slim_jsonl_threshold_mb),
         dedupe_worktree_min_mb=None if args.no_dedupe_worktrees else max(1, args.dedupe_worktree_min_mb),
+        prune_expanded_worktrees=not args.no_prune_expanded_worktrees,
         head_lines=max(1, args.head_lines),
         tail_lines=max(1, args.tail_lines),
     )

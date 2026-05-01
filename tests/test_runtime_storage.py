@@ -10,6 +10,14 @@ import tarfile
 
 from deepscientist.runtime_storage import maintain_quest_runtime_storage
 
+
+def _mark_tree_old(path: Path, *, age_seconds: int = 8 * 3600) -> None:
+    old = time.time() - age_seconds
+    for item in sorted(path.rglob("*"), reverse=True):
+        os.utime(item, (old, old))
+    os.utime(path, (old, old))
+
+
 def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tempfiles(tmp_path: Path) -> None:
     quest_root = tmp_path / "quest"
     bash_root = quest_root / ".ds" / "bash_exec" / "bash-001"
@@ -768,3 +776,101 @@ def test_runtime_storage_maintenance_keeps_pinned_worktree_runtime_payloads(tmp_
     prune_manifest = result["worktree_runtime_prune"]
     assert prune_manifest["worktrees_pruned"] == 0
     assert any(item["reason"] == "pinned" for item in prune_manifest["skipped"])
+
+
+def test_runtime_storage_maintenance_archives_cold_unpinned_expanded_worktree_without_runtime_payloads(
+    tmp_path: Path,
+) -> None:
+    quest_root = tmp_path / "quest"
+    worktree_root = quest_root / ".ds" / "worktrees" / "analysis-old"
+    source_path = worktree_root / "src" / "analysis.py"
+    manuscript_path = worktree_root / "paper" / "paper" / "manuscript.md"
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    manuscript_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text("print('analysis')\n", encoding="utf-8")
+    manuscript_path.write_text("# archived manuscript draft\n", encoding="utf-8")
+    root_artifact = quest_root / "artifacts" / "reports" / "kept.json"
+    root_dataset = quest_root / "datasets" / "manifest.json"
+    root_manuscript = quest_root / "manuscript" / "paper.md"
+    root_artifact.parent.mkdir(parents=True, exist_ok=True)
+    root_dataset.parent.mkdir(parents=True, exist_ok=True)
+    root_manuscript.parent.mkdir(parents=True, exist_ok=True)
+    root_artifact.write_text('{"kept":true}\n', encoding="utf-8")
+    root_dataset.write_text('{"dataset":"kept"}\n', encoding="utf-8")
+    root_manuscript.write_text("# kept root manuscript\n", encoding="utf-8")
+    _mark_tree_old(worktree_root)
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=None,
+    )
+
+    assert not worktree_root.exists()
+    assert root_artifact.exists()
+    assert root_dataset.exists()
+    assert root_manuscript.exists()
+    prune_manifest = result["worktree_runtime_prune"]
+    assert prune_manifest["worktrees_pruned"] == 1
+    assert prune_manifest["expanded_worktrees_archived"] == 1
+    assert prune_manifest["expanded_worktrees_removed"] == 1
+    assert prune_manifest["files_archived"] == 2
+    archived_worktree = prune_manifest["removed"][0]["archived_worktree"]
+    assert archived_worktree["kind"] == "worktree_expanded_checkout"
+    assert archived_worktree["source_path"] == ".ds/worktrees/analysis-old"
+    assert archived_worktree["archive_sha256"]
+    assert archived_worktree["restore_command"].startswith("tar -xzf .ds/cold_archive/worktree_runtime_payloads/")
+    assert {item["path"] for item in archived_worktree["file_manifest"]} == {
+        ".ds/worktrees/analysis-old/paper/paper/manuscript.md",
+        ".ds/worktrees/analysis-old/src/analysis.py",
+    }
+    restore_index = quest_root / prune_manifest["restore_index_ref"]
+    restore_payload = json.loads(restore_index.read_text(encoding="utf-8"))
+    assert restore_payload["archives"][-1]["source_path"] == ".ds/worktrees/analysis-old"
+    archive_path = quest_root / archived_worktree["archive_ref"]
+    with tarfile.open(archive_path, "r:gz") as archive:
+        names = archive.getnames()
+        assert ".ds/worktrees/analysis-old/src/analysis.py" in names
+        assert ".ds/worktrees/analysis-old/paper/paper/manuscript.md" in names
+
+
+def test_runtime_storage_maintenance_keeps_pinned_and_recent_expanded_worktrees_without_runtime_payloads(
+    tmp_path: Path,
+) -> None:
+    quest_root = tmp_path / "quest"
+    pinned_root = quest_root / ".ds" / "worktrees" / "paper-active"
+    recent_root = quest_root / ".ds" / "worktrees" / "analysis-recent"
+    (pinned_root / "paper" / "draft.md").parent.mkdir(parents=True, exist_ok=True)
+    (recent_root / "src").mkdir(parents=True, exist_ok=True)
+    (pinned_root / "paper" / "draft.md").write_text("# active\n", encoding="utf-8")
+    (recent_root / "src" / "analysis.py").write_text("print('recent')\n", encoding="utf-8")
+    (quest_root / ".ds").mkdir(parents=True, exist_ok=True)
+    (quest_root / ".ds" / "research_state.json").write_text(
+        json.dumps(
+            {
+                "current_workspace_root": str(pinned_root),
+                "research_head_worktree_root": str(pinned_root),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _mark_tree_old(pinned_root)
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        dedupe_worktree_min_mb=None,
+    )
+
+    assert pinned_root.exists()
+    assert recent_root.exists()
+    prune_manifest = result["worktree_runtime_prune"]
+    assert prune_manifest["worktrees_pruned"] == 0
+    skip_reasons = {item["worktree_root"]: item["reason"] for item in prune_manifest["skipped"]}
+    assert skip_reasons[".ds/worktrees/paper-active"] == "pinned"
+    assert skip_reasons[".ds/worktrees/analysis-recent"] == "recent_worktree"
