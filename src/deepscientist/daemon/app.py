@@ -3463,11 +3463,36 @@ class DaemonApp:
             threshold = 3
         if not stage or same_fingerprint_count < threshold:
             return None
+        if managed_publication_gate_blocked:
+            return {
+                "continuation_policy": "auto",
+                "continuation_anchor": "decision",
+                "continuation_reason": "controller_work_unit_pending",
+                "continuation_updated_at": utc_now(),
+            }
         return {
             "continuation_policy": "wait_for_user_or_resume",
             "continuation_anchor": "decision",
             "continuation_reason": f"unchanged_{stage}_state",
             "continuation_updated_at": utc_now(),
+        }
+
+    @staticmethod
+    def _publication_gate_controller_pending(snapshot: dict) -> bool:
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        if str(paper_health.get("global_stage_authority") or "").strip().lower() == "publication_gate" and not bool(
+            paper_health.get("managed_publication_gate_clear")
+        ):
+            return True
+        recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+        current_required_action = str(paper_health.get("managed_publication_gate_current_required_action") or "").strip().lower()
+        return recommended_action in {"return_to_publishability_gate", "return_to_controller"} or current_required_action in {
+            "return_to_publishability_gate",
+            "return_to_controller",
         }
 
     def _project_repeated_auto_hold_before_runner(
@@ -3507,6 +3532,7 @@ class DaemonApp:
         continuation_reason = str(snapshot.get("continuation_reason") or "").strip().lower()
         recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
         blockers = [str(item).strip() for item in (paper_health.get("blocking_reasons") or []) if str(item).strip()]
+        controller_pending = self._publication_gate_controller_pending(snapshot)
         hold_markers = (
             "hold",
             "block",
@@ -3533,6 +3559,38 @@ class DaemonApp:
             "fingerprint": current_fingerprint,
             "same_fingerprint_auto_turn_count": projected_count,
         }
+        if controller_pending:
+            self.quest_service.update_runtime_state(
+                quest_root=quest_root,
+                continuation_policy="auto",
+                continuation_anchor="decision",
+                continuation_reason="controller_work_unit_pending",
+                continuation_updated_at=utc_now(),
+                same_fingerprint_auto_turn_count=projected_count,
+                last_stage_fingerprint=current_fingerprint,
+                last_stage_fingerprint_at=utc_now(),
+            )
+            append_jsonl(
+                quest_root / ".ds" / "events.jsonl",
+                {
+                    "event_id": generate_id("evt"),
+                    "type": "runner.turn_skipped",
+                    "quest_id": quest_id,
+                    "source": "daemon_turn_worker",
+                    "turn_reason": turn_reason,
+                    "turn_mode": "controller_work_unit_pending",
+                    "continuation_policy": "auto",
+                    "continuation_reason": "controller_work_unit_pending",
+                    "controller_projection": {
+                        "reason": "publication_gate_blocker",
+                        "same_fingerprint_auto_turn_count": projected_count,
+                    },
+                    "hold_projection": hold_projection,
+                    "summary": "Auto-continue skipped before runner launch because MAS owns the pending publication-gate work unit.",
+                    "created_at": utc_now(),
+                },
+            )
+            return True
         self.quest_service.update_runtime_state(
             quest_root=quest_root,
             continuation_policy="wait_for_user_or_resume",
@@ -4386,6 +4444,10 @@ class DaemonApp:
             return False
         command_payload, result_payload = parked_payload
         quest_root = self.quest_service._quest_root(quest_id)
+        snapshot = self.quest_service.snapshot(quest_id)
+        controller_pending = self._publication_gate_controller_pending(snapshot)
+        continuation_policy = "auto" if controller_pending else "wait_for_user_or_resume"
+        continuation_reason = "controller_work_unit_pending" if controller_pending else "parked_after_checkpoint_no_new_message"
         self._write_parked_no_artifact_delta_telemetry(
             quest_id,
             run_id=run_id,
@@ -4399,9 +4461,9 @@ class DaemonApp:
             active_run_id=None,
             worker_running=False,
             retry_state=None,
-            continuation_policy="wait_for_user_or_resume",
+            continuation_policy=continuation_policy,
             continuation_anchor=str(command_payload.get("continuation_anchor") or "").strip() or "decision",
-            continuation_reason="parked_after_checkpoint_no_new_message",
+            continuation_reason=continuation_reason,
             continuation_updated_at=utc_now(),
             event_source="daemon_parked_turn_closeout",
             event_kind="runtime_parked_turn_closeout",
@@ -4416,7 +4478,8 @@ class DaemonApp:
                 "run_id": run_id,
                 "turn_reason": command_payload.get("turn_reason"),
                 "turn_mode": command_payload.get("turn_mode"),
-                "continuation_reason": "parked_after_checkpoint_no_new_message",
+                "continuation_policy": continuation_policy,
+                "continuation_reason": continuation_reason,
                 "telemetry_path": str(quest_root / ".ds" / "runs" / run_id / "telemetry.json"),
                 "summary": "Completed parked auto-continue run was closed without leaving a live worker projection.",
                 "created_at": utc_now(),

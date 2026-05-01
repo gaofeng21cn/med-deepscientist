@@ -7166,7 +7166,7 @@ def test_new_user_message_bypasses_repeated_auto_hold_projection(temp_home: Path
     ]
 
 
-def test_auto_continue_parks_after_repeated_unchanged_publication_gate_state(temp_home: Path) -> None:
+def test_auto_continue_keeps_publication_gate_blocker_controller_owned(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
     app = DaemonApp(temp_home)
@@ -7225,9 +7225,81 @@ def test_auto_continue_parks_after_repeated_unchanged_publication_gate_state(tem
     app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
     snapshot = app.quest_service.snapshot(quest_id)
     assert snapshot["same_fingerprint_auto_turn_count"] >= 3
-    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_policy"] == "auto"
     assert snapshot["continuation_anchor"] == "decision"
-    assert snapshot["continuation_reason"] == "unchanged_publication_gate_state"
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+
+
+def test_publication_gate_repeated_auto_hold_does_not_wait_for_user_before_runner(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate controller pending quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="write",
+        reason="return_to_publishability_gate",
+    )
+    fingerprint = app._stage_state_fingerprint(app.quest_service.snapshot(quest_id))
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_stage_fingerprint=fingerprint,
+        same_fingerprint_auto_turn_count=2,
+    )
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("controller-owned publication blocker should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+    assert snapshot["same_fingerprint_auto_turn_count"] >= 3
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "controller_work_unit_pending"
+    assert skipped[-1]["continuation_policy"] == "auto"
+    assert skipped[-1]["controller_projection"]["reason"] == "publication_gate_blocker"
 
 
 def test_daemon_auto_continue_routes_into_review_companion_skill_after_decision_artifact(temp_home: Path) -> None:
