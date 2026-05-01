@@ -2504,6 +2504,100 @@ def test_submit_paper_bundle_writes_manifest_and_advances_anchor(temp_home: Path
     assert any(item["label"] == "Bundle Manifest" for item in stage_view["sections"]["key_files"])
 
 
+def test_submit_paper_bundle_keeps_controller_owned_publication_gate_on_auto(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("controller-owned paper bundle quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Controller Gate Paper",
+        note="Candidate for controller gate bundle test.",
+        detailed_outline={
+            "title": "Controller Gate Paper",
+            "research_questions": ["RQ-controller-gate"],
+            "experimental_designs": ["Exp-controller-gate"],
+            "contributions": ["C-controller-gate"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id="outline-001",
+        selected_reason="Use this for controller gate bundle test.",
+    )
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    study_root = temp_home / "studies" / "001-risk"
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "latest.json",
+        {
+            "schema_version": 1,
+            "study_id": study_root.name,
+            "quest_id": quest["quest_id"],
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "reporting",
+                    "severity": "must_fix",
+                    "summary": "claim evidence consistency failed",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _write_citation_rich_draft(paper_root)
+    (paper_root / "writing_plan.md").write_text("# Plan\n", encoding="utf-8")
+    _materialize_reference_materials(quest_root, paper_root, workspace_root=paper_workspace)
+    (paper_root / "build").mkdir(parents=True, exist_ok=True)
+    write_json(paper_root / "build" / "compile_report.json", {"ok": True})
+    (paper_root / "paper.pdf").write_bytes(b"%PDF-1.4\n%paper\n")
+
+    result = artifact.submit_paper_bundle(
+        quest_root,
+        title="Controller-Owned Bundle Paper",
+        summary="Paper bundle was refreshed but publication gate still owns the next work unit.",
+        pdf_path="paper/paper.pdf",
+    )
+
+    assert result["ok"] is True
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    assert snapshot["active_anchor"] == "finalize"
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+    assert snapshot["paper_contract_health"]["global_stage_authority"] == "publication_gate"
+    assert snapshot["paper_contract_health"]["managed_publication_gate_clear"] is False
+
+
 def test_validate_manuscript_coverage_blocks_short_memo_as_full_paper(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

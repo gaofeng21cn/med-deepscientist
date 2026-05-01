@@ -4300,6 +4300,41 @@ class ArtifactService:
     def _human_milestone_payload(payload: dict[str, Any]) -> dict[str, Any]:
         return dict(payload.get("human_milestone") or {}) if isinstance(payload.get("human_milestone"), dict) else {}
 
+    @staticmethod
+    def _publication_gate_controller_pending_from_health(paper_health: dict[str, Any]) -> bool:
+        if (
+            str(paper_health.get("global_stage_authority") or "").strip().lower() == "publication_gate"
+            and not bool(paper_health.get("managed_publication_gate_clear"))
+        ):
+            return True
+        recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+        current_required_action = str(
+            paper_health.get("managed_publication_gate_current_required_action") or ""
+        ).strip().lower()
+        return recommended_action in {"return_to_publishability_gate", "return_to_controller"} or current_required_action in {
+            "return_to_publishability_gate",
+            "return_to_controller",
+        }
+
+    def _paper_bundle_continuation_state(self, quest_root: Path) -> dict[str, str]:
+        snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        if self._publication_gate_controller_pending_from_health(paper_health):
+            return {
+                "policy": "auto",
+                "anchor": "decision",
+                "reason": "controller_work_unit_pending",
+            }
+        return {
+            "policy": "wait_for_user_or_resume",
+            "anchor": "decision",
+            "reason": "paper_bundle_submitted",
+        }
+
     def _continuation_action_projection(
         self,
         quest_root: Path,
@@ -10893,11 +10928,12 @@ class ArtifactService:
             source_idea_id=source_idea_id,
         )
         self.quest_service.update_settings(self._quest_id(quest_root), active_anchor="finalize")
+        continuation_state = self._paper_bundle_continuation_state(quest_root)
         self.quest_service.set_continuation_state(
             quest_root,
-            policy="wait_for_user_or_resume",
-            anchor="decision",
-            reason="paper_bundle_submitted",
+            policy=continuation_state["policy"],
+            anchor=continuation_state["anchor"],
+            reason=continuation_state["reason"],
         )
         artifact = self.record(
             quest_root,
