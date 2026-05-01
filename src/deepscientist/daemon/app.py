@@ -2122,6 +2122,10 @@ class DaemonApp:
         result_payload = read_json(quest_root / ".ds" / "runs" / active_run_id / "result.json", {})
         completed_at = str(result_payload.get("completed_at") or "").strip() if isinstance(result_payload, dict) else ""
         exit_code = result_payload.get("exit_code") if isinstance(result_payload, dict) else None
+        completed_parked_auto_continue = self._completed_parked_auto_continue_payload(
+            quest_id,
+            run_id=active_run_id,
+        )
         previous_status = (
             str(snapshot.get("runtime_status") or snapshot.get("status") or snapshot.get("display_status") or "running").strip()
             or "running"
@@ -2189,6 +2193,9 @@ class DaemonApp:
             event_kind="runtime_stale_turn_reconciled",
             event_summary=summary,
         )
+        if completed_parked_auto_continue is not None:
+            self._record_completed_parked_auto_continue_closeout(quest_id, run_id=active_run_id)
+            reconciled = self.quest_service.snapshot(quest_id)
         with self._turn_lock:
             state = self._turn_state.setdefault(quest_id, {"running": False, "pending": False})
             state["running"] = False
@@ -4293,6 +4300,7 @@ class DaemonApp:
             return
         try:
             self._normalize_status_after_turn(quest_id, turn_reason=turn_reason)
+            self._record_completed_parked_auto_continue_closeout(quest_id, run_id=run_id)
             return
         except Exception as exc:
             runtime_state = self.quest_service._read_runtime_state(quest_root)
@@ -4326,6 +4334,93 @@ class DaemonApp:
                 error=str(exc),
             )
             self._schedule_runtime_storage_maintenance(quest_id)
+
+    def _completed_parked_auto_continue_payload(self, quest_id: str, *, run_id: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        run_root = self.quest_service._quest_root(quest_id) / ".ds" / "runs" / run_id
+        command_payload = read_json(run_root / "command.json", {})
+        result_payload = read_json(run_root / "result.json", {})
+        if not isinstance(command_payload, dict) or not isinstance(result_payload, dict):
+            return None
+        if str(command_payload.get("turn_reason") or "").strip() != "auto_continue":
+            return None
+        if str(command_payload.get("turn_mode") or "").strip() != "parked":
+            return None
+        if result_payload.get("exit_code") != 0:
+            return None
+        return command_payload, result_payload
+
+    def _write_parked_no_artifact_delta_telemetry(
+        self,
+        quest_id: str,
+        *,
+        run_id: str,
+        command_payload: dict[str, Any],
+        result_payload: dict[str, Any],
+    ) -> None:
+        run_root = self.quest_service._quest_root(quest_id) / ".ds" / "runs" / run_id
+        telemetry_path = run_root / "telemetry.json"
+        telemetry = read_json(telemetry_path, {}) if telemetry_path.exists() else {}
+        if not isinstance(telemetry, dict):
+            telemetry = {}
+        telemetry.update(
+            {
+                "run_id": run_id,
+                "turn_reason": command_payload.get("turn_reason"),
+                "turn_mode": command_payload.get("turn_mode"),
+                "turn_intent": command_payload.get("turn_intent"),
+                "exit_code": result_payload.get("exit_code"),
+                "turn_progress_kind": "parked_no_artifact_delta",
+                "meaningful_artifact_delta_at": None,
+                "meaningful_artifact_delta_kind": None,
+                "meaningful_artifact_delta_source_signature": None,
+                "completed_at": telemetry.get("completed_at") or result_payload.get("completed_at") or utc_now(),
+            }
+        )
+        write_json(telemetry_path, telemetry)
+
+    def _record_completed_parked_auto_continue_closeout(self, quest_id: str, *, run_id: str) -> bool:
+        parked_payload = self._completed_parked_auto_continue_payload(quest_id, run_id=run_id)
+        if parked_payload is None:
+            return False
+        command_payload, result_payload = parked_payload
+        quest_root = self.quest_service._quest_root(quest_id)
+        self._write_parked_no_artifact_delta_telemetry(
+            quest_id,
+            run_id=run_id,
+            command_payload=command_payload,
+            result_payload=result_payload,
+        )
+        self.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            status="active",
+            display_status="active",
+            active_run_id=None,
+            worker_running=False,
+            retry_state=None,
+            continuation_policy="wait_for_user_or_resume",
+            continuation_anchor=str(command_payload.get("continuation_anchor") or "").strip() or "decision",
+            continuation_reason="parked_after_checkpoint_no_new_message",
+            continuation_updated_at=utc_now(),
+            event_source="daemon_parked_turn_closeout",
+            event_kind="runtime_parked_turn_closeout",
+            event_summary=f"Closed completed parked auto-continue run `{run_id}` without meaningful artifact delta.",
+        )
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": generate_id("evt"),
+                "type": "runner.parked_turn_closeout",
+                "quest_id": quest_id,
+                "run_id": run_id,
+                "turn_reason": command_payload.get("turn_reason"),
+                "turn_mode": command_payload.get("turn_mode"),
+                "continuation_reason": "parked_after_checkpoint_no_new_message",
+                "telemetry_path": str(quest_root / ".ds" / "runs" / run_id / "telemetry.json"),
+                "summary": "Completed parked auto-continue run was closed without leaving a live worker projection.",
+                "created_at": utc_now(),
+            },
+        )
+        return True
 
     def _normalize_status_after_turn(self, quest_id: str, *, turn_reason: str = "user_message") -> None:
         with self._turn_lock:

@@ -6943,6 +6943,58 @@ def test_daemon_skips_parked_auto_continue_without_running_codex(temp_home: Path
     assert skipped[-1]["continuation_reason"] == "external_metadata_pending"
 
 
+def test_daemon_reconciles_completed_parked_auto_continue_even_if_turn_state_says_running(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("completed parked active run reconciliation quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-parked-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run_root / "command.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "parked",
+            "turn_intent": "continue_stage",
+        },
+    )
+    write_json(
+        run_root / "result.json",
+        {
+            "run_id": run_id,
+            "exit_code": 0,
+            "output_text": "No new user message or /resume; staying parked.",
+        },
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+        worker_running=True,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_anchor="decision",
+    )
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"running": True, "pending": False, "stop_requested": False}
+
+    audit = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot(quest_id)
+
+    assert audit["active_run_id"] is None
+    assert audit["worker_running"] is False
+    assert snapshot["active_run_id"] is None
+    assert snapshot["status"] == "active"
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "parked_after_checkpoint_no_new_message"
+    telemetry = read_json(run_root / "telemetry.json", {})
+    assert telemetry["turn_progress_kind"] == "parked_no_artifact_delta"
+    assert telemetry["meaningful_artifact_delta_at"] is None
+
+
 def test_daemon_projects_repeated_auto_hold_before_running_codex(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
