@@ -25,7 +25,10 @@ from deepscientist.connector.connector_profiles import list_connector_profiles
 from deepscientist.connector_runtime import format_conversation_id
 from deepscientist.daemon.api.router import match_route
 import deepscientist.daemon.api.handlers as daemon_api_handlers
-from deepscientist.daemon.app import DaemonApp
+from deepscientist.daemon.app import (
+    DaemonApp,
+    _RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB,
+)
 from deepscientist.prompts.builder import classify_turn_intent
 from deepscientist.home import ensure_home_layout
 from deepscientist.connector.lingzhu_support import generate_lingzhu_auth_ak, lingzhu_passive_conversation_id
@@ -7482,6 +7485,41 @@ def test_runtime_storage_maintenance_scheduler_dedupes_active_quest(
     assert second["started"] is False
     assert second["reason"] == "already_running"
     assert calls == [quest_id]
+
+
+def test_runtime_storage_maintenance_enables_worktree_dedupe_threshold(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(
+        "runtime maintenance worktree dedupe threshold quest",
+    )
+    quest_id = quest["quest_id"]
+    calls: list[dict[str, object]] = []
+
+    def _capture_maintenance(quest_root: Path, **kwargs: object) -> dict[str, object]:
+        calls.append({"quest_root": quest_root, **kwargs})
+        return {"roots": [], "worktree_runtime_prune": {}}
+
+    monkeypatch.setattr(
+        "deepscientist.daemon.app.maintain_quest_runtime_storage",
+        _capture_maintenance,
+    )
+
+    app._run_runtime_storage_maintenance(quest_id)
+
+    assert calls == [
+        {
+            "quest_root": Path(quest["quest_root"]),
+            "include_worktrees": True,
+            "older_than_seconds": 0,
+            "dedupe_worktree_min_mb": _RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB,
+        }
+    ]
+
 
 def test_daemon_retries_failed_runner_attempt_and_continues_with_retry_context(temp_home: Path) -> None:
     ensure_home_layout(temp_home)

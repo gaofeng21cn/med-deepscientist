@@ -110,6 +110,7 @@ LEGACY_CODEX_RETRY_INITIAL_BACKOFF_SEC = 1.0
 LEGACY_CODEX_RETRY_BACKOFF_MULTIPLIER = 2.0
 LEGACY_CODEX_RETRY_MAX_BACKOFF_SEC = 8.0
 _RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS = 0
+_RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB = 16
 _CRASH_AUTO_RESUME_COOLDOWN = timedelta(minutes=10)
 _CRASH_AUTO_RESUME_MAX_RECENT_ATTEMPTS = 2
 _STALLED_RUNNING_TURN_INACTIVITY_SECONDS = 1800
@@ -2013,7 +2014,7 @@ class DaemonApp:
                 quest_root,
                 include_worktrees=True,
                 older_than_seconds=_RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS,
-                dedupe_worktree_min_mb=None,
+                dedupe_worktree_min_mb=_RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB,
             )
             root_manifests = manifest.get("roots") if isinstance(manifest.get("roots"), list) else []
             compacted_files = 0
