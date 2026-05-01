@@ -143,6 +143,22 @@ Before writing seriously, confirm:
 - `paper/paper_experiment_matrix.md` reflects the current paper-facing experiment and analysis frontier when that planning surface is in use
 - completed relevant analysis results under `experiments/analysis-results/` are mapped into the selected outline or matrix rather than floating only as standalone reports
 
+### MAS medical manuscript prose gate
+
+For MAS-controlled medical original-research manuscripts, full drafting must consume the MAS
+`medical_prose_style_contract` and `medical_manuscript_blueprint` before prose generation.
+Read the blueprint together with `paper/results_narrative_map.json`,
+`paper/claim_evidence_map.json`, and `paper/figure_semantics_manifest.json`; if any of these
+surfaces are missing, incomplete, or inconsistent with the active claim set, route back to outline
+repair, analysis repair, or MAS contract completion before drafting.
+
+The MAS blueprint is the drafting input that turns evidence into a medical manuscript voice:
+clinical problem -> evidence gap -> objective, methods as reproducible clinical study design,
+Results with the clinical finding as the sentence subject, and Discussion as principal finding,
+prior work, interpretation, limitations, and restrained conclusion. Do not draft from run logs, controller checklists, or packaging metadata. Do not make a figure or table as the grammatical subject of a Results finding sentence; cite displays after the finding and quantitative result.
+When the target is a medical original research paper, read
+`references/medical-journal-prose.md` before writing or revising the full draft.
+
 If major claims lack evidence, surface the gap first.
 If the selected outline, outline folder, evidence ledger, or matrix feels underspecified, read `references/outline-evidence-contract-example.md` before drafting further.
 For paper-facing work, use this hard order instead of drifting between surfaces:

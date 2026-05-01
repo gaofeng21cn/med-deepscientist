@@ -249,6 +249,28 @@ def test_paper_reading_stage_skills_use_artifact_arxiv_and_legacy_skill_is_remov
     assert not (root / "alpharxiv-paper-loopup" / "SKILL.md").exists()
 
 
+def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() -> None:
+    root = repo_root() / "src" / "skills" / "write"
+    text = (root / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "medical_prose_style_contract" in text
+    assert "medical_manuscript_blueprint" in text
+    assert "paper/results_narrative_map.json" in text
+    assert "paper/claim_evidence_map.json" in text
+    assert "paper/figure_semantics_manifest.json" in text
+    assert "Do not draft from run logs, controller checklists, or packaging metadata" in text
+    assert "clinical problem -> evidence gap -> objective" in text
+    assert "clinical finding as the sentence subject" in text
+    assert "figure or table as the grammatical subject" in text
+
+    reference = root / "references" / "medical-journal-prose.md"
+    assert reference.exists()
+    reference_text = reference.read_text(encoding="utf-8")
+    assert "JAMA/NEJM/BMJ/Lancet-style original research voice" in reference_text
+    assert "old-to-new information flow" in reference_text
+    assert "unsupported no-difference" in reference_text
+
+
 def test_baseline_skill_documents_confirm_or_waive_gate() -> None:
     text = (repo_root() / "src" / "skills" / "baseline" / "SKILL.md").read_text(encoding="utf-8")
     assert "artifact.confirm_baseline(...)" in text
