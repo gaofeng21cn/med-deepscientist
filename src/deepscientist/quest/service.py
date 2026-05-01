@@ -5110,6 +5110,11 @@ class QuestService:
             "last_stage_fingerprint_at": runtime_state.get("last_stage_fingerprint_at"),
             "same_fingerprint_auto_turn_count": int(runtime_state.get("same_fingerprint_auto_turn_count") or 0),
             "external_startup_noise": runtime_state.get("external_startup_noise"),
+            "last_controller_decision_authorization": (
+                dict(runtime_state.get("last_controller_decision_authorization") or {})
+                if isinstance(runtime_state.get("last_controller_decision_authorization"), dict)
+                else None
+            ),
             "pending_decisions": pending_decisions,
             "waiting_interaction_id": waiting_interaction_id,
             "default_reply_interaction_id": default_reply_interaction_id,
@@ -5570,6 +5575,11 @@ class QuestService:
             "last_stage_fingerprint_at": runtime_state.get("last_stage_fingerprint_at"),
             "same_fingerprint_auto_turn_count": int(runtime_state.get("same_fingerprint_auto_turn_count") or 0),
             "external_startup_noise": runtime_state.get("external_startup_noise"),
+            "last_controller_decision_authorization": (
+                dict(runtime_state.get("last_controller_decision_authorization") or {})
+                if isinstance(runtime_state.get("last_controller_decision_authorization"), dict)
+                else None
+            ),
             "pending_decisions": pending_decisions,
             "active_interactions": active_interactions,
             "recent_reply_threads": recent_reply_threads,

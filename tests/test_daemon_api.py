@@ -468,6 +468,72 @@ def test_turn_skill_for_controller_owned_publication_gate_prefers_controller_rou
     )
 
 
+def test_snapshot_projects_controller_decision_authorization_for_publication_gate_route(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate controller route projection")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+        active_anchor="decision",
+    )
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="auto",
+        continuation_anchor="decision",
+        continuation_reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair",
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+
+    assert snapshot["last_controller_decision_authorization"]["route_target"] == "analysis-campaign"
+    assert app._publication_gate_controller_pending(snapshot) is True
+    assert (
+        app._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution")
+        == "analysis-campaign"
+    )
+
+
 def test_turn_skill_for_command_execution_prefers_paper_followthrough_stage_over_decision_anchor() -> None:
     snapshot = {
         "active_anchor": "decision",
