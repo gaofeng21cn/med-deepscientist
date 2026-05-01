@@ -3636,6 +3636,8 @@ class DaemonApp:
             continuation_policy = str(snapshot.get("continuation_policy") or "auto").strip().lower() or "auto"
             if continuation_policy == "when_external_progress":
                 return "monitoring"
+            if DaemonApp._publication_gate_controller_pending(snapshot):
+                return "stage_execution"
             if continuation_policy in {"wait_for_user_or_resume", "none"}:
                 return "parked"
             return "stage_execution"
