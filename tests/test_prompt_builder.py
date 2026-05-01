@@ -116,6 +116,35 @@ def test_prompt_builder_includes_recovery_resume_packet_for_daemon_recovery(temp
     assert "this turn exists because the daemon/runtime previously died" in prompt
 
 
+def test_prompt_builder_controller_owned_publication_gate_overrides_parked_wait_step(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+    quest_root = Path(snapshot["quest_root"])
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_anchor="decision",
+        continuation_reason="non_retryable_runner_error",
+    )
+    snapshot = service.snapshot(snapshot["quest_id"])
+    snapshot["last_controller_decision_authorization"] = {
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair",
+    }
+    snapshot["paper_contract_health"] = {
+        "global_stage_authority": "publication_gate",
+        "managed_publication_gate_clear": False,
+        "recommended_action": "return_to_publishability_gate",
+    }
+
+    next_step = builder._next_required_step(snapshot=snapshot)
+
+    assert "controller owns the current publication-gate blocker" in next_step
+    assert "analysis-campaign" in next_step
+    assert "analysis_claim_evidence_repair" in next_step
+    assert "do not wait for a new user message or `/resume`" in next_step
+
+
 def test_prompt_builder_stays_compact_and_avoids_redundant_stage_sop(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     prompt = builder.build(

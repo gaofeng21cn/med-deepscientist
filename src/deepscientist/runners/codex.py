@@ -88,6 +88,50 @@ _PROVIDER_ENV_CONFLICT_KEYS = (
 _CHAT_WIRE_TOOL_CALL_GUARD_MARKER = "## Codex Chat-Wire Tool Call Compatibility"
 
 
+def _record_runner_postprocess_warning(
+    *,
+    quest_events: Path,
+    logger: JsonlLogger,
+    quest_id: str,
+    run_id: str,
+    skill_id: str,
+    model: str,
+    stage: str,
+    error: Exception,
+) -> None:
+    summary = (
+        f"Runner postprocess stage `{stage}` failed for completed run `{run_id}`: {error}. "
+        "The successful runner result is preserved."
+    )
+    append_jsonl(
+        quest_events,
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.turn_postprocess_warning",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "source": "codex",
+            "skill_id": skill_id,
+            "model": model,
+            "stage": stage,
+            "summary": summary,
+            "created_at": utc_now(),
+        },
+    )
+    log = getattr(logger, "log", None)
+    if callable(log):
+        log(
+            "warning",
+            "runner.codex.postprocess_warning",
+            quest_id=quest_id,
+            run_id=run_id,
+            skill_id=skill_id,
+            model=model,
+            stage=stage,
+            error=str(error),
+        )
+
+
 def _usage_metrics_from_event(event: dict[str, Any]) -> dict[str, int]:
     candidates: list[dict[str, Any]] = []
     for key in ("usage", "token_usage", "turn_usage"):
@@ -1110,23 +1154,58 @@ class CodexRunner:
                 model=request.model,
                 exit_code=exit_code,
             )
-            artifact_result = self.artifact_service.record(
-                request.quest_root,
-                {
-                    "kind": "run",
-                    "status": "completed" if exit_code == 0 else "failed",
+            artifact_result: dict[str, Any] = {
+                "status": "postprocess_not_recorded",
+                "run_id": request.run_id,
+            }
+            try:
+                artifact_result = self.artifact_service.record(
+                    request.quest_root,
+                    {
+                        "kind": "run",
+                        "status": "completed" if exit_code == 0 else "failed",
+                        "run_id": request.run_id,
+                        "run_kind": request.skill_id,
+                        "model": request.model,
+                        "summary": (summary_text or output_text)[:1000],
+                        "history_root": str(history_root),
+                        "run_root": str(run_root),
+                        "exit_code": exit_code,
+                    },
+                    workspace_root=workspace_root,
+                    commit_message=f"run: {request.skill_id} {request.run_id}",
+                )
+            except Exception as exc:
+                artifact_result = {
+                    "status": "postprocess_failed",
+                    "stage": "artifact_record",
                     "run_id": request.run_id,
-                    "run_kind": request.skill_id,
-                    "model": request.model,
-                    "summary": (summary_text or output_text)[:1000],
-                    "history_root": str(history_root),
-                    "run_root": str(run_root),
-                    "exit_code": exit_code,
-                },
-                workspace_root=workspace_root,
-                commit_message=f"run: {request.skill_id} {request.run_id}",
-            )
-            export_git_graph(request.quest_root, request.quest_root / "artifacts" / "graphs")
+                    "error": str(exc),
+                }
+                _record_runner_postprocess_warning(
+                    quest_events=quest_events,
+                    logger=self.logger,
+                    quest_id=request.quest_id,
+                    run_id=request.run_id,
+                    skill_id=request.skill_id,
+                    model=request.model,
+                    stage="artifact_record",
+                    error=exc,
+                )
+            else:
+                try:
+                    export_git_graph(request.quest_root, request.quest_root / "artifacts" / "graphs")
+                except Exception as exc:
+                    _record_runner_postprocess_warning(
+                        quest_events=quest_events,
+                        logger=self.logger,
+                        quest_id=request.quest_id,
+                        run_id=request.run_id,
+                        skill_id=request.skill_id,
+                        model=request.model,
+                        stage="export_git_graph",
+                        error=exc,
+                    )
             write_json(run_root / "artifact.json", artifact_result)
             return RunResult(
                 ok=exit_code == 0,

@@ -344,13 +344,19 @@ class PromptBuilder:
         normalized_reason = str(turn_reason or "user_message").strip() or "user_message"
         lines = [f"- turn_reason: {normalized_reason}"]
         if normalized_reason == "auto_continue":
+            resolved_turn_mode = str(turn_mode or "stage_execution").strip() or "stage_execution"
             lines.extend(
                 [
+                    f"- turn_mode: {resolved_turn_mode}",
                     "- this turn was started by the runtime because the quest is still unfinished and no blocking user decision is currently pending",
                     "- there is no new user message attached to this turn; continue from the current durable quest state, active user requirements, recent conversation, and the latest artifacts",
                     "- do not reinterpret the last user message as if it were newly sent again",
                 ]
             )
+            if resolved_turn_mode == "stage_execution":
+                lines.append(
+                    "- stage_execution_rule: treat this as an executable controller/runtime turn, not as a parked status reply."
+                )
         elif normalized_reason == "queued_user_messages":
             lines.extend(
                 [
@@ -634,6 +640,42 @@ class PromptBuilder:
         pending_user_count = int(snapshot.get("pending_user_message_count") or 0)
         if pending_user_count > 0:
             return f"Poll artifact.interact(...) and handle the {pending_user_count} queued user message(s) first."
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        publication_gate_controller_pending = (
+            str(paper_health.get("global_stage_authority") or "").strip().lower() == "publication_gate"
+            and not bool(paper_health.get("managed_publication_gate_clear"))
+        )
+        if not publication_gate_controller_pending:
+            recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+            current_required_action = str(
+                paper_health.get("managed_publication_gate_current_required_action") or ""
+            ).strip().lower()
+            publication_gate_controller_pending = recommended_action in {
+                "return_to_publishability_gate",
+                "return_to_controller",
+            } or current_required_action in {
+                "return_to_publishability_gate",
+                "return_to_controller",
+            }
+        if publication_gate_controller_pending:
+            controller_auth = (
+                dict(snapshot.get("last_controller_decision_authorization") or {})
+                if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+                else {}
+            )
+            route_target = str(controller_auth.get("route_target") or "").strip()
+            route_question = str(controller_auth.get("route_key_question") or "").strip()
+            route_clause = f" through `{route_target}`" if route_target else ""
+            question_clause = f"; active work unit: {route_question}" if route_question else ""
+            return (
+                "MAS/controller owns the current publication-gate blocker"
+                f"{route_clause}{question_clause}. Execute that controller-owned work unit from durable state now; "
+                "do not wait for a new user message or `/resume`."
+            )
         continuation_policy = str(snapshot.get("continuation_policy") or "auto").strip().lower() or "auto"
         continuation_anchor = str(snapshot.get("continuation_anchor") or "").strip()
         if continuation_policy == "wait_for_user_or_resume":

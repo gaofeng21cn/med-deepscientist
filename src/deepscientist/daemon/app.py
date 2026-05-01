@@ -2453,6 +2453,9 @@ class DaemonApp:
             event_summary=f"Quest {quest_id} resumed via `{source}`.",
         )
         snapshot = self.quest_service.snapshot_fast(quest_id)
+        controller_snapshot = snapshot
+        if not preserve_waiting_state and pending_user_message_count == 0:
+            controller_snapshot = self.quest_service.snapshot(quest_id)
         recovery_abandoned_run_id = None
         recovery_summary = None
         if source.startswith("auto:daemon-recovery"):
@@ -2469,6 +2472,11 @@ class DaemonApp:
             "last_recovery_abandoned_run_id": recovery_abandoned_run_id,
             "last_recovery_summary": recovery_summary,
         }
+        controller_pending = (
+            not preserve_waiting_state
+            and pending_user_message_count == 0
+            and self._publication_gate_controller_pending(controller_snapshot)
+        )
         if continuation_updates:
             runtime_state_updates.update(
                 continuation_policy=continuation_updates["continuation_policy"],
@@ -2480,11 +2488,23 @@ class DaemonApp:
                     f"Quest {quest_id} continuation policy reconciled for control mode `{control_mode}` during resume."
                 ),
             )
+        if controller_pending:
+            runtime_state_updates.update(
+                continuation_policy="auto",
+                continuation_anchor="decision",
+                continuation_reason="controller_work_unit_pending",
+                continuation_updated_at=utc_now(),
+                event_source="quest_resume",
+                event_kind="runtime_continuation_changed",
+                event_summary=(
+                    f"Quest {quest_id} resumed into a controller-owned publication-gate work unit."
+                ),
+            )
         self.quest_service.update_runtime_state(
             quest_root=quest_root,
             **runtime_state_updates,
         )
-        if continuation_updates:
+        if continuation_updates or controller_pending:
             snapshot = self.quest_service.snapshot_fast(quest_id)
         summary = f"Quest {quest_id} resumed."
         event = self._append_control_event(
@@ -3653,6 +3673,18 @@ class DaemonApp:
         continuation_anchor = str(snapshot.get("continuation_anchor") or "").strip()
         if continuation_anchor in CONTINUATION_SKILLS and continuation_anchor != "decision":
             return continuation_anchor
+        controller_auth = (
+            dict(snapshot.get("last_controller_decision_authorization") or {})
+            if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+        controller_route_target = str(controller_auth.get("route_target") or "").strip()
+        if (
+            DaemonApp._publication_gate_controller_pending(snapshot)
+            and controller_route_target in CONTINUATION_SKILLS
+            and controller_route_target != "decision"
+        ):
+            return controller_route_target
         paper_health = (
             dict(snapshot.get("paper_contract_health") or {})
             if isinstance(snapshot.get("paper_contract_health"), dict)
@@ -4551,6 +4583,18 @@ class DaemonApp:
         )
         if anti_spin_update:
             runtime_updates.update(anti_spin_update)
+        elif (
+            self._publication_gate_controller_pending(finished_snapshot)
+            and str(snapshot.get("continuation_policy") or "").strip().lower() == "wait_for_user_or_resume"
+        ):
+            runtime_updates.update(
+                {
+                    "continuation_policy": "auto",
+                    "continuation_anchor": "decision",
+                    "continuation_reason": "controller_work_unit_pending",
+                    "continuation_updated_at": utc_now(),
+                }
+            )
         self.quest_service.update_runtime_state(
             quest_root=self.quest_service._quest_root(quest_id),
             **runtime_updates,

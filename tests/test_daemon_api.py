@@ -442,6 +442,32 @@ def test_turn_skill_for_auto_continue_prefers_paper_followthrough_stage_over_dec
     assert DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution") == "write"
 
 
+def test_turn_skill_for_controller_owned_publication_gate_prefers_controller_route_target() -> None:
+    snapshot = {
+        "active_anchor": "write",
+        "continuation_anchor": "decision",
+        "baseline_gate": "confirmed",
+        "paper_contract_health": {
+            "global_stage_authority": "publication_gate",
+            "managed_publication_gate_clear": False,
+            "recommended_next_stage": "write",
+            "recommended_action": "return_to_publishability_gate",
+        },
+        "last_controller_decision_authorization": {
+            "route_target": "analysis-campaign",
+            "route_key_question": "analysis_claim_evidence_repair",
+        },
+        "startup_contract": {
+            "need_research_paper": True,
+        },
+    }
+
+    assert (
+        DaemonApp._turn_skill_for(snapshot, None, turn_reason="auto_continue", turn_mode="stage_execution")
+        == "analysis-campaign"
+    )
+
+
 def test_turn_skill_for_command_execution_prefers_paper_followthrough_stage_over_decision_anchor() -> None:
     snapshot = {
         "active_anchor": "decision",
@@ -5149,6 +5175,81 @@ def test_resume_quest_control_mode_autonomous_reconciles_legacy_wait_and_auto_co
     assert runtime_state["continuation_reason"] == "control_mode_autonomous"
 
 
+def test_resume_quest_controller_owned_publication_gate_clears_stale_runner_error_wait(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume controller-owned publication gate work unit")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_anchor="decision",
+        continuation_reason="non_retryable_runner_error",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair",
+    }
+    write_json(runtime_state_path, runtime_state)
+    scheduled: list[tuple[str, str]] = []
+
+    def _fake_schedule_turn(target_quest_id: str, *, reason: str = "user_message") -> dict[str, object]:
+        scheduled.append((target_quest_id, reason))
+        return {
+            "scheduled": True,
+            "started": True,
+            "queued": False,
+            "reason": reason,
+        }
+
+    monkeypatch.setattr(app, "schedule_turn", _fake_schedule_turn)
+
+    payload = app.resume_quest(quest_id, source="runtime_watch")
+
+    assert payload["scheduled"] is True
+    assert payload["snapshot"]["continuation_policy"] == "auto"
+    assert payload["snapshot"]["continuation_reason"] == "controller_work_unit_pending"
+    assert scheduled == [(quest_id, "auto_continue")]
+    runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
+    assert runtime_state["continuation_policy"] == "auto"
+    assert runtime_state["continuation_reason"] == "controller_work_unit_pending"
+
+
 def test_quest_control_pause_marks_quest_paused_and_interrupts_runner(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -7228,6 +7329,59 @@ def test_auto_continue_keeps_publication_gate_blocker_controller_owned(temp_home
     app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
     snapshot = app.quest_service.snapshot(quest_id)
     assert snapshot["same_fingerprint_auto_turn_count"] >= 3
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+
+
+def test_successful_auto_continue_clears_stale_wait_when_publication_gate_controller_pending(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("successful controller-owned publication gate turn")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        continuation_policy="wait_for_user_or_resume",
+        continuation_anchor="decision",
+        continuation_reason="non_retryable_runner_error",
+    )
+
+    app._normalize_status_after_turn(quest_id, turn_reason="auto_continue")
+
+    snapshot = app.quest_service.snapshot(quest_id)
     assert snapshot["continuation_policy"] == "auto"
     assert snapshot["continuation_anchor"] == "decision"
     assert snapshot["continuation_reason"] == "controller_work_unit_pending"

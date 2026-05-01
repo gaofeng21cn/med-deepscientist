@@ -1108,3 +1108,123 @@ def test_codex_runner_drains_stderr_before_stdout_finishes(monkeypatch, temp_hom
     assert telemetry["stdout_event_count"] == 4
     assert telemetry["model_inherited"] is False
     assert telemetry["reasoning_effort"] == "xhigh"
+
+
+def test_codex_runner_preserves_success_when_artifact_record_postprocess_fails(
+    monkeypatch,
+    temp_home,
+) -> None:  # type: ignore[no-untyped-def]
+    class _PromptBuilder:
+        def build(self, **_: object) -> str:
+            return "prompt from builder"
+
+    class _Logger:
+        def __init__(self) -> None:
+            self.events: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        def log(self, *args: object, **kwargs: object) -> None:
+            self.events.append((args, kwargs))
+
+    class _QuestService:
+        def schedule_projection_refresh(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+    class _ArtifactService:
+        def __init__(self) -> None:
+            self.quest_service = _QuestService()
+
+        def record(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("unknown file extension: .png")
+
+    class _FakeStdin:
+        def write(self, text: str) -> int:
+            return len(text)
+
+        def close(self) -> None:
+            return None
+
+    class _FakeStdout:
+        def __init__(self) -> None:
+            self._lines = [
+                json.dumps({"type": "thread.started", "thread_id": "thr-001"}) + "\n",
+                json.dumps({"type": "turn.started"}) + "\n",
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {"type": "agent_message", "id": "item-001", "text": "done"},
+                    }
+                )
+                + "\n",
+                json.dumps({"type": "turn.completed"}) + "\n",
+            ]
+
+        def __iter__(self) -> "_FakeStdout":
+            return self
+
+        def __next__(self) -> str:
+            if not self._lines:
+                raise StopIteration
+            return self._lines.pop(0)
+
+    class _FakeStderr:
+        def read(self) -> str:
+            return ""
+
+    class _FakeProcess:
+        stdin = _FakeStdin()
+        stdout = _FakeStdout()
+        stderr = _FakeStderr()
+
+        def wait(self) -> int:
+            return 0
+
+        def poll(self) -> None:
+            return None
+
+    monkeypatch.setattr("deepscientist.runners.codex.subprocess.Popen", lambda *args, **kwargs: _FakeProcess())
+    monkeypatch.setattr(
+        "deepscientist.runners.codex.normalize_codex_reasoning_effort",
+        lambda reasoning_effort, *, resolved_binary: (str(reasoning_effort), None),
+    )
+
+    logger = _Logger()
+    runner = CodexRunner(
+        home=temp_home,
+        repo_root=temp_home,
+        binary="codex",
+        logger=logger,  # type: ignore[arg-type]
+        prompt_builder=_PromptBuilder(),  # type: ignore[arg-type]
+        artifact_service=_ArtifactService(),  # type: ignore[arg-type]
+    )
+
+    quest_root = temp_home / "quest"
+    quest_root.mkdir(parents=True, exist_ok=True)
+    (quest_root / "quest.yaml").write_text("active_anchor: write\n", encoding="utf-8")
+    worktree_root = quest_root / "workspace"
+    worktree_root.mkdir(parents=True, exist_ok=True)
+    result = runner.run(
+        RunRequest(
+            quest_id="q-001",
+            quest_root=quest_root,
+            worktree_root=worktree_root,
+            run_id="run-001",
+            skill_id="write",
+            message="continue",
+            model="gpt-5.4",
+            approval_policy="never",
+            sandbox_mode="danger-full-access",
+            reasoning_effort="xhigh",
+            turn_reason="auto_continue",
+            turn_intent="continue_stage",
+            turn_mode="stage_execution",
+        )
+    )
+
+    assert result.ok is True
+    assert result.exit_code == 0
+    events = (quest_root / ".ds" / "events.jsonl").read_text(encoding="utf-8")
+    assert "runner.turn_postprocess_warning" in events
+    assert "runner.turn_error" not in events
+    artifact = read_json(quest_root / ".ds" / "runs" / "run-001" / "artifact.json", {})
+    assert artifact["status"] == "postprocess_failed"
+    assert artifact["stage"] == "artifact_record"
