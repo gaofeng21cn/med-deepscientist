@@ -30,6 +30,9 @@ DECISION_ACTIONS = {
     "write",
     "finalize",
     "request_user_decision",
+    "controller_work_unit_pending",
+    "controller_backoff_pending",
+    "platform_repair_required",
 }
 
 

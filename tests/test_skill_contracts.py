@@ -466,7 +466,11 @@ def test_system_prompt_keeps_decision_actions_enumerated_and_python_env_managed(
 
     assert "decision_action_rule" in text
     assert "`request_user_decision`" in text
+    assert "`platform_repair_required`" in text
+    assert "`controller_work_unit_pending`" in text
+    assert "`controller_backoff_pending`" in text
     assert "not in a made-up action string" in text
+    assert "Use controller/platform actions only for runtime control-plane blockers" in text
     assert "managed_python_env_rule" in text
     assert "`uv run ...`" in text
     assert "system `pytest`" in text

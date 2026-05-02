@@ -85,8 +85,12 @@ Use the following canonical actions:
 - `reset`
 - `stop`
 - `request_user_decision`
+- `controller_work_unit_pending`
+- `controller_backoff_pending`
+- `platform_repair_required`
 
 Choose the smallest action that genuinely resolves the current state.
+Use controller/platform actions only for runtime control-plane blockers. Keep the precise work-unit, backoff, or repair details in `reason`, `protocol_step`, and `details`; do not use them for ordinary manuscript or experiment routing.
 
 In the current runtime, prefer these concrete flow actions:
 

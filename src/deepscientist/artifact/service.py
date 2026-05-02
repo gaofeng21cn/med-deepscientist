@@ -256,6 +256,14 @@ class ArtifactService:
         return cls._normalize_decision_action(action) == "stop"
 
     @classmethod
+    def _is_controller_pending_decision_action(cls, action: object) -> bool:
+        return cls._normalize_decision_action(action) in {
+            "controller_work_unit_pending",
+            "controller_backoff_pending",
+            "platform_repair_required",
+        }
+
+    @classmethod
     def _normalize_record_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
         normalized_payload = dict(payload)
         if str(normalized_payload.get("kind") or "").strip() == "decision":
@@ -4373,7 +4381,11 @@ class ArtifactService:
             operational_route = str(details.get("operational_route") or "").strip()
             route_action = operational_route.rsplit("/", 1)[-1].strip() if "/" in operational_route else ""
             protocol_step = str(record.get("protocol_step") or "").strip().lower()
-            if self._is_parked_decision_action(action) or action in {"reset", "request_user_decision"}:
+            if (
+                self._is_controller_pending_decision_action(action)
+                or self._is_parked_decision_action(action)
+                or action in {"reset", "request_user_decision"}
+            ):
                 display_action = action
                 if route_action and route_action != action:
                     display_action = route_action
@@ -7767,7 +7779,9 @@ class ArtifactService:
             self.quest_service.update_runtime_state(
                 quest_root=quest_root,
                 continuation_policy=(
-                    "wait_for_user_or_resume"
+                    "auto"
+                    if self._is_controller_pending_decision_action(record.get("action"))
+                    else "wait_for_user_or_resume"
                     if self._is_parked_decision_action(record.get("action"))
                     else "auto"
                 ),

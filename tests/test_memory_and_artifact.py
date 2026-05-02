@@ -7029,6 +7029,150 @@ def test_paper_decision_sync_projects_stop_hold_display_without_changing_canonic
     assert "- Canonical recorded action: `stop`" in refreshed_summary
 
 
+def test_paper_decision_sync_projects_platform_repair_required_route(
+    temp_home: Path,
+    monkeypatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("paper platform repair sync quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+
+    candidate = artifact.submit_paper_outline(
+        quest_root,
+        mode="candidate",
+        title="Platform Repair Route Outline",
+        detailed_outline={
+            "title": "Platform Repair Route Outline",
+            "research_questions": ["RQ-platform-repair-route"],
+            "experimental_designs": ["EXP-platform-repair-route"],
+        },
+    )
+    artifact.submit_paper_outline(
+        quest_root,
+        mode="select",
+        outline_id=candidate["outline_id"],
+        selected_reason="Promote the outline into the active paper line.",
+    )
+
+    paper_workspace = quest_service.active_workspace_root(quest_root)
+    paper_root = paper_workspace / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    (paper_root / "draft.md").write_text("# Draft\n\nPlatform repair maintenance.\n", encoding="utf-8")
+
+    monkeypatch.setattr(artifact, "_synchronize_paper_reference_materials", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        artifact,
+        "_paper_contract_health_payload",
+        lambda *args, **kwargs: {
+            "contract_ok": True,
+            "writing_ready": True,
+            "audit_package_ready": True,
+            "finalize_ready": False,
+            "bundle_present": True,
+            "delivery_state": "audit_ready",
+            "closure_state": "audit_ready_with_blockers",
+            "delivered_at": None,
+            "keep_bundle_fixed_by_default": False,
+            "selected_outline_ref": "outline-001",
+            "section_count": 1,
+            "ready_section_count": 1,
+            "ledger_item_count": 1,
+            "unresolved_required_count": 0,
+            "unmapped_completed_count": 0,
+            "open_supplementary_count": 0,
+            "reference_materialization_ready": True,
+            "bibliography_ready": True,
+            "bibliography_entry_count": 20,
+            "references_path": None,
+            "literature_ready": True,
+            "literature_record_count": 20,
+            "literature_record_counts": {},
+            "literature_record_paths": [],
+            "reference_gate": "ready",
+            "surface_consistency_ok": True,
+            "surface_counts": [],
+            "citation_usage_ready": True,
+            "draft_available": True,
+            "draft_citation_count": 0,
+            "draft_unique_citation_count": 0,
+            "draft_citation_keys": [],
+            "cited_bibliography_ready": True,
+            "cited_bibliography_entry_count": 20,
+            "minimum_cited_bibliography_entries": 20,
+            "citation_key_resolution_ok": True,
+            "unresolved_citation_key_count": 0,
+            "unresolved_citation_keys": [],
+            "citation_usage_by_section": [],
+            "review_outputs_ready": False,
+            "review_report_path": None,
+            "review_revision_log_path": None,
+            "proofing_outputs_ready": False,
+            "proofing_report_path": None,
+            "proofing_language_issues_path": None,
+            "submission_checklist_ready": False,
+            "submission_checklist_path": None,
+            "submission_blocking_item_count": 0,
+            "submission_blocking_items": [],
+            "final_claim_ledger_ready": False,
+            "final_claim_ledger_path": None,
+            "finalize_resume_packet_ready": False,
+            "finalize_resume_packet_path": None,
+            "completion_approval_ready": False,
+            "completion_blocking_reasons": [],
+            "blocking_reasons": ["publication gate validator cannot recognize a repaired prose review mirror"],
+            "recommended_next_stage": "finalize",
+            "recommended_action": "return_to_publishability_gate",
+            "recommendation_scope": "paper_line_local_only",
+            "global_stage_authority": "publication_gate",
+            "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+            "managed_publication_gate_clear": False,
+            "unresolved_required_items": [],
+            "unmapped_completed_items": [],
+        },
+    )
+
+    quest_service.update_settings(quest["quest_id"], active_anchor="decision")
+
+    recorded = artifact.record(
+        quest_root,
+        {
+            "kind": "decision",
+            "stage": "decision",
+            "verdict": "blocked",
+            "action": "platform_repair_required",
+            "next_stage": "decision",
+            "protocol_step": "validator_recognition_platform_repair",
+            "reason": "The manuscript-side repair passed local checks, but the managed publication gate still cannot recognize the repaired prose review mirror.",
+            "summary": "Route is blocked on platform repair instead of manuscript-content churn.",
+            "details": {
+                "operational_route": "decision/platform_repair_required",
+                "platform_repair": {
+                    "surface": "publication_gate_validator",
+                    "symptom": "medical_prose_review_valid_false_after_local_schema_repair",
+                },
+            },
+        },
+        workspace_root=paper_workspace,
+    )
+
+    snapshot = quest_service.snapshot(quest["quest_id"])
+    refreshed_status = (quest_root / "status.md").read_text(encoding="utf-8")
+    refreshed_summary = (quest_root / "SUMMARY.md").read_text(encoding="utf-8")
+    payload = read_json(quest_root / "paper" / "paper_line_state.json", {})
+
+    assert recorded["ok"] is True
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert payload["continuation_display_action"] == "platform_repair_required"
+    assert payload["continuation_canonical_action"] == "platform_repair_required"
+    assert "Current Quest Route: `decision` / `platform_repair_required`" in refreshed_status
+    assert "- Quest-Level Next Action: `platform_repair_required`" in refreshed_status
+    assert "- Quest-level next step: `decision` / `platform_repair_required`" in refreshed_summary
+
+
 def test_paper_line_sync_preserves_stop_route_for_unchanged_finalize_park(
     temp_home: Path,
     monkeypatch,
