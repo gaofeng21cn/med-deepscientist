@@ -1701,6 +1701,29 @@ class DaemonApp:
 
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:
         snapshot = self._compact_snapshot_with_reconciled_turn_state(quest_id)
+        turn_state = self._refresh_turn_worker_state(quest_id)
+        if not turn_state.get("running"):
+            active_run_id = str(snapshot.get("active_run_id") or "").strip()
+            if active_run_id and self._active_run_has_recent_external_activity(
+                self.quest_service._quest_root(quest_id),
+                active_run_id,
+            ):
+                return {
+                    "scheduled": True,
+                    "started": False,
+                    "queued": True,
+                    "reason": "external_live_run_active",
+                    "active_run_id": active_run_id,
+                }
+            external_live_run_id = self._rebind_missing_active_external_live_run(quest_id, snapshot=snapshot)
+            if external_live_run_id:
+                return {
+                    "scheduled": True,
+                    "started": False,
+                    "queued": True,
+                    "reason": "external_live_run_active",
+                    "active_run_id": external_live_run_id,
+                }
         recovery = self._recover_stalled_running_turn(quest_id, snapshot=snapshot, turn_reason=reason)
         if recovery.get("blocked"):
             return {
@@ -2092,6 +2115,11 @@ class DaemonApp:
         worker_pending = bool(turn_state.get("pending"))
         stop_requested = bool(turn_state.get("stop_requested"))
         active_run_id = str(resolved_snapshot.get("active_run_id") or "").strip() or None
+        if active_run_id is None:
+            rebound_run_id = self._rebind_missing_active_external_live_run(quest_id, snapshot=resolved_snapshot)
+            if rebound_run_id:
+                resolved_snapshot = self.quest_service.snapshot_fast(quest_id)
+                active_run_id = rebound_run_id
         if not worker_running and active_run_id:
             quest_root = self.quest_service._quest_root(quest_id)
             worker_running = self._active_run_has_recent_external_activity(quest_root, active_run_id)
@@ -2109,6 +2137,12 @@ class DaemonApp:
             self._refresh_turn_worker_state(quest_id)
             if self._record_latest_completed_parked_auto_continue_closeout_if_missing(quest_id):
                 return self.quest_service.snapshot(quest_id)
+            rebound_run_id = self._latest_recent_external_live_run_id(
+                self.quest_service._quest_root(quest_id),
+                exclude_run_ids=set(),
+            )
+            if rebound_run_id:
+                return self._rebind_external_live_run(quest_id, run_id=rebound_run_id)
             return snapshot
         turn_state = self._refresh_turn_worker_state(quest_id)
         stale_live_turn_reconciled = False
@@ -2212,6 +2246,100 @@ class DaemonApp:
             state.pop("worker", None)
         self._schedule_runtime_storage_maintenance(quest_id)
         return reconciled
+
+    def _rebind_missing_active_external_live_run(self, quest_id: str, *, snapshot: dict | None = None) -> str | None:
+        snapshot = dict(snapshot or self.quest_service.snapshot_fast(quest_id))
+        if str(snapshot.get("active_run_id") or "").strip():
+            return None
+        quest_root = self.quest_service._quest_root(quest_id)
+        run_id = self._latest_recent_external_live_run_id(quest_root, exclude_run_ids=set())
+        if not run_id:
+            return None
+        self._rebind_external_live_run(quest_id, run_id=run_id)
+        return run_id
+
+    def _rebind_external_live_run(self, quest_id: str, *, run_id: str) -> dict[str, Any]:
+        quest_root = self.quest_service._quest_root(quest_id)
+        summary = f"Rebound active runtime state to externally running run `{run_id}`."
+        snapshot = self.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            status="running",
+            display_status="running",
+            active_run_id=run_id,
+            worker_running=True,
+            event_source="daemon_runtime_reconcile",
+            event_kind="runtime_external_live_run_rebound",
+            event_summary=summary,
+        )
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": generate_id("evt"),
+                "type": "quest.external_live_run_rebound",
+                "quest_id": quest_id,
+                "run_id": run_id,
+                "summary": summary,
+                "created_at": utc_now(),
+            },
+        )
+        self.logger.log(
+            "warning",
+            "quest.external_live_run_rebound",
+            quest_id=quest_id,
+            run_id=run_id,
+        )
+        return snapshot
+
+    def _latest_recent_external_live_run_id(self, quest_root: Path, *, exclude_run_ids: set[str]) -> str | None:
+        now = datetime.now(UTC)
+        latest_by_run: dict[str, datetime] = {}
+        for event in read_jsonl_tail(quest_root / ".ds" / "events.jsonl", 400):
+            run_id = str(event.get("run_id") or "").strip()
+            if not run_id or run_id in exclude_run_ids:
+                continue
+            if str(event.get("type") or "").strip() not in {
+                "runner.turn_start",
+                "runner.tool_call",
+                "runner.tool_result",
+                "runner.turn_progress",
+            }:
+                continue
+            parsed = self._parse_event_timestamp(event.get("created_at"))
+            if parsed is None:
+                continue
+            current = latest_by_run.get(run_id)
+            if current is None or parsed > current:
+                latest_by_run[run_id] = parsed
+        runs_root = quest_root / ".ds" / "runs"
+        if runs_root.exists():
+            for run_root in runs_root.iterdir():
+                if not run_root.is_dir() or run_root.name in exclude_run_ids:
+                    continue
+                for candidate in (run_root / "stdout.jsonl", run_root / "telemetry.json"):
+                    try:
+                        if not candidate.exists():
+                            continue
+                        mtime = datetime.fromtimestamp(candidate.stat().st_mtime, tz=UTC)
+                    except OSError:
+                        continue
+                    current = latest_by_run.get(run_root.name)
+                    if current is None or mtime > current:
+                        latest_by_run[run_root.name] = mtime
+        live_candidates: list[tuple[datetime, str]] = []
+        for run_id, activity_at in latest_by_run.items():
+            if (now - activity_at) > timedelta(seconds=_STALLED_RUNNING_TURN_INACTIVITY_SECONDS):
+                continue
+            result_payload = read_json(quest_root / ".ds" / "runs" / run_id / "result.json", {})
+            if isinstance(result_payload, dict) and (
+                str(result_payload.get("completed_at") or "").strip()
+                or isinstance(result_payload.get("exit_code"), int)
+            ):
+                continue
+            live_candidates.append((activity_at, run_id))
+        if not live_candidates:
+            return None
+        live_candidates.sort(key=lambda item: item[0], reverse=True)
+        return live_candidates[0][1]
 
     def _active_run_has_recent_external_activity(self, quest_root: Path, active_run_id: str) -> bool:
         if not str(active_run_id or "").strip():

@@ -929,6 +929,160 @@ def test_quest_runtime_audit_preserves_active_run_with_recent_runner_activity_fr
     )
 
 
+def test_quest_runtime_audit_rebinds_missing_active_run_from_recent_external_activity(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("runtime audit rebinds external runner quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-external-rebind-001"
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="active",
+        active_run_id=None,
+        worker_running=False,
+    )
+    append_jsonl(
+        quest_root / ".ds" / "events.jsonl",
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.tool_result",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "created_at": utc_now(),
+        },
+    )
+
+    payload = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+
+    assert payload == {
+        "ok": True,
+        "status": "live",
+        "source": "daemon_turn_worker",
+        "active_run_id": run_id,
+        "worker_running": True,
+        "worker_pending": False,
+        "stop_requested": False,
+    }
+    assert snapshot["status"] == "running"
+    assert snapshot["runtime_status"] == "running"
+    assert snapshot["display_status"] == "running"
+    assert snapshot["active_run_id"] == run_id
+    assert snapshot["worker_running"] is True
+    assert any(
+        item.get("type") == "quest.external_live_run_rebound"
+        and item.get("run_id") == run_id
+        for item in app.quest_service.events(quest_id)["events"]
+    )
+
+
+def test_schedule_turn_rebinds_external_live_run_instead_of_starting_duplicate(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("schedule turn rebinds external runner quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-external-rebind-schedule-001"
+    drained: list[str] = []
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="active",
+        active_run_id=None,
+        worker_running=False,
+    )
+    append_jsonl(
+        quest_root / ".ds" / "events.jsonl",
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.tool_call",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "created_at": utc_now(),
+        },
+    )
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: drained.append(target_quest_id))
+
+    payload = app.schedule_turn(quest_id, reason="auto_continue")
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+
+    assert payload == {
+        "scheduled": True,
+        "started": False,
+        "queued": True,
+        "reason": "external_live_run_active",
+        "active_run_id": run_id,
+    }
+    assert drained == []
+    assert snapshot["active_run_id"] == run_id
+    assert snapshot["worker_running"] is True
+
+
+def test_schedule_turn_preserves_queueing_when_local_worker_is_running(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("schedule turn keeps local worker queue quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-local-worker-001"
+    release = threading.Event()
+    worker = threading.Thread(target=lambda: release.wait(timeout=5), daemon=True)
+    worker.start()
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+        worker_running=True,
+    )
+    append_jsonl(
+        quest_root / ".ds" / "events.jsonl",
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.tool_result",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "created_at": utc_now(),
+        },
+    )
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: None)
+    try:
+        with app._turn_lock:
+            app._turn_state[quest_id] = {
+                "running": True,
+                "pending": False,
+                "worker": worker,
+                "stop_requested": False,
+            }
+
+        payload = app.schedule_turn(quest_id, reason="auto_continue")
+        turn_state = app._turn_state[quest_id]
+    finally:
+        release.set()
+        worker.join(timeout=1)
+
+    assert payload == {
+        "scheduled": True,
+        "started": False,
+        "queued": True,
+        "reason": "auto_continue",
+    }
+    assert turn_state["pending"] is True
+
+
 def test_quest_session_surfaces_stale_interaction_watchdog_for_live_silent_turn(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
