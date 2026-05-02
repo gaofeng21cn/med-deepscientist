@@ -3695,6 +3695,39 @@ class DaemonApp:
         }
 
     @staticmethod
+    def _controller_work_unit_lifecycle_block_reason(snapshot: dict) -> str | None:
+        controller_auth = (
+            dict(snapshot.get("last_controller_decision_authorization") or {})
+            if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+        lifecycle = controller_auth.get("controller_work_unit_lifecycle")
+        if isinstance(lifecycle, str):
+            state = lifecycle.strip().lower()
+            return state or None
+        if not isinstance(lifecycle, dict):
+            return None
+        state = str(lifecycle.get("lifecycle_state") or lifecycle.get("state") or "").strip().lower()
+        block_reason = str(lifecycle.get("block_reason") or "").strip().lower()
+        latest_event_type = str(lifecycle.get("latest_event_type") or "").strip().lower()
+        terminal_states = {
+            "closed",
+            "needs_specificity",
+            "platform_repair_required",
+            "await_artifact_delta_or_gate_replay",
+            "gate_reread_required",
+        }
+        if block_reason in terminal_states:
+            return block_reason
+        if state in terminal_states:
+            return state
+        if latest_event_type in terminal_states:
+            return latest_event_type
+        if bool(lifecycle.get("delivery_blocked")):
+            return block_reason or state or latest_event_type or "controller_work_unit_pending"
+        return None
+
+    @staticmethod
     def _has_executable_controller_work_unit_authorization(snapshot: dict) -> bool:
         if not DaemonApp._publication_gate_controller_pending(snapshot):
             return False
@@ -3703,6 +3736,8 @@ class DaemonApp:
             if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
             else {}
         )
+        if DaemonApp._controller_work_unit_lifecycle_block_reason(snapshot) is not None:
+            return False
         route_target = str(controller_auth.get("route_target") or "").strip()
         if route_target not in CONTINUATION_SKILLS or route_target == "decision":
             return False
@@ -3778,13 +3813,16 @@ class DaemonApp:
             "same_fingerprint_auto_turn_count": projected_count,
         }
         if controller_pending:
+            lifecycle_reason = self._controller_work_unit_lifecycle_block_reason(snapshot)
+            controller_reason = lifecycle_reason or "controller_work_unit_pending"
+            controller_projection_reason = lifecycle_reason or "publication_gate_blocker"
             if self._has_executable_controller_work_unit_authorization(snapshot):
                 return False
             self.quest_service.update_runtime_state(
                 quest_root=quest_root,
                 continuation_policy="auto",
                 continuation_anchor="decision",
-                continuation_reason="controller_work_unit_pending",
+                continuation_reason=controller_reason,
                 continuation_updated_at=utc_now(),
                 same_fingerprint_auto_turn_count=projected_count,
                 last_stage_fingerprint=current_fingerprint,
@@ -3798,11 +3836,11 @@ class DaemonApp:
                     "quest_id": quest_id,
                     "source": "daemon_turn_worker",
                     "turn_reason": turn_reason,
-                    "turn_mode": "controller_work_unit_pending",
+                    "turn_mode": controller_reason,
                     "continuation_policy": "auto",
-                    "continuation_reason": "controller_work_unit_pending",
+                    "continuation_reason": controller_reason,
                     "controller_projection": {
-                        "reason": "publication_gate_blocker",
+                        "reason": controller_projection_reason,
                         "same_fingerprint_auto_turn_count": projected_count,
                     },
                     "hold_projection": hold_projection,
@@ -4713,11 +4751,23 @@ class DaemonApp:
         if retry_state:
             return "controller_backoff_pending"
         continuation_reason = str(snapshot.get("continuation_reason") or "").strip().lower()
-        if continuation_reason in {"controller_backoff_pending", "platform_repair_required"}:
+        controller_terminal_reasons = {
+            "controller_backoff_pending",
+            "platform_repair_required",
+            "gate_needs_specificity",
+            "needs_specificity",
+            "gate_reread_required",
+            "await_artifact_delta_or_gate_replay",
+            "closed",
+        }
+        if continuation_reason in controller_terminal_reasons:
             return continuation_reason
         command_reason = str((command_payload or {}).get("continuation_reason") or "").strip().lower()
-        if command_reason in {"controller_backoff_pending", "platform_repair_required"}:
+        if command_reason in controller_terminal_reasons:
             return command_reason
+        lifecycle_reason = DaemonApp._controller_work_unit_lifecycle_block_reason(snapshot)
+        if lifecycle_reason is not None:
+            return lifecycle_reason
         if command_payload and str(command_payload.get("turn_id") or command_payload.get("idempotency_key") or "").strip():
             return "controller_backoff_pending"
         if DaemonApp._publication_gate_controller_pending(snapshot):
@@ -4813,6 +4863,11 @@ class DaemonApp:
                     "controller_work_unit_pending",
                     "controller_backoff_pending",
                     "platform_repair_required",
+                    "gate_needs_specificity",
+                    "needs_specificity",
+                    "gate_reread_required",
+                    "await_artifact_delta_or_gate_replay",
+                    "closed",
                 }
             ):
                 return False
