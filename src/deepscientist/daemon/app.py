@@ -3039,6 +3039,13 @@ class DaemonApp:
             turn_mode=turn_mode,
         ):
             return
+        if self._project_controller_work_unit_block_before_runner(
+            quest_id,
+            snapshot=snapshot,
+            turn_reason=turn_reason,
+            turn_mode=turn_mode,
+        ):
+            return
         if (
             str(turn_reason or "").strip() == "auto_continue"
             and turn_mode == "parked"
@@ -3701,21 +3708,26 @@ class DaemonApp:
             if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
             else {}
         )
+        def normalize_state(value: object) -> str | None:
+            state = str(value or "").strip().lower().replace("-", "_")
+            return state or None
+
         lifecycle = controller_auth.get("controller_work_unit_lifecycle")
         if isinstance(lifecycle, str):
-            state = lifecycle.strip().lower()
-            return state or None
+            return normalize_state(lifecycle)
         if not isinstance(lifecycle, dict):
             return None
-        state = str(lifecycle.get("lifecycle_state") or lifecycle.get("state") or "").strip().lower()
-        block_reason = str(lifecycle.get("block_reason") or "").strip().lower()
-        latest_event_type = str(lifecycle.get("latest_event_type") or "").strip().lower()
+        state = normalize_state(lifecycle.get("lifecycle_state") or lifecycle.get("state"))
+        block_reason = normalize_state(lifecycle.get("block_reason"))
+        latest_event_type = normalize_state(lifecycle.get("latest_event_type"))
         terminal_states = {
             "closed",
             "needs_specificity",
+            "gate_needs_specificity",
             "platform_repair_required",
             "await_artifact_delta_or_gate_replay",
             "gate_reread_required",
+            "stop_hold",
         }
         if block_reason in terminal_states:
             return block_reason
@@ -3728,6 +3740,159 @@ class DaemonApp:
         return None
 
     @staticmethod
+    def _text_values(payload: dict, *keys: str) -> list[str]:
+        values: list[str] = []
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                values.extend(str(item or "").strip() for item in value if str(item or "").strip())
+            else:
+                text = str(value or "").strip()
+                if text:
+                    values.append(text)
+        return values
+
+    @staticmethod
+    def _mapping_has_actionable_controller_target(payload: dict) -> bool:
+        actionable_keys = {
+            "claim_id",
+            "claim_ref",
+            "figure_id",
+            "figure_ref",
+            "table_id",
+            "table_ref",
+            "metric_id",
+            "metric_ref",
+            "citation_id",
+            "citation_ref",
+            "evidence_row_id",
+            "evidence_row_ref",
+            "package_artifact",
+            "artifact_path",
+            "source_path",
+        }
+        if any(str(payload.get(key) or "").strip() for key in actionable_keys):
+            return True
+        for key in (
+            "blocking_artifact_refs",
+            "blocker_details",
+            "gate_blocker_details",
+            "specificity_targets",
+            "work_unit_targets",
+            "gaps",
+        ):
+            value = payload.get(key)
+            if isinstance(value, dict) and DaemonApp._mapping_has_actionable_controller_target(dict(value)):
+                return True
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict) and DaemonApp._mapping_has_actionable_controller_target(dict(item)):
+                        return True
+        return False
+
+    @staticmethod
+    def _controller_auth_blockers(snapshot: dict, controller_auth: dict) -> set[str]:
+        blockers = set(
+            DaemonApp._text_values(
+                controller_auth,
+                "blockers",
+                "fingerprint_blockers",
+                "work_unit_blockers",
+                "gate_blockers",
+                "blocking_reasons",
+            )
+        )
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        blockers.update(
+            DaemonApp._text_values(
+                paper_health,
+                "blocking_reasons",
+                "completion_blocking_reasons",
+                "managed_publication_gate_gap_summaries",
+            )
+        )
+        return {item.strip() for item in blockers if item.strip()}
+
+    @staticmethod
+    def _current_package_freshness_proof_current(payload: dict) -> bool:
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in {"current", "fresh", "synced", "updated", "unchanged", "ready"}:
+            return False
+        if not (
+            str(payload.get("proof_path") or "").strip()
+            and str(payload.get("submission_manifest_path") or "").strip()
+            and (
+                str(payload.get("current_package_root") or "").strip()
+                or str(payload.get("current_package_zip") or "").strip()
+            )
+        ):
+            return False
+        source_signature = str(
+            payload.get("source_signature") or payload.get("evaluated_source_signature") or ""
+        ).strip()
+        authority_signature = str(payload.get("authority_source_signature") or "").strip()
+        return not (source_signature and authority_signature and source_signature != authority_signature)
+
+    @staticmethod
+    def _current_package_freshness_payload(snapshot: dict, controller_auth: dict) -> dict:
+        for payload in (
+            controller_auth.get("current_package_freshness"),
+            snapshot.get("current_package_freshness"),
+            (
+                dict(snapshot.get("paper_contract_health") or {}).get("current_package_freshness")
+                if isinstance(snapshot.get("paper_contract_health"), dict)
+                else None
+            ),
+        ):
+            if isinstance(payload, dict):
+                return dict(payload)
+        return {}
+
+    @staticmethod
+    def _controller_work_unit_authorization_block_reason(snapshot: dict) -> str | None:
+        controller_auth = (
+            dict(snapshot.get("last_controller_decision_authorization") or {})
+            if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+        lifecycle_reason = DaemonApp._controller_work_unit_lifecycle_block_reason(snapshot)
+        if lifecycle_reason is not None:
+            return lifecycle_reason
+        route_target = str(controller_auth.get("route_target") or "").strip()
+        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
+            return "controller_work_unit_pending" if controller_auth else None
+        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
+        work_unit_fingerprint = str(controller_auth.get("work_unit_fingerprint") or "").strip()
+        route_question = str(controller_auth.get("route_key_question") or "").strip()
+        if not work_unit_id or not work_unit_fingerprint:
+            return "controller_work_unit_pending"
+        if work_unit_id in {"gate_needs_specificity", "needs_specificity"}:
+            return "gate_needs_specificity"
+        blockers = DaemonApp._controller_auth_blockers(snapshot, controller_auth)
+        if (
+            "stale_study_delivery_mirror" in blockers
+            and not DaemonApp._current_package_freshness_proof_current(
+                DaemonApp._current_package_freshness_payload(snapshot, controller_auth)
+            )
+        ):
+            return "current_package_freshness_required"
+        if (
+            route_target == "analysis-campaign"
+            and work_unit_id == "analysis_claim_evidence_repair"
+            and not DaemonApp._mapping_has_actionable_controller_target(controller_auth)
+        ):
+            return "gate_needs_specificity"
+        if route_question and not (
+            route_question == work_unit_id or route_question.startswith(f"{work_unit_id}:")
+        ):
+            return "controller_work_unit_pending"
+        return None
+
+    @staticmethod
     def _has_executable_controller_work_unit_authorization(snapshot: dict) -> bool:
         if not DaemonApp._publication_gate_controller_pending(snapshot):
             return False
@@ -3736,17 +3901,65 @@ class DaemonApp:
             if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
             else {}
         )
-        if DaemonApp._controller_work_unit_lifecycle_block_reason(snapshot) is not None:
+        if not controller_auth:
             return False
-        route_target = str(controller_auth.get("route_target") or "").strip()
-        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
+        return DaemonApp._controller_work_unit_authorization_block_reason(snapshot) is None
+
+    def _project_controller_work_unit_block_before_runner(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict,
+        turn_reason: str,
+        turn_mode: str,
+    ) -> bool:
+        if str(turn_reason or "").strip() != "auto_continue":
             return False
-        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
-        work_unit_fingerprint = str(controller_auth.get("work_unit_fingerprint") or "").strip()
-        route_question = str(controller_auth.get("route_key_question") or "").strip()
-        if not work_unit_id or not work_unit_fingerprint:
+        if turn_mode != "stage_execution":
             return False
-        return not route_question or route_question == work_unit_id or route_question.startswith(f"{work_unit_id}:")
+        if int(snapshot.get("pending_user_message_count") or 0) > 0:
+            return False
+        if str(snapshot.get("waiting_interaction_id") or "").strip():
+            return False
+        if str(snapshot.get("active_run_id") or "").strip():
+            return False
+        if not self._publication_gate_controller_pending(snapshot):
+            return False
+        controller_auth = snapshot.get("last_controller_decision_authorization")
+        if not isinstance(controller_auth, dict) or not controller_auth:
+            return False
+        controller_reason = self._controller_work_unit_authorization_block_reason(snapshot)
+        if controller_reason is None:
+            return False
+        quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
+        self.quest_service.update_runtime_state(
+            quest_root=quest_root,
+            continuation_policy="auto",
+            continuation_anchor="decision",
+            continuation_reason=controller_reason,
+            continuation_updated_at=utc_now(),
+            last_stage_fingerprint=self._stage_state_fingerprint(snapshot),
+            last_stage_fingerprint_at=utc_now(),
+        )
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": generate_id("evt"),
+                "type": "runner.turn_skipped",
+                "quest_id": quest_id,
+                "source": "daemon_turn_worker",
+                "turn_reason": turn_reason,
+                "turn_mode": controller_reason,
+                "continuation_policy": "auto",
+                "continuation_reason": controller_reason,
+                "controller_projection": {
+                    "reason": controller_reason,
+                },
+                "summary": "Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
+                "created_at": utc_now(),
+            },
+        )
+        return True
 
     def _project_repeated_auto_hold_before_runner(
         self,
@@ -3814,8 +4027,9 @@ class DaemonApp:
         }
         if controller_pending:
             lifecycle_reason = self._controller_work_unit_lifecycle_block_reason(snapshot)
-            controller_reason = lifecycle_reason or "controller_work_unit_pending"
-            controller_projection_reason = lifecycle_reason or "publication_gate_blocker"
+            auth_block_reason = self._controller_work_unit_authorization_block_reason(snapshot)
+            controller_reason = lifecycle_reason or auth_block_reason or "controller_work_unit_pending"
+            controller_projection_reason = lifecycle_reason or auth_block_reason or "publication_gate_blocker"
             if self._has_executable_controller_work_unit_authorization(snapshot):
                 return False
             self.quest_service.update_runtime_state(
@@ -3920,6 +4134,7 @@ class DaemonApp:
             DaemonApp._publication_gate_controller_pending(snapshot)
             and controller_route_target in CONTINUATION_SKILLS
             and controller_route_target != "decision"
+            and DaemonApp._has_executable_controller_work_unit_authorization(snapshot)
         ):
             return controller_route_target
         paper_health = (

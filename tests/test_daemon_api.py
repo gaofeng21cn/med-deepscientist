@@ -456,6 +456,10 @@ def test_turn_skill_for_controller_owned_publication_gate_prefers_controller_rou
         "last_controller_decision_authorization": {
             "route_target": "analysis-campaign",
             "route_key_question": "analysis_claim_evidence_repair",
+            "work_unit_id": "analysis_claim_evidence_repair",
+            "work_unit_fingerprint": "publication-blockers::specific",
+            "claim_id": "claim-001",
+            "source_path": "/tmp/study/paper/claim_evidence_map.json",
         },
         "startup_contract": {
             "need_research_paper": True,
@@ -521,6 +525,10 @@ def test_snapshot_projects_controller_decision_authorization_for_publication_gat
     runtime_state["last_controller_decision_authorization"] = {
         "route_target": "analysis-campaign",
         "route_key_question": "analysis_claim_evidence_repair",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::specific",
+        "claim_id": "claim-001",
+        "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
     }
     write_json(runtime_state_path, runtime_state)
 
@@ -7929,9 +7937,12 @@ def test_publication_gate_repeated_auto_hold_does_not_wait_for_user_before_runne
     [
         ("closed", "closed"),
         ("needs_specificity", "needs_specificity"),
+        ("gate_needs_specificity", "gate_needs_specificity"),
         ("platform_repair_required", "platform_repair_required"),
         ("await_artifact_delta_or_gate_replay", "await_artifact_delta_or_gate_replay"),
         ("gate_reread_required", "gate_reread_required"),
+        ("stop-hold", "stop_hold"),
+        ("stop_hold", "stop_hold"),
         (
             {
                 "lifecycle_state": "platform_repair_required",
@@ -8096,6 +8107,8 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
         "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence, story, figure, and results traceability blockers.",
         "work_unit_id": "analysis_claim_evidence_repair",
         "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
+        "claim_id": "claim-001",
+        "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
         "active_run_id": "run-stale-authorization",
     }
     write_json(runtime_state_path, runtime_state)
@@ -8141,6 +8154,110 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
     events = read_jsonl(quest_root / ".ds" / "events.jsonl")
     skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
     assert not skipped or skipped[-1].get("turn_mode") != "controller_work_unit_pending"
+
+
+@pytest.mark.parametrize(
+    ("authorization_extra", "expected_reason"),
+    [
+        (
+            {
+                "blockers": ["claim_evidence_consistency_failed"],
+            },
+            "gate_needs_specificity",
+        ),
+        (
+            {
+                "blockers": ["stale_study_delivery_mirror"],
+                "claim_id": "claim-001",
+                "source_path": "/tmp/study/paper/claim_evidence_map.json",
+            },
+            "current_package_freshness_required",
+        ),
+    ],
+)
+def test_publication_gate_incomplete_controller_work_unit_authorization_skips_runner(
+    temp_home: Path,
+    authorization_extra: dict[str, object],
+    expected_reason: str,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(f"publication gate incomplete controller auth {expected_reason}")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence, story, figure, and results traceability blockers.",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
+        **authorization_extra,
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("incomplete controller authorization should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == expected_reason
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == expected_reason
+    assert skipped[-1]["continuation_reason"] == expected_reason
+    assert skipped[-1]["controller_projection"]["reason"] == expected_reason
 
 
 def test_publication_gate_parked_continuation_auto_turn_starts_runner(temp_home: Path) -> None:
