@@ -29,6 +29,7 @@ from .codex_telemetry import (
     DEFAULT_TURN_TOOL_CALL_BUDGET,
     _finalize_tool_budget_telemetry,
     _new_tool_budget_telemetry,
+    _public_tool_budget_telemetry_snapshot,
     _record_tool_budget_event,
 )
 
@@ -251,7 +252,7 @@ def _record_turn_progress_heartbeat(
             "idempotency_key": idempotency_key,
         }
     )
-    write_json(run_root / "telemetry.json", telemetry)
+    write_json(run_root / "telemetry.json", _public_tool_budget_telemetry_snapshot(telemetry))
     append_jsonl(
         quest_events,
         {

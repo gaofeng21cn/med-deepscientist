@@ -2092,6 +2092,9 @@ class DaemonApp:
         worker_pending = bool(turn_state.get("pending"))
         stop_requested = bool(turn_state.get("stop_requested"))
         active_run_id = str(resolved_snapshot.get("active_run_id") or "").strip() or None
+        if not worker_running and active_run_id:
+            quest_root = self.quest_service._quest_root(quest_id)
+            worker_running = self._active_run_has_recent_external_activity(quest_root, active_run_id)
         return build_quest_runtime_audit_contract(
             active_run_id=active_run_id,
             worker_running=worker_running,
@@ -2122,6 +2125,8 @@ class DaemonApp:
                 return snapshot
 
         quest_root = self.quest_service._quest_root(quest_id)
+        if self._active_run_has_recent_external_activity(quest_root, active_run_id):
+            return snapshot
         result_payload = read_json(quest_root / ".ds" / "runs" / active_run_id / "result.json", {})
         completed_at = str(result_payload.get("completed_at") or "").strip() if isinstance(result_payload, dict) else ""
         exit_code = result_payload.get("exit_code") if isinstance(result_payload, dict) else None
@@ -2207,6 +2212,43 @@ class DaemonApp:
             state.pop("worker", None)
         self._schedule_runtime_storage_maintenance(quest_id)
         return reconciled
+
+    def _active_run_has_recent_external_activity(self, quest_root: Path, active_run_id: str) -> bool:
+        if not str(active_run_id or "").strip():
+            return False
+        now = datetime.now(UTC)
+        latest_activity: datetime | None = None
+        run_root = quest_root / ".ds" / "runs" / active_run_id
+        result_payload = read_json(run_root / "result.json", {})
+        if isinstance(result_payload, dict) and (
+            str(result_payload.get("completed_at") or "").strip()
+            or isinstance(result_payload.get("exit_code"), int)
+        ):
+            return False
+        for event in reversed(read_jsonl_tail(quest_root / ".ds" / "events.jsonl", 200)):
+            if str(event.get("run_id") or "").strip() != active_run_id:
+                continue
+            if str(event.get("type") or "").strip() not in {
+                "runner.turn_start",
+                "runner.tool_call",
+                "runner.tool_result",
+                "runner.turn_progress",
+            }:
+                continue
+            parsed = self._parse_event_timestamp(event.get("created_at"))
+            if parsed is not None:
+                latest_activity = parsed
+                break
+        for candidate in (run_root / "stdout.jsonl", run_root / "telemetry.json"):
+            try:
+                if not candidate.exists():
+                    continue
+                mtime = datetime.fromtimestamp(candidate.stat().st_mtime, tz=UTC)
+            except OSError:
+                continue
+            if latest_activity is None or mtime > latest_activity:
+                latest_activity = mtime
+        return latest_activity is not None and (now - latest_activity) <= timedelta(seconds=_STALLED_RUNNING_TURN_INACTIVITY_SECONDS)
 
     def _interrupt_stale_live_turn_if_needed(
         self,

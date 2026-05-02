@@ -96,12 +96,16 @@ Only the following HTTP routes and payload shape are stable for adapter integrat
   - if present, `runtime_event_ref` and `runtime_event` must point to the same durable artifact
 - Stable `runtime_audit` keys:
   - `ok`
-  - `status` (`live` or `none`)
+  - `status` (`live`, `none`, or `invalid`)
   - `source`
   - `active_run_id`
   - `worker_running`
   - `worker_pending`
   - `stop_requested`
+- Stable `runtime_audit` liveness semantics:
+  - `live` requires a non-empty `active_run_id` plus either an in-process daemon worker or recent durable runner activity for that run
+  - `none` means no active run is live from the runtime audit surface
+  - `invalid` means worker liveness was projected without a non-empty `active_run_id`
 
 - `GET /api/quests/{quest_id}/bash/sessions`
 - Stable list entry minimum:

@@ -879,6 +879,56 @@ def test_quest_runtime_audit_reconciles_stale_active_run_without_worker(temp_hom
     )
 
 
+def test_quest_runtime_audit_preserves_active_run_with_recent_runner_activity_from_external_process(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("runtime audit external runner activity quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-external-live-001"
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+    )
+    append_jsonl(
+        quest_root / ".ds" / "events.jsonl",
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.tool_result",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "created_at": utc_now(),
+        },
+    )
+
+    payload = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+
+    assert payload == {
+        "ok": True,
+        "status": "live",
+        "source": "daemon_turn_worker",
+        "active_run_id": run_id,
+        "worker_running": True,
+        "worker_pending": False,
+        "stop_requested": False,
+    }
+    assert snapshot["status"] == "running"
+    assert snapshot["runtime_status"] == "running"
+    assert snapshot["display_status"] == "running"
+    assert snapshot["active_run_id"] == run_id
+    assert not any(
+        item.get("type") == "quest.turn_state_reconciled"
+        and item.get("abandoned_run_id") == run_id
+        for item in app.quest_service.events(quest_id)["events"]
+    )
+
+
 def test_quest_session_surfaces_stale_interaction_watchdog_for_live_silent_turn(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

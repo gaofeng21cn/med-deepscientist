@@ -158,3 +158,17 @@ def _finalize_tool_budget_telemetry(telemetry: dict[str, Any]) -> None:
         else:
             telemetry["turn_progress_kind"] = "no_tool_activity"
     _refresh_repeated_read_ratio(telemetry)
+
+
+def _public_tool_budget_telemetry_snapshot(telemetry: dict[str, Any]) -> dict[str, Any]:
+    snapshot = {key: value for key, value in telemetry.items() if not str(key).startswith("_")}
+    fingerprints = telemetry.get("_unique_command_fingerprints")
+    if isinstance(fingerprints, set):
+        snapshot["unique_command_count"] = len(fingerprints)
+    snapshot["tool_count"] = int(snapshot.get("tool_call_count") or snapshot.get("tool_count") or 0)
+    snapshot["saved_bytes"] = int(snapshot.get("saved_bytes") or snapshot.get("tool_result_bytes_saved_total") or 0)
+    read_count = int(snapshot.get("read_tool_call_count") or 0)
+    repeated_count = int(snapshot.get("repeated_read_result_count") or 0)
+    snapshot["repeated_read_ratio"] = (repeated_count / read_count) if read_count else 0.0
+    snapshot["read_churn_ratio"] = snapshot["repeated_read_ratio"]
+    return snapshot

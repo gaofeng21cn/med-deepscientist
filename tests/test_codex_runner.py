@@ -108,6 +108,41 @@ def test_codex_runner_turn_progress_heartbeat_preserves_idempotency_key(tmp_path
     assert events[-1]["idempotency_key"] == "turn-heartbeat-001"
 
 
+def test_codex_runner_turn_progress_heartbeat_writes_serializable_tool_budget_telemetry(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_root = quest_root / ".ds" / "runs" / "run-heartbeat-telemetry-001"
+    quest_events = quest_root / ".ds" / "events.jsonl"
+    run_root.mkdir(parents=True)
+    telemetry = _new_tool_budget_telemetry(tool_call_budget=3)
+    _record_tool_budget_event(
+        telemetry,
+        {
+            "type": "runner.tool_call",
+            "tool_name": "bash_exec.bash_exec",
+            "args": json.dumps({"mode": "read", "id": "bash-001"}),
+            "command_fingerprint": "bash-read-001",
+        },
+    )
+
+    _record_turn_progress_heartbeat(
+        telemetry=telemetry,
+        quest_events=quest_events,
+        run_root=run_root,
+        quest_id="quest-heartbeat-telemetry-001",
+        run_id="run-heartbeat-telemetry-001",
+        source="codex",
+        skill_id="write",
+        model="inherit",
+        summary="Long-running turn is still active.",
+    )
+
+    updated = read_json(run_root / "telemetry.json", {})
+    assert "_unique_command_fingerprints" not in updated
+    assert updated["unique_command_count"] == 1
+    assert updated["tool_call_count"] == 1
+    assert telemetry["_unique_command_fingerprints"] == {"bash-read-001"}
+
+
 def test_codex_tool_event_truncates_oversized_bash_exec_log_but_keeps_json_parseable() -> None:
     long_log = "\n".join(f"line {index}: {'x' * 200}" for index in range(5000))
     result_payload = {
