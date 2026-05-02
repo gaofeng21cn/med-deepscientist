@@ -103,6 +103,82 @@ def _write_mas_medical_manuscript_blueprint(study_root: Path) -> None:
     )
 
 
+def _write_mas_medical_style_corpus(study_root: Path) -> None:
+    write_json(
+        study_root / "paper" / "medical_journal_style_corpus.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_journal_style_corpus",
+            "corpus_id": "general_medical_journal_style_corpus_v1",
+            "style_profile": {"target_voice": "neutral_clinical_original_research"},
+            "source_refs": [
+                {"source_id": "zeiger_biomedical_papers"},
+                {"source_id": "gopen_swan_reader_expectations"},
+                {"source_id": "jama_author_instructions"},
+                {"source_id": "elsevier_medicine_writing"},
+                {"source_id": "jama_network_open_original_investigations"},
+            ],
+            "principles": {
+                "introduction": ["clinical problem to evidence gap"],
+                "results": ["clinical finding as sentence subject"],
+                "discussion": ["restrained interpretation"],
+            },
+        },
+    )
+
+
+def _write_mas_ai_medical_prose_review_request(study_root: Path) -> None:
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "medical_prose_review_request.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_prose_review_request",
+            "review_owner": "ai_reviewer",
+            "review_policy_id": "medical_publication_critique_v1",
+            "structured_response_contract": {
+                "owner": "ai_reviewer",
+                "mechanical_flags_role": "evidence_snippets_only",
+            },
+        },
+    )
+
+
+def _write_mas_retrospective_medical_prose_audit(study_root: Path) -> None:
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "retrospective_medical_prose_audit.json",
+        {
+            "schema_version": 1,
+            "surface": "retrospective_medical_prose_audit",
+            "assessment_provenance": {
+                "owner": "ai_reviewer",
+                "source_kind": "retrospective_medical_prose_audit",
+                "policy_id": "medical_journal_prose_retrospective_audit_v1",
+                "ai_reviewer_required": False,
+            },
+            "samples": [
+                {
+                    "sample_id": "nf-pitnet-003",
+                    "overall_style_verdict": "work_report_like",
+                    "style_score": 42,
+                    "route_back_recommendation": {"route_target": "write"},
+                },
+                {
+                    "sample_id": "dpcc-003",
+                    "overall_style_verdict": "mixed",
+                    "style_score": 58,
+                    "route_back_recommendation": {"route_target": "write"},
+                },
+                {
+                    "sample_id": "dpcc-004",
+                    "overall_style_verdict": "mixed",
+                    "style_score": 55,
+                    "route_back_recommendation": {"route_target": "write"},
+                },
+            ],
+        },
+    )
+
+
 def _write_mas_ai_medical_prose_review(study_root: Path, *, verdict: str = "clear") -> None:
     status = "ready" if verdict == "clear" else "partial" if verdict == "revise" else "blocked"
     write_json(
@@ -185,7 +261,10 @@ def _materialize_ready_paper_line_for_publication_gate(
     else:
         resolved_study_root = (quest_root / study_root).resolve(strict=False)
     _write_mas_medical_manuscript_blueprint(resolved_study_root)
+    _write_mas_medical_style_corpus(resolved_study_root)
+    _write_mas_ai_medical_prose_review_request(resolved_study_root)
     _write_mas_ai_medical_prose_review(resolved_study_root)
+    _write_mas_retrospective_medical_prose_audit(resolved_study_root)
     paper_root = ensure_dir(quest_root / "paper")
     write_json(
         paper_root / "selected_outline.json",
@@ -1844,6 +1923,114 @@ def test_snapshot_blocks_full_medical_draft_when_mas_blueprint_is_missing(temp_h
     assert health["writing_ready"] is False
     assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
     assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
+
+
+def test_snapshot_blocks_full_medical_draft_when_style_corpus_is_missing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by missing MAS style corpus")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    (study_root / "paper" / "medical_journal_style_corpus.json").unlink()
+    (paper_root / "draft.md").unlink()
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_style_corpus_present"] is False
+    assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert "MAS medical journal style corpus is missing" in health["blocking_reasons"]
+
+
+def test_snapshot_blocks_full_medical_draft_when_ai_prose_review_request_is_missing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by missing MAS AI prose request")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    (study_root / "artifacts" / "publication_eval" / "medical_prose_review_request.json").unlink()
+    (paper_root / "draft.md").unlink()
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_prose_review_request_present"] is False
+    assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert "MAS AI medical prose review request is missing" in health["blocking_reasons"]
 
 
 def test_snapshot_blocks_full_medical_draft_when_ai_prose_review_is_not_clear(temp_home: Path) -> None:

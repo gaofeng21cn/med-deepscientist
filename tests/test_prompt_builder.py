@@ -357,6 +357,24 @@ def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home:
         "mas_medical_writing_preflight_ready": False,
         "mas_medical_manuscript_blueprint_path": "/tmp/study/paper/medical_manuscript_blueprint.json",
         "mas_medical_manuscript_blueprint_valid": True,
+        "mas_medical_style_corpus_path": "/tmp/study/paper/medical_journal_style_corpus.json",
+        "mas_medical_style_corpus_id": "general_medical_journal_style_corpus_v1",
+        "mas_medical_style_corpus_source_ids": [
+            "zeiger_biomedical_papers",
+            "gopen_swan_reader_expectations",
+            "jama_author_instructions",
+            "elsevier_medicine_writing",
+            "jama_network_open_original_investigations",
+        ],
+        "mas_medical_style_corpus_principle_keys": [
+            "introduction",
+            "sentence_information_flow",
+            "results",
+            "discussion",
+            "claim_restraint",
+        ],
+        "mas_medical_prose_review_request_path": "/tmp/study/artifacts/publication_eval/medical_prose_review_request.json",
+        "mas_medical_prose_review_request_valid": True,
         "mas_medical_prose_review_path": "/tmp/study/artifacts/publication_eval/medical_prose_review.json",
         "mas_medical_prose_review_verdict": "revise",
         "mas_medical_prose_review_summary": "AI reviewer found work-report residue in Results.",
@@ -369,6 +387,16 @@ def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home:
                 "after": "The model improved risk stratification across the prespecified threshold range.",
             }
         ],
+        "mas_retrospective_medical_prose_audit_path": "/tmp/study/artifacts/publication_eval/retrospective_medical_prose_audit.json",
+        "mas_retrospective_medical_prose_audit_sample_ids": ["nf-pitnet-003", "dpcc-003", "dpcc-004"],
+        "mas_retrospective_medical_prose_audit_rewrite_targets": [
+            {
+                "sample_id": "nf-pitnet-003",
+                "verdict": "work_report_like",
+                "style_score": 42,
+                "route_target": "write",
+            }
+        ],
     }
 
     prompt = builder._paper_and_evidence_block(snapshot, Path(snapshot["quest_root"]))
@@ -376,9 +404,17 @@ def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home:
     assert "mas_medical_write_preflight: blocked" in prompt
     assert "mas_medical_write_preflight_ready: False" in prompt
     assert "mas_medical_blueprint_path: /tmp/study/paper/medical_manuscript_blueprint.json" in prompt
+    assert "mas_medical_style_corpus_id: general_medical_journal_style_corpus_v1" in prompt
+    assert "zeiger_biomedical_papers" in prompt
+    assert "mas_ai_prose_review_request_valid: True" in prompt
     assert "mas_ai_prose_review_verdict: revise" in prompt
     assert "results: Findings should lead sentences before display citations." in prompt
     assert "The model improved risk stratification across the prespecified threshold range." in prompt
+    assert "mas_retrospective_prose_audit_samples: nf-pitnet-003, dpcc-003, dpcc-004" in prompt
+    assert "nf-pitnet-003: work_report_like -> write" in prompt
+    assert "style corpus present/valid" in prompt
+    assert "AI prose review request present/valid" in prompt
+    assert "use the MAS style corpus and retrospective prose audit" in prompt
     assert "MAS AI medical prose review has not cleared full drafting: revise" in prompt
     assert "route-back plan only" in prompt
     assert "do not generate a full draft from run logs, controller checklists, or package metadata" in prompt

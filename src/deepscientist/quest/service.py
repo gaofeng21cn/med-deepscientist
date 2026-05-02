@@ -84,9 +84,11 @@ _MAS_MEDICAL_BLUEPRINT_REQUIRED_FIELDS = (
 _MAS_AI_PROSE_CLEAR_VERDICTS = {"clear", "ready", "pass", "approved"}
 _MAS_MEDICAL_PROSE_REVIEW_REQUIRED_INPUTS = (
     "paper/medical_manuscript_blueprint.json",
+    "paper/medical_journal_style_corpus.json",
     "paper/claim_evidence_map.json",
     "paper/results_narrative_map.json",
     "paper/figure_semantics_manifest.json",
+    "artifacts/publication_eval/medical_prose_review_request.json",
 )
 
 
@@ -2061,6 +2063,109 @@ class QuestService:
             "route_back_recommendation": route_back or None,
         }
 
+    @staticmethod
+    def _mas_medical_style_corpus_state(study_root: Path | None) -> dict[str, Any]:
+        corpus_path = study_root / "paper" / "medical_journal_style_corpus.json" if study_root is not None else None
+        payload = read_json(corpus_path, {}) if corpus_path is not None and corpus_path.exists() else {}
+        payload_valid = (
+            isinstance(payload, dict)
+            and payload.get("surface") == "medical_journal_style_corpus"
+            and str(payload.get("corpus_id") or "").strip() == "general_medical_journal_style_corpus_v1"
+        )
+        source_refs = [
+            dict(item)
+            for item in (payload.get("source_refs") or [])
+            if isinstance(payload, dict) and isinstance(item, dict)
+        ]
+        principles = dict(payload.get("principles") or {}) if isinstance(payload, dict) else {}
+        return {
+            "path": str(corpus_path) if corpus_path is not None else None,
+            "present": bool(corpus_path is not None and corpus_path.exists()),
+            "valid": bool(payload_valid),
+            "corpus_id": str((payload or {}).get("corpus_id") or "").strip() or None
+            if isinstance(payload, dict)
+            else None,
+            "source_ids": [
+                str(item.get("source_id") or "").strip()
+                for item in source_refs
+                if str(item.get("source_id") or "").strip()
+            ],
+            "target_voice": str((((payload or {}).get("style_profile") or {}).get("target_voice")) or "").strip()
+            or None
+            if isinstance(payload, dict) and isinstance(payload.get("style_profile"), dict)
+            else None,
+            "principle_keys": [
+                str(key).strip()
+                for key, value in principles.items()
+                if str(key).strip() and isinstance(value, list) and value
+            ],
+        }
+
+    @staticmethod
+    def _mas_medical_prose_review_request_state(study_root: Path | None) -> dict[str, Any]:
+        request_path = (
+            study_root / "artifacts" / "publication_eval" / "medical_prose_review_request.json"
+            if study_root is not None
+            else None
+        )
+        payload = read_json(request_path, {}) if request_path is not None and request_path.exists() else {}
+        contract = dict(payload.get("structured_response_contract") or {}) if isinstance(payload, dict) else {}
+        payload_valid = (
+            isinstance(payload, dict)
+            and payload.get("surface") == "medical_prose_review_request"
+            and payload.get("review_owner") == "ai_reviewer"
+            and contract.get("mechanical_flags_role") == "evidence_snippets_only"
+        )
+        return {
+            "path": str(request_path) if request_path is not None else None,
+            "present": bool(request_path is not None and request_path.exists()),
+            "valid": bool(payload_valid),
+            "review_owner": str((payload or {}).get("review_owner") or "").strip() or None
+            if isinstance(payload, dict)
+            else None,
+            "mechanical_flags_role": str(contract.get("mechanical_flags_role") or "").strip() or None,
+        }
+
+    @staticmethod
+    def _mas_retrospective_medical_prose_audit_state(study_root: Path | None) -> dict[str, Any]:
+        audit_path = (
+            study_root / "artifacts" / "publication_eval" / "retrospective_medical_prose_audit.json"
+            if study_root is not None
+            else None
+        )
+        payload = read_json(audit_path, {}) if audit_path is not None and audit_path.exists() else {}
+        provenance = dict(payload.get("assessment_provenance") or {}) if isinstance(payload, dict) else {}
+        samples = [dict(item) for item in (payload.get("samples") or []) if isinstance(item, dict)] if isinstance(payload, dict) else []
+        sample_ids = [
+            str(item.get("sample_id") or "").strip()
+            for item in samples
+            if str(item.get("sample_id") or "").strip()
+        ]
+        payload_valid = (
+            isinstance(payload, dict)
+            and payload.get("surface") == "retrospective_medical_prose_audit"
+            and provenance.get("owner") == "ai_reviewer"
+            and provenance.get("ai_reviewer_required") is False
+            and {"nf-pitnet-003", "dpcc-003", "dpcc-004"}.issubset(set(sample_ids))
+        )
+        return {
+            "path": str(audit_path) if audit_path is not None else None,
+            "present": bool(audit_path is not None and audit_path.exists()),
+            "valid": bool(payload_valid),
+            "owner": str(provenance.get("owner") or "").strip() or None,
+            "sample_ids": sample_ids,
+            "sample_count": len(sample_ids),
+            "top_rewrite_targets": [
+                {
+                    "sample_id": str(item.get("sample_id") or "").strip(),
+                    "verdict": str(item.get("overall_style_verdict") or "").strip(),
+                    "style_score": item.get("style_score"),
+                    "route_target": str(((item.get("route_back_recommendation") or {}).get("route_target")) or "").strip(),
+                }
+                for item in samples[:3]
+            ],
+        }
+
     @classmethod
     def _mas_medical_writing_preflight_payload(
         cls,
@@ -2071,7 +2176,10 @@ class QuestService:
     ) -> dict[str, Any]:
         def _not_required_payload(*, status: str, study_root: Path | None) -> dict[str, Any]:
             blueprint = cls._mas_medical_manuscript_blueprint_state(study_root)
+            style_corpus = cls._mas_medical_style_corpus_state(study_root)
+            prose_review_request = cls._mas_medical_prose_review_request_state(study_root)
             prose_review = cls._mas_medical_prose_review_state(study_root)
+            retrospective_audit = cls._mas_retrospective_medical_prose_audit_state(study_root)
             return {
                 "ready": True,
                 "status": status,
@@ -2079,7 +2187,10 @@ class QuestService:
                 "route_back_target": "none",
                 "required_inputs": [],
                 "blueprint": blueprint,
+                "style_corpus": style_corpus,
+                "prose_review_request": prose_review_request,
                 "prose_review": prose_review,
+                "retrospective_audit": retrospective_audit,
             }
 
         if study_root is None:
@@ -2087,7 +2198,10 @@ class QuestService:
         if not required:
             return _not_required_payload(status="not_required", study_root=study_root)
         blueprint = cls._mas_medical_manuscript_blueprint_state(study_root)
+        style_corpus = cls._mas_medical_style_corpus_state(study_root)
+        prose_review_request = cls._mas_medical_prose_review_request_state(study_root)
         prose_review = cls._mas_medical_prose_review_state(study_root)
+        retrospective_audit = cls._mas_retrospective_medical_prose_audit_state(study_root)
         required_input_paths = {
             "paper/claim_evidence_map.json": paper_root / "claim_evidence_map.json" if paper_root is not None else None,
             "paper/results_narrative_map.json": paper_root / "results_narrative_map.json" if paper_root is not None else None,
@@ -2106,6 +2220,14 @@ class QuestService:
             blocking_reasons.append(
                 "MAS medical manuscript blueprint is incomplete" + (f": {missing}" if missing else "")
             )
+        if not style_corpus["present"]:
+            blocking_reasons.append("MAS medical journal style corpus is missing")
+        elif not style_corpus["valid"]:
+            blocking_reasons.append("MAS medical journal style corpus is incomplete")
+        if not prose_review_request["present"]:
+            blocking_reasons.append("MAS AI medical prose review request is missing")
+        elif not prose_review_request["valid"]:
+            blocking_reasons.append("MAS AI medical prose review request is incomplete or not AI reviewer-targeted")
         if not prose_review["present"]:
             blocking_reasons.append("MAS AI medical prose review is missing")
         elif not prose_review["valid"]:
@@ -2124,9 +2246,9 @@ class QuestService:
         route_back = prose_review.get("route_back_recommendation")
         if isinstance(route_back, dict):
             route_back_target = str(route_back.get("route_target") or route_back_target).strip() or route_back_target
-        if not blueprint["present"] or not blueprint["valid"]:
+        if not blueprint["present"] or not blueprint["valid"] or not style_corpus["present"] or not style_corpus["valid"]:
             route_back_target = "mas_contract_completion"
-        elif missing_inputs:
+        elif missing_inputs or not prose_review_request["present"] or not prose_review_request["valid"]:
             route_back_target = "analysis_or_outline_repair"
         elif prose_review["present"] and not prose_review["clear"]:
             route_back_target = "write_revision_from_ai_prose_review"
@@ -2138,7 +2260,10 @@ class QuestService:
             "required_inputs": list(_MAS_MEDICAL_PROSE_REVIEW_REQUIRED_INPUTS)
             + ["artifacts/publication_eval/medical_prose_review.json"],
             "blueprint": blueprint,
+            "style_corpus": style_corpus,
+            "prose_review_request": prose_review_request,
             "prose_review": prose_review,
+            "retrospective_audit": retrospective_audit,
         }
 
     @classmethod
@@ -4887,6 +5012,33 @@ class QuestService:
             "mas_medical_manuscript_blueprint_path": str(
                 (mas_medical_writing_preflight.get("blueprint") or {}).get("path") or ""
             ).strip() or None,
+            "mas_medical_style_corpus_present": bool(
+                (mas_medical_writing_preflight.get("style_corpus") or {}).get("present")
+            ),
+            "mas_medical_style_corpus_valid": bool(
+                (mas_medical_writing_preflight.get("style_corpus") or {}).get("valid")
+            ),
+            "mas_medical_style_corpus_path": str(
+                (mas_medical_writing_preflight.get("style_corpus") or {}).get("path") or ""
+            ).strip() or None,
+            "mas_medical_style_corpus_id": (
+                (mas_medical_writing_preflight.get("style_corpus") or {}).get("corpus_id")
+            ),
+            "mas_medical_style_corpus_source_ids": list(
+                ((mas_medical_writing_preflight.get("style_corpus") or {}).get("source_ids") or [])
+            ),
+            "mas_medical_style_corpus_principle_keys": list(
+                ((mas_medical_writing_preflight.get("style_corpus") or {}).get("principle_keys") or [])
+            ),
+            "mas_medical_prose_review_request_present": bool(
+                (mas_medical_writing_preflight.get("prose_review_request") or {}).get("present")
+            ),
+            "mas_medical_prose_review_request_valid": bool(
+                (mas_medical_writing_preflight.get("prose_review_request") or {}).get("valid")
+            ),
+            "mas_medical_prose_review_request_path": str(
+                (mas_medical_writing_preflight.get("prose_review_request") or {}).get("path") or ""
+            ).strip() or None,
             "mas_medical_prose_review_present": bool(
                 (mas_medical_writing_preflight.get("prose_review") or {}).get("present")
             ),
@@ -4913,6 +5065,21 @@ class QuestService:
             ),
             "mas_medical_prose_review_section_level_diagnosis": dict(
                 ((mas_medical_writing_preflight.get("prose_review") or {}).get("section_level_diagnosis") or {})
+            ),
+            "mas_retrospective_medical_prose_audit_present": bool(
+                (mas_medical_writing_preflight.get("retrospective_audit") or {}).get("present")
+            ),
+            "mas_retrospective_medical_prose_audit_valid": bool(
+                (mas_medical_writing_preflight.get("retrospective_audit") or {}).get("valid")
+            ),
+            "mas_retrospective_medical_prose_audit_path": str(
+                (mas_medical_writing_preflight.get("retrospective_audit") or {}).get("path") or ""
+            ).strip() or None,
+            "mas_retrospective_medical_prose_audit_sample_ids": list(
+                ((mas_medical_writing_preflight.get("retrospective_audit") or {}).get("sample_ids") or [])
+            ),
+            "mas_retrospective_medical_prose_audit_rewrite_targets": list(
+                ((mas_medical_writing_preflight.get("retrospective_audit") or {}).get("top_rewrite_targets") or [])
             ),
             "draft_available": bool(citation_usage.get("draft_available")),
             "draft_citation_count": int(citation_usage.get("draft_citation_count") or 0),

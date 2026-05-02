@@ -7,10 +7,12 @@ Use this reference when writing MAS-controlled English medical original-research
 Before full drafting, `artifact.get_paper_contract_health(detail='full')` must show the MAS
 medical writing preflight as ready. The subjective style authority is the AI-owned
 `medical_prose_review`, read together with `medical_manuscript_blueprint`, claim-evidence,
-results narrative, and figure semantics surfaces. If the AI prose review is missing, not AI
-reviewer-owned, or not clear, produce a route-back plan instead of a full manuscript draft. When it
-contains representative rewrites, use them as the concrete revision target and write that target
-back into the paper-facing revision plan.
+results narrative, figure semantics, the `medical_journal_style_corpus`, the AI prose review
+request bundle, and any `retrospective_medical_prose_audit` replay findings. If the style corpus,
+AI review request, or AI prose review is missing, not AI reviewer-owned where applicable, or not
+clear, produce a route-back plan instead of a full manuscript draft. When the AI review contains
+representative rewrites, use them as the concrete revision target and write that target back into
+the paper-facing revision plan.
 
 ## Target Voice
 
@@ -21,7 +23,8 @@ statistical reviewers, and editors, not a project progress report.
 Style sources: Zeiger's biomedical paper text model, Gopen and Swan's reader-expectation
 information flow, JAMA concise/specific/informative wording, Elsevier medical manuscript
 audience/relevance/avoid-overstatement guidance, and JAMA Network Open original investigation
-examples.
+examples. The MAS style corpus is the runtime-consumable form of these sources; use it for voice
+and rhythm, not as a checklist.
 
 ## Reader Flow
 
@@ -43,3 +46,5 @@ examples.
   explicitly supports that exact claim.
 - Treating regex or pattern hits as the final style verdict. Mechanical checks are safety rails and
   evidence snippets; the AI prose review owns the subjective medical-journal voice judgment.
+- Ignoring retrospective audit warnings. NF-PitNET 003, DPCC 003, and DPCC 004 replay findings
+  are regression baselines for work-report residue, figure-led Results, and Discussion restraint.

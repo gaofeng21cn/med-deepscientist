@@ -255,6 +255,9 @@ def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() ->
 
     assert "medical_prose_style_contract" in text
     assert "medical_manuscript_blueprint" in text
+    assert "medical_journal_style_corpus" in text
+    assert "medical_prose_review_request.json" in text
+    assert "retrospective_medical_prose_audit" in text
     assert "medical_prose_review" in text
     assert "artifact.get_paper_contract_health(detail='full')" in text
     assert "mas_medical_writing_preflight_ready=true" in text
@@ -267,6 +270,7 @@ def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() ->
     assert "packaging metadata" in text
     assert "representative rewrites" in text
     assert "subjective manuscript-style authority" in text
+    assert "NF-PitNET 003, DPCC 003" in text
     assert "clinical problem -> evidence gap -> objective" in text
     assert "clinical finding as the sentence subject" in text
     assert "figure or table as the grammatical" in text
