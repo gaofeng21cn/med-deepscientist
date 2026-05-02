@@ -1583,6 +1583,21 @@ class PromptBuilder:
                     if isinstance(paper_contract_health.get("mas_medical_prose_review_section_level_diagnosis"), dict)
                     else {}
                 )
+                style_source_ids = [
+                    str(item).strip()
+                    for item in (paper_contract_health.get("mas_medical_style_corpus_source_ids") or [])
+                    if str(item).strip()
+                ]
+                style_principle_keys = [
+                    str(item).strip()
+                    for item in (paper_contract_health.get("mas_medical_style_corpus_principle_keys") or [])
+                    if str(item).strip()
+                ]
+                retrospective_targets = [
+                    dict(item)
+                    for item in (paper_contract_health.get("mas_retrospective_medical_prose_audit_rewrite_targets") or [])
+                    if isinstance(item, dict)
+                ]
                 rewrite_preview = "; ".join(
                     str(item.get("after") or item.get("rewrite") or item.get("before") or "").strip()
                     for item in representative_rewrites[:3]
@@ -1592,6 +1607,14 @@ class PromptBuilder:
                     f"{key}: {value}"
                     for key, value in list(prose_diagnosis.items())[:4]
                     if str(key).strip() and str(value).strip()
+                ) or "none"
+                retrospective_preview = "; ".join(
+                    (
+                        f"{str(item.get('sample_id') or '').strip()}: "
+                        f"{str(item.get('verdict') or '').strip()} -> {str(item.get('route_target') or '').strip()}"
+                    )
+                    for item in retrospective_targets[:3]
+                    if str(item.get("sample_id") or "").strip()
                 ) or "none"
                 write_preflight_blockers = [
                     str(item).strip()
@@ -1604,13 +1627,23 @@ class PromptBuilder:
                         f"- mas_medical_write_preflight_ready: {bool(paper_contract_health.get('mas_medical_writing_preflight_ready'))}",
                         f"- mas_medical_blueprint_path: {str(paper_contract_health.get('mas_medical_manuscript_blueprint_path') or 'none')}",
                         f"- mas_medical_blueprint_valid: {bool(paper_contract_health.get('mas_medical_manuscript_blueprint_valid'))}",
+                        f"- mas_medical_style_corpus_path: {str(paper_contract_health.get('mas_medical_style_corpus_path') or 'none')}",
+                        f"- mas_medical_style_corpus_id: {str(paper_contract_health.get('mas_medical_style_corpus_id') or 'none')}",
+                        f"- mas_medical_style_source_ids: {', '.join(style_source_ids) or 'none'}",
+                        f"- mas_medical_style_principles: {', '.join(style_principle_keys) or 'none'}",
+                        f"- mas_ai_prose_review_request_path: {str(paper_contract_health.get('mas_medical_prose_review_request_path') or 'none')}",
+                        f"- mas_ai_prose_review_request_valid: {bool(paper_contract_health.get('mas_medical_prose_review_request_valid'))}",
                         f"- mas_ai_prose_review_path: {str(paper_contract_health.get('mas_medical_prose_review_path') or 'none')}",
                         f"- mas_ai_prose_review_verdict: {str(paper_contract_health.get('mas_medical_prose_review_verdict') or 'none')}",
                         f"- mas_ai_prose_review_summary: {str(paper_contract_health.get('mas_medical_prose_review_summary') or 'none')}",
                         f"- mas_ai_prose_diagnosis: {diagnosis_preview}",
                         f"- mas_ai_prose_rewrite_examples: {rewrite_preview}",
+                        f"- mas_retrospective_prose_audit_path: {str(paper_contract_health.get('mas_retrospective_medical_prose_audit_path') or 'none')}",
+                        f"- mas_retrospective_prose_audit_samples: {', '.join(str(item).strip() for item in (paper_contract_health.get('mas_retrospective_medical_prose_audit_sample_ids') or []) if str(item).strip()) or 'none'}",
+                        f"- mas_retrospective_prose_rewrite_targets: {retrospective_preview}",
                         f"- mas_medical_write_preflight_blockers: {', '.join(write_preflight_blockers) or 'none'}",
-                        "- mas_medical_write_rule: before full medical manuscript drafting, `artifact.get_paper_contract_health(detail='full')` must show MAS blueprint present/valid and AI prose review clear; otherwise generate a route-back plan only.",
+                        "- mas_medical_write_rule: before full medical manuscript drafting, `artifact.get_paper_contract_health(detail='full')` must show MAS blueprint present/valid, style corpus present/valid, AI prose review request present/valid, and AI prose review clear; otherwise generate a route-back plan only.",
+                        "- mas_medical_style_rule: use the MAS style corpus and retrospective prose audit to learn medical-journal voice and recurring failure modes, then consume AI prose review rewrites as the concrete revision target.",
                         "- mas_medical_source_rule: do not generate a full draft from run logs, controller checklists, or package metadata when MAS medical write preflight is blocked.",
                     ]
                 )

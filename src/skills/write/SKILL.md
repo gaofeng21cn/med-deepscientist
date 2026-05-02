@@ -147,10 +147,14 @@ Before writing seriously, confirm:
 
 For MAS-controlled medical original-research manuscripts, full drafting must consume the MAS
 `medical_prose_style_contract`, `medical_manuscript_blueprint`, and AI-owned
-`medical_prose_review` before prose generation. Call
+`medical_prose_review` before prose generation. It must also consume the MAS
+`medical_journal_style_corpus`, the AI reviewer input bundle
+`artifacts/publication_eval/medical_prose_review_request.json`, and any available
+`retrospective_medical_prose_audit` replay findings before prose generation. Call
 `artifact.get_paper_contract_health(detail='full')` before any full-draft action. Full drafting is
 allowed only when that surface reports `mas_medical_writing_preflight_ready=true`, the MAS
-blueprint is present and valid, and the AI prose review is present, AI reviewer-owned, and clear.
+blueprint is present and valid, the MAS style corpus is present and valid, the AI prose review
+request is present and valid, and the AI prose review is present, AI reviewer-owned, and clear.
 Read the blueprint together with `paper/results_narrative_map.json`,
 `paper/claim_evidence_map.json`, `paper/figure_semantics_manifest.json`, and the AI prose
 review diagnosis/representative rewrites; if any of these surfaces are missing, incomplete,
@@ -164,8 +168,10 @@ Results with the clinical finding as the sentence subject, and Discussion as pri
 prior work, interpretation, limitations, and restrained conclusion. The AI prose review is the
 subjective manuscript-style authority; mechanical flags can guide evidence snippets but cannot
 authorize full medical-journal prose quality. Consume the AI review's representative rewrites when
-revising and write the revision target back into the paper-facing plan. Do not draft from run logs,
-controller checklists, or packaging metadata. Do not make a figure or table as the grammatical
+revising and write the revision target back into the paper-facing plan. Use the style corpus to
+learn voice and reader flow, and use retrospective audit findings from NF-PitNET 003, DPCC 003,
+and DPCC 004 as regression warnings for work-report residue, figure-led Results, and unrestrained
+Discussion interpretation. Do not draft from run logs, controller checklists, or packaging metadata. Do not make a figure or table as the grammatical
 subject of a Results finding sentence; cite displays after the finding and quantitative result.
 When the target is a medical original research paper, read
 `references/medical-journal-prose.md` before writing or revising the full draft.
