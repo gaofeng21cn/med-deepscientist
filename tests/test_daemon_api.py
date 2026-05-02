@@ -8357,6 +8357,116 @@ def test_publication_gate_incomplete_controller_work_unit_authorization_skips_ru
     assert skipped[-1]["controller_projection"]["reason"] == expected_reason
 
 
+def test_publication_gate_current_package_freshness_signature_mismatch_skips_runner(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate current package signature mismatch")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "current_package mirror needs a fresh signed projection",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence, story, figure, and results traceability blockers.",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
+        "blockers": ["stale_study_delivery_mirror/current_package"],
+        "claim_id": "claim-001",
+        "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
+        "current_package_freshness": {
+            "status": "current",
+            "proof_path": str(study_root / "paper" / "CURRENT_PACKAGE_FRESHNESS_PROOF.json"),
+            "submission_manifest_path": str(study_root / "paper" / "submission_manifest.json"),
+            "current_package_root": str(study_root / "manuscript" / "current_package"),
+            "source_signature": "study-source-old",
+            "authority_source_signature": "study-source-new",
+        },
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class RecordingRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        def run(self, request):  # noqa: ANN001
+            self.requests.append(request)
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="runner should have been blocked",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RecordingRunner()
+    app.runners["codex"] = runner
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    assert runner.requests == []
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == "current_package_freshness_required"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "current_package_freshness_required"
+    assert skipped[-1]["continuation_reason"] == "current_package_freshness_required"
+    assert skipped[-1]["controller_projection"]["reason"] == "current_package_freshness_required"
+
+
 def test_publication_gate_parked_continuation_auto_turn_starts_runner(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

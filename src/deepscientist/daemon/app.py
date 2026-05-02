@@ -3818,6 +3818,14 @@ class DaemonApp:
         return {item.strip() for item in blockers if item.strip()}
 
     @staticmethod
+    def _has_current_package_freshness_blocker(blockers: set[str]) -> bool:
+        return any(
+            item.strip().lower() == "stale_study_delivery_mirror"
+            or item.strip().lower().startswith("stale_study_delivery_mirror/")
+            for item in blockers
+        )
+
+    @staticmethod
     def _current_package_freshness_proof_current(payload: dict) -> bool:
         status = str(payload.get("status") or "").strip().lower()
         if status not in {"current", "fresh", "synced", "updated", "unchanged", "ready"}:
@@ -3874,7 +3882,7 @@ class DaemonApp:
             return "controller_work_unit_pending"
         blockers = DaemonApp._controller_auth_blockers(snapshot, controller_auth)
         if (
-            "stale_study_delivery_mirror" in blockers
+            DaemonApp._has_current_package_freshness_blocker(blockers)
             and not DaemonApp._current_package_freshness_proof_current(
                 DaemonApp._current_package_freshness_payload(snapshot, controller_auth)
             )
