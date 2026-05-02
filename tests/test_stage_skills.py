@@ -261,6 +261,9 @@ def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() ->
     assert "medical_prose_review" in text
     assert "artifact.get_paper_contract_health(detail='full')" in text
     assert "mas_medical_writing_preflight_ready=true" in text
+    assert "medical_quality_ready_from_mds=false" in text
+    assert "backend_preflight" in text
+    assert "Existing draft files, complete manuscript coverage, and `contract_ok=true`" in text
     assert "paper/results_narrative_map.json" in text
     assert "paper/claim_evidence_map.json" in text
     assert "paper/figure_semantics_manifest.json" in text

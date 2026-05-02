@@ -326,12 +326,17 @@ def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) ->
     )
 
     assert "paper_contract_health: blocked" in prompt
+    assert "paper_contract_health_role: backend_preflight" in prompt
+    assert "paper_coverage_role: mechanical_oracle" in prompt
+    assert "paper_quality_authority: mas_publication_eval" in prompt
+    assert "paper_medical_quality_ready_from_mds: False" in prompt
     assert "paper_health_counts: unresolved_required=1, unmapped_completed=0, blocking_pending=1" in prompt
     assert "paper_recommended_next_stage: analysis-campaign" in prompt
     assert "paper_recommendation_scope: paper_line_local_only" in prompt
     assert "paper_global_stage_authority: publication_gate" in prompt
     assert "paper_health_tool:" in prompt
     assert "paper_coverage_tool:" in prompt
+    assert "existing draft, coverage complete, and paper contract OK are backend preflight signals" in prompt
     assert "paper_status_narration_mode: ai_first" in prompt
     assert "paper_status_answer_checklist: milestone_status, review_readiness, submission_readiness, remaining_scope" in prompt
     assert "paper_status_narration_rule:" in prompt
@@ -349,6 +354,20 @@ def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home:
         "recommendation_scope": "paper_line_local_only",
         "global_stage_authority": "publication_gate",
         "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+        "authority_semantics": {
+            "paper_contract_health_role": "backend_preflight",
+            "coverage_role": "mechanical_oracle",
+            "paper_quality_authority": "mas_publication_eval",
+            "medical_quality_authorities": [
+                "mas_ai_medical_writing_preflight",
+                "mas_ai_medical_prose_review",
+                "mas_publication_eval",
+            ],
+            "medical_quality_ready_from_mds": False,
+        },
+        "paper_contract_health_role": "backend_preflight",
+        "paper_quality_authority": "mas_publication_eval",
+        "medical_quality_ready_from_mds": False,
         "blocking_reasons": ["MAS AI medical prose review has not cleared full drafting: revise"],
         "write_preflight_status": "blocked",
         "write_preflight_blocking_reasons": [
@@ -402,6 +421,11 @@ def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home:
     prompt = builder._paper_and_evidence_block(snapshot, Path(snapshot["quest_root"]))
 
     assert "mas_medical_write_preflight: blocked" in prompt
+    assert "paper_contract_health_role: backend_preflight" in prompt
+    assert "paper_coverage_role: mechanical_oracle" in prompt
+    assert "paper_quality_authority: mas_publication_eval" in prompt
+    assert "paper_medical_quality_authorities: mas_ai_medical_writing_preflight, mas_ai_medical_prose_review, mas_publication_eval" in prompt
+    assert "paper_medical_quality_ready_from_mds: False" in prompt
     assert "mas_medical_write_preflight_ready: False" in prompt
     assert "mas_medical_blueprint_path: /tmp/study/paper/medical_manuscript_blueprint.json" in prompt
     assert "mas_medical_style_corpus_id: general_medical_journal_style_corpus_v1" in prompt

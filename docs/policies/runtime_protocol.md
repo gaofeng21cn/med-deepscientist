@@ -21,6 +21,13 @@ remains the stable runtime authority; the transition contract explains how MAS
 may consume that authority without treating MDS prompt, UI, product, or
 experimental surfaces as stable MAS-facing product contracts.
 
+Paper-facing health surfaces keep the same boundary. `paper_contract_health`
+reports `backend_preflight` state and manuscript coverage reports
+`mechanical_oracle` state. Existing draft presence, complete mechanical
+coverage, and `contract_ok=true` are not MAS medical manuscript quality
+readiness signals. MAS AI medical writing preflight, AI prose review, and
+`publication_eval/latest.json` own the medical quality readiness decision.
+
 ## 2. Stable Daemon API Shape
 
 Only the following HTTP routes and payload shape are stable for adapter integration.
@@ -358,6 +365,11 @@ No intake/fix/refactor may silently break this stable protocol.
 No MAS/MDS transition work may promote an oracle-only MDS surface into a
 MAS-consumable contract unless that surface is added to this document and
 covered by targeted regression tests in the same change.
+
+No paper-health or coverage field may be treated as a second medical-quality
+authority. Any MAS-facing consumer must use the structured authority fields
+(`paper_contract_health_role`, `coverage_role`, `paper_quality_authority`,
+`medical_quality_ready_from_mds`) rather than relying on prose-only rules.
 
 Any change to stable behavior requires all of:
 

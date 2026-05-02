@@ -2629,14 +2629,105 @@ def test_validate_manuscript_coverage_blocks_short_memo_as_full_paper(temp_home:
     assert coverage["package_type"] == "submission_package"
     assert coverage["draft_checkpoint_ready"] is True
     assert coverage_result["mechanical_coverage_only"] is True
-    assert coverage_result["quality_authority"] == "ai_reviewer_required"
+    assert coverage_result["coverage_role"] == "mechanical_oracle"
+    assert coverage_result["quality_authority"] == "mas_ai_preflight_prose_review_publication_eval"
+    assert coverage_result["medical_quality_ready_from_mds"] is False
+    assert coverage_result["authority_semantics"]["paper_quality_authority"] == "mas_publication_eval"
     assert coverage["mechanical_coverage_only"] is True
-    assert coverage["quality_authority"] == "ai_reviewer_required"
+    assert coverage["coverage_role"] == "mechanical_oracle"
+    assert coverage["quality_authority"] == "mas_ai_preflight_prose_review_publication_eval"
+    assert coverage["medical_quality_ready_from_mds"] is False
     assert coverage["manuscript_ready"] is False
     assert coverage["submission_ready"] is False
     assert coverage["one_section_only"] is True
     assert any("fewer than 5 section" in item for item in coverage["manuscript_blockers"])
     assert any("fewer than 2 ready" in item for item in coverage["manuscript_blockers"])
+
+
+def test_validate_manuscript_coverage_does_not_claim_medical_quality_when_mechanically_complete(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    quest = quest_service.create("mechanical coverage authority quest")
+    quest_root = Path(quest["quest_root"])
+    artifact = ArtifactService(temp_home)
+    paper_root = quest_root / "paper"
+    paper_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Mechanical Coverage Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "evidence_ledger.json",
+        {
+            "items": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_bundle_manifest.json",
+        {
+            "schema_version": 1,
+            "package_type": "submission_package",
+            "draft_path": "paper/draft.md",
+            "pdf_path": "paper/paper.pdf",
+        },
+    )
+    write_text(
+        paper_root / "draft.md",
+        "\n".join(
+            [
+                "# Draft",
+                "## Introduction",
+                "Intro text.",
+                "## Methods",
+                "Methods text.",
+                "## Results",
+                "Results text.",
+                "![Figure](figures/F1.png)",
+                "| A | B |",
+                "|---|---|",
+                "| 1 | 2 |",
+                "## Discussion",
+                "Discussion text.",
+                "## Conclusion",
+                "Conclusion text.",
+            ]
+        ),
+    )
+    write_text(paper_root / "paper.pdf", "%PDF-1.4\n")
+    write_json(
+        paper_root / "paper_experiment_matrix.json",
+        {
+            "rows": [
+                {"item_id": f"AN-{index}", "status": "ready"}
+                for index in range(1, 6)
+            ]
+        },
+    )
+    review_root = paper_root / "review"
+    review_root.mkdir(parents=True, exist_ok=True)
+    write_json(review_root / "submission_checklist.json", {"status": "ready_for_submission"})
+
+    result = artifact.validate_manuscript_coverage(
+        quest_root,
+        detail="full",
+        minimum_sections=5,
+        minimum_analysis_groups=5,
+    )
+    coverage = result["manuscript_coverage"]
+
+    assert coverage["manuscript_ready"] is True
+    assert coverage["submission_ready"] is True
+    assert coverage["coverage_role"] == "mechanical_oracle"
+    assert coverage["medical_quality_ready_from_mds"] is False
+    assert coverage["authority_semantics"]["mechanical_oracle_only"] is True
+    assert coverage["authority_semantics"]["paper_quality_authority"] == "mas_publication_eval"
 
 
 def test_submit_paper_outline_select_preserves_candidate_sections_and_required_items(temp_home: Path) -> None:
