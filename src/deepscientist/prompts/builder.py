@@ -1572,6 +1572,48 @@ class PromptBuilder:
                     "- paper_campaign_tool: call artifact.get_analysis_campaign(campaign_id='active') when exact supplementary slice status matters.",
                 ]
             )
+            if "mas_medical_writing_preflight_ready" in paper_contract_health:
+                representative_rewrites = [
+                    dict(item)
+                    for item in (paper_contract_health.get("mas_medical_prose_review_representative_rewrites") or [])
+                    if isinstance(item, dict)
+                ]
+                prose_diagnosis = (
+                    dict(paper_contract_health.get("mas_medical_prose_review_section_level_diagnosis") or {})
+                    if isinstance(paper_contract_health.get("mas_medical_prose_review_section_level_diagnosis"), dict)
+                    else {}
+                )
+                rewrite_preview = "; ".join(
+                    str(item.get("after") or item.get("rewrite") or item.get("before") or "").strip()
+                    for item in representative_rewrites[:3]
+                    if str(item.get("after") or item.get("rewrite") or item.get("before") or "").strip()
+                ) or "none"
+                diagnosis_preview = "; ".join(
+                    f"{key}: {value}"
+                    for key, value in list(prose_diagnosis.items())[:4]
+                    if str(key).strip() and str(value).strip()
+                ) or "none"
+                write_preflight_blockers = [
+                    str(item).strip()
+                    for item in (paper_contract_health.get("write_preflight_blocking_reasons") or [])
+                    if str(item).strip()
+                ]
+                lines.extend(
+                    [
+                        f"- mas_medical_write_preflight: {str(paper_contract_health.get('write_preflight_status') or 'unknown')}",
+                        f"- mas_medical_write_preflight_ready: {bool(paper_contract_health.get('mas_medical_writing_preflight_ready'))}",
+                        f"- mas_medical_blueprint_path: {str(paper_contract_health.get('mas_medical_manuscript_blueprint_path') or 'none')}",
+                        f"- mas_medical_blueprint_valid: {bool(paper_contract_health.get('mas_medical_manuscript_blueprint_valid'))}",
+                        f"- mas_ai_prose_review_path: {str(paper_contract_health.get('mas_medical_prose_review_path') or 'none')}",
+                        f"- mas_ai_prose_review_verdict: {str(paper_contract_health.get('mas_medical_prose_review_verdict') or 'none')}",
+                        f"- mas_ai_prose_review_summary: {str(paper_contract_health.get('mas_medical_prose_review_summary') or 'none')}",
+                        f"- mas_ai_prose_diagnosis: {diagnosis_preview}",
+                        f"- mas_ai_prose_rewrite_examples: {rewrite_preview}",
+                        f"- mas_medical_write_preflight_blockers: {', '.join(write_preflight_blockers) or 'none'}",
+                        "- mas_medical_write_rule: before full medical manuscript drafting, `artifact.get_paper_contract_health(detail='full')` must show MAS blueprint present/valid and AI prose review clear; otherwise generate a route-back plan only.",
+                        "- mas_medical_source_rule: do not generate a full draft from run logs, controller checklists, or package metadata when MAS medical write preflight is blocked.",
+                    ]
+                )
             if narration_contract:
                 answer_checklist = (
                     ((narration_contract.get("narration_policy") or {}) if isinstance(narration_contract.get("narration_policy"), dict) else {})

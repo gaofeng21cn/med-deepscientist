@@ -69,6 +69,92 @@ def _write_managed_publication_eval_latest(
     return latest_path
 
 
+def _write_mas_medical_manuscript_blueprint(study_root: Path) -> None:
+    write_json(
+        study_root / "paper" / "medical_manuscript_blueprint.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_manuscript_blueprint",
+            "clinical_problem": "Clinical follow-up requires a stable risk-stratification frame.",
+            "evidence_gap": "Existing reports do not define how the available predictors should shape interpretation.",
+            "target_population": "Adults in the managed medical study cohort.",
+            "study_design": "Retrospective clinical cohort study.",
+            "main_findings_by_clinical_importance": [
+                {
+                    "rank": 1,
+                    "clinical_finding": "The primary model supported restrained risk interpretation.",
+                    "supporting_display_items": ["F1"],
+                }
+            ],
+            "clinical_interpretation": "Findings should be interpreted as bounded prediction evidence.",
+            "limitations": ["External validation is not established."],
+            "claim_evidence_map": [
+                {"claim_id": "C1", "statement": "Primary claim is mapped to the evidence set."}
+            ],
+            "figure_table_rhetorical_roles": [
+                {"display_id": "F1", "rhetorical_role": "Supports the primary clinical finding."}
+            ],
+            "discussion_claim_boundary": "Discussion must avoid treatment escalation claims.",
+            "journal_voice_target": {
+                "voice": "neutral_clinical_original_research",
+                "style_sources": ["JAMA", "Zeiger", "Gopen and Swan"],
+            },
+        },
+    )
+
+
+def _write_mas_ai_medical_prose_review(study_root: Path, *, verdict: str = "clear") -> None:
+    status = "ready" if verdict == "clear" else "partial" if verdict == "revise" else "blocked"
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "medical_prose_review.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_prose_review",
+            "assessment_provenance": {
+                "owner": "ai_reviewer",
+                "source_kind": "medical_prose_review",
+                "policy_id": "medical_publication_critique_v1",
+                "ai_reviewer_required": False,
+            },
+            "medical_journal_prose_quality": {
+                "status": status,
+                "overall_style_verdict": verdict,
+                "summary": (
+                    "AI reviewer cleared the manuscript prose for medical-journal style."
+                    if verdict == "clear"
+                    else "AI reviewer found work-report residue in the Results and Discussion prose."
+                ),
+                "section_level_diagnosis": {
+                    "results": "Findings should lead sentences before display citations.",
+                    "discussion": "Interpretation should remain restrained and limitation-aware.",
+                },
+                "representative_bad_sentences": (
+                    [] if verdict == "clear" else ["Figure 1 shows that the model worked well."]
+                ),
+                "representative_rewrites": (
+                    []
+                    if verdict == "clear"
+                    else [
+                        {
+                            "before": "Figure 1 shows that the model worked well.",
+                            "after": "The model improved risk stratification across the prespecified threshold range.",
+                        }
+                    ]
+                ),
+                "route_back_recommendation": {
+                    "required": verdict != "clear",
+                    "route_target": "none" if verdict == "clear" else "write",
+                    "reason": "Medical journal prose review result.",
+                },
+            },
+            "mechanical_safety_flags": [],
+            "source_refs": [
+                str(study_root / "paper" / "medical_manuscript_blueprint.json"),
+            ],
+        },
+    )
+
+
 def test_search_files_matches_paths_and_normalizes_simple_globs(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -93,6 +179,13 @@ def _materialize_ready_paper_line_for_publication_gate(
     *,
     study_root_ref: str,
 ) -> Path:
+    study_root = Path(study_root_ref).expanduser()
+    if study_root.is_absolute():
+        resolved_study_root = study_root.resolve(strict=False)
+    else:
+        resolved_study_root = (quest_root / study_root).resolve(strict=False)
+    _write_mas_medical_manuscript_blueprint(resolved_study_root)
+    _write_mas_ai_medical_prose_review(resolved_study_root)
     paper_root = ensure_dir(quest_root / "paper")
     write_json(
         paper_root / "selected_outline.json",
@@ -133,6 +226,30 @@ def _materialize_ready_paper_line_for_publication_gate(
         },
     )
     write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "results-main",
+                    "direct_answer": "The managed paper line has a stable primary clinical finding.",
+                    "supporting_display_items": ["F1"],
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figure_semantics_manifest.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "story_role": "result_primary",
+                    "direct_message": "Supports the primary clinical finding.",
+                }
+            ]
+        },
+    )
     write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
     _write_citation_rich_draft(paper_root)
     _materialize_reference_materials(quest_root, paper_root)
@@ -1007,7 +1124,9 @@ def test_snapshot_keeps_bundle_not_ready_when_submission_checklist_has_blocking_
     assert health["delivery_state"] == "audit_ready"
     assert health["recommended_next_stage"] == "write"
     assert health["recommended_action"] == "finish_proofing_and_submission_checks"
-    assert "submission packaging checklist still has 1 blocking item(s)" in " ".join(health["blocking_reasons"])
+    joined = " ".join(health["blocking_reasons"])
+    assert "Final author block is still missing." in joined
+    assert "submission-minimal package is incomplete" in joined
 
 
 def test_snapshot_blocks_finalize_when_submission_minimal_surface_is_missing(temp_home: Path) -> None:
@@ -1670,6 +1789,120 @@ def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_no
     assert health["completion_approval_ready"] is False
     joined = " ".join(health["completion_blocking_reasons"])
     assert "forbidden_manuscript_terminology" in joined
+
+
+def test_snapshot_blocks_full_medical_draft_when_mas_blueprint_is_missing(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by missing MAS medical blueprint")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    paper_root = _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    (study_root / "paper" / "medical_manuscript_blueprint.json").unlink()
+    (paper_root / "draft.md").unlink()
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_manuscript_blueprint_present"] is False
+    assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["writing_ready"] is False
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
+
+
+def test_snapshot_blocks_full_medical_draft_when_ai_prose_review_is_not_clear(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("paper blocked by MAS AI prose review")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    _write_mas_ai_medical_prose_review(study_root, verdict="revise")
+    (quest_root / "paper" / "draft.md").unlink()
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_manuscript_blueprint_valid"] is True
+    assert health["mas_medical_prose_review_valid"] is True
+    assert health["mas_medical_prose_review_clear"] is False
+    assert health["mas_medical_prose_review_verdict"] == "revise"
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert any("MAS AI medical prose review has not cleared full drafting" in item for item in health["blocking_reasons"])
+    assert health["mas_medical_prose_review_representative_rewrites"][0]["after"] == (
+        "The model improved risk stratification across the prespecified threshold range."
+    )
 
 
 

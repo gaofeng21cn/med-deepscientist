@@ -337,6 +337,53 @@ def test_prompt_builder_includes_paper_contract_health_block(temp_home: Path) ->
     assert "paper_status_narration_rule:" in prompt
 
 
+def test_prompt_builder_includes_mas_ai_first_medical_write_preflight(temp_home: Path) -> None:
+    builder, snapshot = _make_builder(temp_home)
+    snapshot["paper_contract_health"] = {
+        "writing_ready": False,
+        "unresolved_required_count": 0,
+        "unmapped_completed_count": 0,
+        "blocking_open_supplementary_count": 0,
+        "recommended_next_stage": "write",
+        "recommended_action": "return_to_mas_medical_writing_preflight",
+        "recommendation_scope": "paper_line_local_only",
+        "global_stage_authority": "publication_gate",
+        "global_stage_rule": "paper-line recommendations are subordinate until publication gate allows write",
+        "blocking_reasons": ["MAS AI medical prose review has not cleared full drafting: revise"],
+        "write_preflight_status": "blocked",
+        "write_preflight_blocking_reasons": [
+            "MAS AI medical prose review has not cleared full drafting: revise"
+        ],
+        "mas_medical_writing_preflight_ready": False,
+        "mas_medical_manuscript_blueprint_path": "/tmp/study/paper/medical_manuscript_blueprint.json",
+        "mas_medical_manuscript_blueprint_valid": True,
+        "mas_medical_prose_review_path": "/tmp/study/artifacts/publication_eval/medical_prose_review.json",
+        "mas_medical_prose_review_verdict": "revise",
+        "mas_medical_prose_review_summary": "AI reviewer found work-report residue in Results.",
+        "mas_medical_prose_review_section_level_diagnosis": {
+            "results": "Findings should lead sentences before display citations."
+        },
+        "mas_medical_prose_review_representative_rewrites": [
+            {
+                "before": "Figure 1 shows that the model worked well.",
+                "after": "The model improved risk stratification across the prespecified threshold range.",
+            }
+        ],
+    }
+
+    prompt = builder._paper_and_evidence_block(snapshot, Path(snapshot["quest_root"]))
+
+    assert "mas_medical_write_preflight: blocked" in prompt
+    assert "mas_medical_write_preflight_ready: False" in prompt
+    assert "mas_medical_blueprint_path: /tmp/study/paper/medical_manuscript_blueprint.json" in prompt
+    assert "mas_ai_prose_review_verdict: revise" in prompt
+    assert "results: Findings should lead sentences before display citations." in prompt
+    assert "The model improved risk stratification across the prespecified threshold range." in prompt
+    assert "MAS AI medical prose review has not cleared full drafting: revise" in prompt
+    assert "route-back plan only" in prompt
+    assert "do not generate a full draft from run logs, controller checklists, or package metadata" in prompt
+
+
 def test_prompt_builder_includes_surface_and_attachment_summary_for_connector_turn(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))

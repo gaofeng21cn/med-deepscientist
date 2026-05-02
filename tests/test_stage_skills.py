@@ -255,20 +255,34 @@ def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() ->
 
     assert "medical_prose_style_contract" in text
     assert "medical_manuscript_blueprint" in text
+    assert "medical_prose_review" in text
+    assert "artifact.get_paper_contract_health(detail='full')" in text
+    assert "mas_medical_writing_preflight_ready=true" in text
     assert "paper/results_narrative_map.json" in text
     assert "paper/claim_evidence_map.json" in text
     assert "paper/figure_semantics_manifest.json" in text
-    assert "Do not draft from run logs, controller checklists, or packaging metadata" in text
+    assert "route-back plan only" in text
+    assert "run logs" in text
+    assert "controller checklists" in text
+    assert "packaging metadata" in text
+    assert "representative rewrites" in text
+    assert "subjective manuscript-style authority" in text
     assert "clinical problem -> evidence gap -> objective" in text
     assert "clinical finding as the sentence subject" in text
-    assert "figure or table as the grammatical subject" in text
+    assert "figure or table as the grammatical" in text
+    assert "subject of a Results finding sentence" in text
 
     reference = root / "references" / "medical-journal-prose.md"
     assert reference.exists()
     reference_text = reference.read_text(encoding="utf-8")
     assert "JAMA/NEJM/BMJ/Lancet-style original research voice" in reference_text
+    assert "AI-owned" in reference_text
+    assert "representative rewrites" in reference_text
+    assert "Zeiger" in reference_text
+    assert "Gopen and Swan" in reference_text
     assert "old-to-new information flow" in reference_text
     assert "unsupported no-difference" in reference_text
+    assert "Mechanical checks are safety rails" in reference_text
 
 
 def test_baseline_skill_documents_confirm_or_waive_gate() -> None:
