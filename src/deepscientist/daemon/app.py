@@ -3524,6 +3524,25 @@ class DaemonApp:
             "return_to_controller",
         }
 
+    @staticmethod
+    def _has_executable_controller_work_unit_authorization(snapshot: dict) -> bool:
+        if not DaemonApp._publication_gate_controller_pending(snapshot):
+            return False
+        controller_auth = (
+            dict(snapshot.get("last_controller_decision_authorization") or {})
+            if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+        route_target = str(controller_auth.get("route_target") or "").strip()
+        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
+            return False
+        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
+        work_unit_fingerprint = str(controller_auth.get("work_unit_fingerprint") or "").strip()
+        route_question = str(controller_auth.get("route_key_question") or "").strip()
+        if not work_unit_id or not work_unit_fingerprint:
+            return False
+        return not route_question or route_question == work_unit_id
+
     def _project_repeated_auto_hold_before_runner(
         self,
         quest_id: str,
@@ -3589,6 +3608,8 @@ class DaemonApp:
             "same_fingerprint_auto_turn_count": projected_count,
         }
         if controller_pending:
+            if self._has_executable_controller_work_unit_authorization(snapshot):
+                return False
             self.quest_service.update_runtime_state(
                 quest_root=quest_root,
                 continuation_policy="auto",
