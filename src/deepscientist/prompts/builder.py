@@ -1567,7 +1567,7 @@ class PromptBuilder:
                     f"- paper_global_stage_rule: {str(paper_contract_health.get('global_stage_rule') or 'none')}",
                     f"- paper_primary_blocker: {primary_blocker}",
                     "- paper_health_tool: call artifact.get_paper_contract_health(detail='full') before paper-facing write/finalize work when the exact blocking items matter.",
-                    "- paper_coverage_tool: call artifact.validate_manuscript_coverage(detail='full') before full-manuscript or submission-readiness claims.",
+                    "- paper_coverage_tool: call artifact.validate_manuscript_coverage(detail='full') before full-manuscript or submission-readiness claims, and treat it as mechanical coverage only; paper_contract_health and MAS AI preflight remain the quality authority.",
                     "- paper_outline_tool: call artifact.list_paper_outlines(...) when outline inventory or a valid outline_id is needed.",
                     "- paper_campaign_tool: call artifact.get_analysis_campaign(campaign_id='active') when exact supplementary slice status matters.",
                 ]

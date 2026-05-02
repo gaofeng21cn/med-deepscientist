@@ -69,6 +69,7 @@ _EVENT_RUN_ID_BYTES_RE = re.compile(rb'"run_id"\s*:\s*"([^"]+)"')
 _STATUS_UPDATED_AT_RE = re.compile(r"^-\s*Updated at:\s*(?P<timestamp>\S+)\s*$", re.IGNORECASE | re.MULTILINE)
 CONTINUATION_POLICIES = {"auto", "when_external_progress", "wait_for_user_or_resume", "none"}
 _MAS_MEDICAL_BLUEPRINT_REQUIRED_FIELDS = (
+    "authoring_provenance",
     "clinical_problem",
     "evidence_gap",
     "target_population",
@@ -81,6 +82,7 @@ _MAS_MEDICAL_BLUEPRINT_REQUIRED_FIELDS = (
     "discussion_claim_boundary",
     "journal_voice_target",
 )
+_MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD = "authoring_provenance"
 _MAS_AI_PROSE_CLEAR_VERDICTS = {"clear", "ready", "pass", "approved"}
 _MAS_MEDICAL_PROSE_REVIEW_REQUIRED_INPUTS = (
     "paper/medical_manuscript_blueprint.json",
@@ -1992,6 +1994,34 @@ class QuestService:
         payload = read_json(blueprint_path, {}) if blueprint_path is not None and blueprint_path.exists() else {}
         payload_valid = isinstance(payload, dict) and bool(payload)
         missing_fields: list[str] = []
+        authoring_provenance = (
+            dict(payload.get(_MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD) or {})
+            if isinstance(payload, dict)
+            and isinstance(payload.get(_MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD), dict)
+            else {}
+        )
+        assessment_provenance = (
+            dict(payload.get("assessment_provenance") or {})
+            if isinstance(payload, dict) and isinstance(payload.get("assessment_provenance"), dict)
+            else {}
+        )
+        provenance = authoring_provenance or assessment_provenance
+        provenance_owner = str(provenance.get("owner") or "").strip()
+        clearance = (
+            dict(payload.get("blueprint_quality_clearance") or {})
+            if isinstance(payload, dict) and isinstance(payload.get("blueprint_quality_clearance"), dict)
+            else {}
+        )
+        clearance_owner = str(clearance.get("owner") or "").strip()
+        clearance_verdict = str(clearance.get("verdict") or "").strip().lower()
+        ai_owner = provenance_owner in {"ai_author", "ai_reviewer"}
+        ai_authorized = ai_owner and (
+            provenance.get("ai_reviewer_required") is False
+            or (
+                clearance_owner == "ai_reviewer"
+                and clearance_verdict in {"clear", "approved"}
+            )
+        )
         if payload_valid:
             missing_fields = [
                 field
@@ -2000,12 +2030,25 @@ class QuestService:
                 or payload.get(field) is None
                 or (isinstance(payload.get(field), (str, list, dict)) and not payload.get(field))
             ]
+            if not ai_authorized and _MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD not in missing_fields:
+                missing_fields.append(_MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD)
             payload_valid = not missing_fields
         return {
             "path": str(blueprint_path) if blueprint_path is not None else None,
             "present": bool(blueprint_path is not None and blueprint_path.exists()),
             "valid": payload_valid,
             "missing_fields": missing_fields,
+            "ai_authorized": bool(ai_authorized),
+            "provenance_owner": provenance_owner or None,
+            "provenance_source": (
+                _MAS_MEDICAL_BLUEPRINT_AUTHORING_PROVENANCE_FIELD
+                if authoring_provenance
+                else "assessment_provenance"
+                if assessment_provenance
+                else None
+            ),
+            "clearance_owner": clearance_owner or None,
+            "clearance_verdict": clearance_verdict or None,
         }
 
     @staticmethod
@@ -2215,6 +2258,8 @@ class QuestService:
         blocking_reasons: list[str] = []
         if not blueprint["present"]:
             blocking_reasons.append("MAS medical manuscript blueprint is missing")
+        elif not blueprint.get("ai_authorized"):
+            blocking_reasons.append("MAS medical manuscript blueprint lacks AI authorization/provenance")
         elif not blueprint["valid"]:
             missing = ", ".join(str(item) for item in blueprint.get("missing_fields") or [])
             blocking_reasons.append(
@@ -4444,9 +4489,49 @@ class QuestService:
         draft_file_present = bool(draft_path) and Path(draft_path).expanduser().resolve(strict=False).exists()
         active_line_draft_status = str(active_line.get("draft_status") or "").strip()
         draft_status = active_line_draft_status or ("present" if draft_file_present else "missing")
-        mas_medical_preflight_required = not draft_file_present
+        mas_ai_first_surface_relpaths = (
+            "paper/medical_manuscript_blueprint.json",
+            "paper/medical_journal_style_corpus.json",
+            "paper/claim_evidence_map.json",
+            "paper/results_narrative_map.json",
+            "paper/figure_semantics_manifest.json",
+            "artifacts/publication_eval/latest.json",
+            "artifacts/publication_eval/medical_prose_review_request.json",
+            "artifacts/publication_eval/medical_prose_review.json",
+            "artifacts/publication_eval/retrospective_medical_prose_audit.json",
+            "paper/review/review_ledger.json",
+        )
+        mas_required_trigger_relpaths = (
+            "paper/medical_manuscript_blueprint.json",
+            "paper/medical_journal_style_corpus.json",
+            "artifacts/publication_eval/latest.json",
+            "artifacts/publication_eval/medical_prose_review_request.json",
+            "artifacts/publication_eval/medical_prose_review.json",
+            "artifacts/publication_eval/retrospective_medical_prose_audit.json",
+            "paper/review/review_ledger.json",
+        )
+        candidate_mas_roots = [
+            root
+            for root in (managed_study_root, quest_root)
+            if root is not None
+        ]
+        mas_surface_root = managed_study_root
+        if mas_surface_root is None:
+            mas_surface_root = next(
+                (
+                    root
+                    for root in candidate_mas_roots
+                    if any((root / relative_path).exists() for relative_path in mas_required_trigger_relpaths)
+                ),
+                None,
+            )
+        mas_medical_preflight_required = bool(managed_study_root) or any(
+            (root / relative_path).exists()
+            for root in candidate_mas_roots
+            for relative_path in mas_required_trigger_relpaths
+        )
         mas_medical_writing_preflight = self._mas_medical_writing_preflight_payload(
-            study_root=managed_study_root,
+            study_root=mas_surface_root,
             paper_root=paper_root,
             required=mas_medical_preflight_required,
         )
@@ -5008,6 +5093,21 @@ class QuestService:
             ),
             "mas_medical_manuscript_blueprint_valid": bool(
                 (mas_medical_writing_preflight.get("blueprint") or {}).get("valid")
+            ),
+            "mas_medical_manuscript_blueprint_ai_authorized": bool(
+                (mas_medical_writing_preflight.get("blueprint") or {}).get("ai_authorized")
+            ),
+            "mas_medical_manuscript_blueprint_provenance_owner": (
+                (mas_medical_writing_preflight.get("blueprint") or {}).get("provenance_owner")
+            ),
+            "mas_medical_manuscript_blueprint_provenance_source": (
+                (mas_medical_writing_preflight.get("blueprint") or {}).get("provenance_source")
+            ),
+            "mas_medical_manuscript_blueprint_clearance_owner": (
+                (mas_medical_writing_preflight.get("blueprint") or {}).get("clearance_owner")
+            ),
+            "mas_medical_manuscript_blueprint_clearance_verdict": (
+                (mas_medical_writing_preflight.get("blueprint") or {}).get("clearance_verdict")
             ),
             "mas_medical_manuscript_blueprint_path": str(
                 (mas_medical_writing_preflight.get("blueprint") or {}).get("path") or ""

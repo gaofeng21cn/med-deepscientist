@@ -4,6 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
+from deepscientist.artifact import ArtifactService
 from deepscientist.config import ConfigManager
 from deepscientist.cli import _local_ui_url, init_command, pause_command
 from deepscientist.home import ensure_home_layout, repo_root
@@ -75,6 +76,11 @@ def _write_mas_medical_manuscript_blueprint(study_root: Path) -> None:
         {
             "schema_version": 1,
             "surface": "medical_manuscript_blueprint",
+            "authoring_provenance": {
+                "owner": "ai_author",
+                "ai_reviewer_required": False,
+                "policy_id": "medical_manuscript_ai_first_blueprint_v1",
+            },
             "clinical_problem": "Clinical follow-up requires a stable risk-stratification frame.",
             "evidence_gap": "Existing reports do not define how the available predictors should shape interpretation.",
             "target_population": "Adults in the managed medical study cohort.",
@@ -741,6 +747,8 @@ def test_snapshot_exposes_paper_contract_and_analysis_inventory(temp_home: Path)
     assert refreshed["idea_lines"][0]["paper_line_id"] == "paper-line-001"
     assert refreshed["paper_contract_health"]["contract_ok"] is True
     assert refreshed["paper_contract_health"]["writing_ready"] is True
+    assert refreshed["paper_contract_health"]["write_preflight_status"] == "not_applicable"
+    assert refreshed["paper_contract_health"]["mas_medical_writing_preflight_ready"] is True
     assert refreshed["paper_contract_health"]["recommended_next_stage"] == "write"
     assert refreshed["paper_contract_health"]["recommendation_scope"] == "paper_line_local_only"
     assert refreshed["paper_contract_health"]["global_stage_authority"] == "publication_gate"
@@ -1925,6 +1933,179 @@ def test_snapshot_blocks_full_medical_draft_when_mas_blueprint_is_missing(temp_h
     assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
 
 
+def test_snapshot_requires_mas_ai_preflight_even_when_medical_draft_exists(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("existing medical draft still needs MAS AI preflight")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    (study_root / "paper" / "medical_manuscript_blueprint.json").unlink()
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["draft_status"] == "present"
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["writing_ready"] is False
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
+
+
+def test_snapshot_requires_ai_authorized_mas_medical_blueprint(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("medical blueprint needs AI authorization")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    blueprint_path = study_root / "paper" / "medical_manuscript_blueprint.json"
+    blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
+    blueprint.pop("authoring_provenance")
+    write_json(blueprint_path, blueprint)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["mas_medical_manuscript_blueprint_present"] is True
+    assert health["mas_medical_manuscript_blueprint_valid"] is False
+    assert health["mas_medical_manuscript_blueprint_ai_authorized"] is False
+    assert health["write_preflight_status"] == "blocked"
+    assert "MAS medical manuscript blueprint lacks AI authorization/provenance" in health["blocking_reasons"]
+
+
+def test_snapshot_accepts_mas_blueprint_ai_reviewer_quality_clearance(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("medical blueprint reviewer clearance")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    blueprint_path = study_root / "paper" / "medical_manuscript_blueprint.json"
+    blueprint = json.loads(blueprint_path.read_text(encoding="utf-8"))
+    blueprint["authoring_provenance"] = {
+        "owner": "ai_reviewer",
+        "ai_reviewer_required": True,
+    }
+    blueprint["blueprint_quality_clearance"] = {
+        "owner": "ai_reviewer",
+        "verdict": "approved",
+    }
+    write_json(blueprint_path, blueprint)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["mas_medical_manuscript_blueprint_valid"] is True
+    assert health["mas_medical_manuscript_blueprint_ai_authorized"] is True
+    assert health["mas_medical_manuscript_blueprint_clearance_owner"] == "ai_reviewer"
+    assert health["mas_medical_manuscript_blueprint_clearance_verdict"] == "approved"
+    assert health["write_preflight_status"] == "ready"
+
+
 def test_snapshot_blocks_full_medical_draft_when_style_corpus_is_missing(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -2090,6 +2271,63 @@ def test_snapshot_blocks_full_medical_draft_when_ai_prose_review_is_not_clear(te
     assert health["mas_medical_prose_review_representative_rewrites"][0]["after"] == (
         "The model improved risk stratification across the prespecified threshold range."
     )
+
+
+def test_get_paper_contract_health_invalidates_cache_when_mas_ai_review_changes(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    quest_service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = quest_service.create("medical AI review cache invalidation")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+    artifact = ArtifactService(temp_home)
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=snapshot["quest_id"],
+        payload={
+            "verdict": {
+                "overall_verdict": "clear",
+                "primary_claim_status": "supported",
+                "summary": "publication gate clears write-stage continuation",
+                "stop_loss_pressure": "none",
+            },
+            "gaps": [
+                {
+                    "gap_id": "gap-001",
+                    "gap_type": "delivery",
+                    "severity": "optional",
+                    "summary": "no blocking gaps",
+                }
+            ],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "continue_same_line",
+                    "priority": "now",
+                    "reason": "continue writing",
+                    "requires_controller_decision": False,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+
+    first = artifact.get_paper_contract_health(quest_root, detail="full")
+    assert first["gate_cache_hit"] is False
+    assert first["paper_contract_health"]["mas_medical_prose_review_clear"] is True
+
+    _write_mas_ai_medical_prose_review(study_root, verdict="revise")
+
+    second = artifact.get_paper_contract_health(quest_root, detail="full")
+    assert second["gate_cache_hit"] is False
+    assert second["gate_fingerprint"] != first["gate_fingerprint"]
+    assert second["paper_contract_health"]["mas_medical_prose_review_verdict"] == "revise"
+    assert second["paper_contract_health"]["mas_medical_prose_review_clear"] is False
+    assert second["paper_contract_health"]["recommended_action"] == "return_to_mas_medical_writing_preflight"
 
 
 

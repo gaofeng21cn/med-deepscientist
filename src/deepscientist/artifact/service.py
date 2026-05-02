@@ -4228,6 +4228,8 @@ class ArtifactService:
 
         return {
             "schema_version": 1,
+            "mechanical_coverage_only": True,
+            "quality_authority": "ai_reviewer_required",
             "package_type": package_type,
             "paper_root": str(paper_root),
             "manifest_path": str(manifest_path) if manifest_path.exists() else None,
@@ -6544,12 +6546,58 @@ class ArtifactService:
                 "active_paper_line_ref": active_paper_line_ref,
                 "paper_lines": paper_lines,
             }
+        paper_root = (
+            Path(str(paper_contract.get("paper_root") or "")).expanduser().resolve(strict=False)
+            if str(paper_contract.get("paper_root") or "").strip()
+            else quest_root / "paper"
+        )
+        managed_eval_context = self.quest_service._managed_publication_eval_context(
+            quest_root,
+            paper_root=paper_root,
+        )
+        managed_study_root = (
+            Path(str(managed_eval_context.get("study_root") or "")).expanduser().resolve(strict=False)
+            if str(managed_eval_context.get("study_root") or "").strip()
+            else None
+        )
+
+        def surface_summary(root: Path | None, relative_path: str) -> dict[str, Any]:
+            path = root / relative_path if root is not None else None
+            summary: dict[str, Any] = {
+                "relative_path": relative_path,
+                "path": str(path) if path is not None else None,
+                "present": bool(path is not None and path.exists()),
+            }
+            if path is None or not path.exists() or not path.is_file():
+                return summary
+            stat = path.stat()
+            summary["mtime_ns"] = int(stat.st_mtime_ns)
+            summary["size_bytes"] = int(stat.st_size)
+            summary["sha256"] = sha256_text(path.read_text(encoding="utf-8", errors="replace"))
+            return summary
+
+        mas_ai_first_surface_summaries = [
+            surface_summary(managed_study_root, relative_path)
+            for relative_path in (
+                "paper/medical_manuscript_blueprint.json",
+                "paper/medical_journal_style_corpus.json",
+                "paper/claim_evidence_map.json",
+                "paper/results_narrative_map.json",
+                "paper/figure_semantics_manifest.json",
+                "artifacts/publication_eval/latest.json",
+                "artifacts/publication_eval/medical_prose_review_request.json",
+                "artifacts/publication_eval/medical_prose_review.json",
+                "artifacts/publication_eval/retrospective_medical_prose_audit.json",
+                "paper/review/review_ledger.json",
+            )
+        ]
         gate_input = {
             "paper_contract": paper_contract,
             "paper_evidence": paper_evidence,
             "analysis_inventory": analysis_inventory,
             "paper_lines": paper_lines,
             "active_paper_line_ref": active_paper_line_ref,
+            "mas_ai_first_surfaces": mas_ai_first_surface_summaries,
         }
         gate_fingerprint = payload_sha256(gate_input)
         gate_cache_path = quest_root / ".ds" / "gate_cache" / "paper_contract_health.json"
@@ -6634,6 +6682,8 @@ class ArtifactService:
             "detail": normalized_detail,
             "active_workspace_root": str(workspace_root),
             "manuscript_coverage_path": str(coverage_path),
+            "mechanical_coverage_only": True,
+            "quality_authority": "ai_reviewer_required",
             "manuscript_coverage": payload,
         }
 

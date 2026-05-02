@@ -37,7 +37,7 @@ It is a cross-cutting control skill that should be used whenever the quest must 
 - whether to stop
 - whether to ask the user for a structured decision
 
-Do not choose `finalize` for a paper line unless `artifact.validate_manuscript_coverage(detail='full')` reports `submission_ready=true`.
+Do not choose `finalize` for a paper line from `artifact.validate_manuscript_coverage(detail='full')` alone. That tool is a mechanical coverage check; paper lines also require `artifact.get_paper_contract_health(detail='full')` with no paper-contract blockers and, for MAS-managed medical manuscripts, a clear MAS AI preflight/prose-review state.
 
 ## Use when
 

@@ -2628,6 +2628,10 @@ def test_validate_manuscript_coverage_blocks_short_memo_as_full_paper(temp_home:
     assert coverage_result["ok"] is True
     assert coverage["package_type"] == "submission_package"
     assert coverage["draft_checkpoint_ready"] is True
+    assert coverage_result["mechanical_coverage_only"] is True
+    assert coverage_result["quality_authority"] == "ai_reviewer_required"
+    assert coverage["mechanical_coverage_only"] is True
+    assert coverage["quality_authority"] == "ai_reviewer_required"
     assert coverage["manuscript_ready"] is False
     assert coverage["submission_ready"] is False
     assert coverage["one_section_only"] is True
