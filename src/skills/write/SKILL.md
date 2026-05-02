@@ -151,8 +151,10 @@ For MAS-controlled medical original-research manuscripts, full drafting must con
 `medical_journal_style_corpus`, the AI reviewer input bundle
 `artifacts/publication_eval/medical_prose_review_request.json`, and any available
 `retrospective_medical_prose_audit` replay findings before prose generation. Call
-`artifact.get_paper_contract_health(detail='full')` before any full-draft action. Full drafting is
-allowed only when that surface reports `mas_medical_writing_preflight_ready=true`, the MAS
+`artifact.get_paper_contract_health(detail='full')` before any full-draft action. Treat that
+surface as `backend_preflight`: it can show whether MDS sees the required MAS-owned surfaces,
+but it is not the paper-quality authority. Full drafting is allowed only when that surface reports
+`mas_medical_writing_preflight_ready=true`, `medical_quality_ready_from_mds=false`, the MAS
 blueprint is present and valid, the MAS style corpus is present and valid, the AI prose review
 request is present and valid, and the AI prose review is present, AI reviewer-owned, and clear.
 Read the blueprint together with `paper/results_narrative_map.json`,
@@ -173,6 +175,9 @@ learn voice and reader flow, and use retrospective audit findings from NF-PitNET
 and DPCC 004 as regression warnings for work-report residue, figure-led Results, and unrestrained
 Discussion interpretation. Do not draft from run logs, controller checklists, or packaging metadata. Do not make a figure or table as the grammatical
 subject of a Results finding sentence; cite displays after the finding and quantitative result.
+Existing draft files, complete manuscript coverage, and `contract_ok=true` are mechanical/backend
+preflight signals only. They do not authorize MAS medical manuscript quality readiness without MAS
+AI preflight, prose review, and publication_eval clearance.
 When the target is a medical original research paper, read
 `references/medical-journal-prose.md` before writing or revising the full draft.
 

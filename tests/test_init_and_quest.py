@@ -1870,6 +1870,10 @@ def test_snapshot_blocks_completion_approval_when_managed_publication_eval_is_no
 
     assert health["writing_ready"] is True
     assert health["audit_package_ready"] is True
+    assert health["paper_contract_health_role"] == "backend_preflight"
+    assert health["paper_quality_authority"] == "mas_publication_eval"
+    assert health["medical_quality_ready_from_mds"] is False
+    assert health["authority_semantics"]["mechanical_oracle_only"] is True
     assert health["managed_publication_gate_status"] == "blocked"
     assert health["managed_publication_gate_clear"] is False
     assert health["finalize_ready"] is False
@@ -1928,6 +1932,8 @@ def test_snapshot_blocks_full_medical_draft_when_mas_blueprint_is_missing(temp_h
     assert health["write_preflight_status"] == "blocked"
     assert health["mas_medical_manuscript_blueprint_present"] is False
     assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["medical_quality_ready_from_mds"] is False
+    assert health["authority_semantics"]["paper_contract_health_role"] == "backend_preflight"
     assert health["writing_ready"] is False
     assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
     assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]

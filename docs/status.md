@@ -4,6 +4,7 @@
 
 - 仓库角色：`MedAutoScience` 的稳定 runtime substrate，当前通过受控 fork 形态维护
 - MAS/MDS 迁移收缩角色：`controlled backend`、`behavior oracle`、`upstream intake buffer`
+- 论文质量边界：MDS `paper_contract_health` 是 `backend_preflight`，coverage 是 `mechanical_oracle`；existing draft、coverage complete、contract ok 不能越权成为 MAS medical manuscript quality ready
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
 - 长线方向：把 runtime surface 收敛成 family 级稳定合同，repo 边界保持可演进
 - 当前执行真相：最底层 AI 执行继续通过 `CodexRunner -> codex exec autonomous agent loop` 落地；默认 `model / reasoning` 继承本机 `Codex` 默认配置，而不是 repo-local pin 固定型号
@@ -52,10 +53,11 @@
 
 1. 保持 `MedAutoScience -> MedDeepScientist` 兼容性清晰且可验证。
 2. 按 `controlled backend / behavior oracle / upstream intake buffer` 收缩 MDS 角色，避免把 MDS 扩成第二个 MAS product owner。
-3. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
-4. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
-5. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
-6. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
+3. 保持 paper health / coverage / prompt skill 只消费结构化 authority 字段；MAS AI preflight、prose review、publication_eval 才能驱动医学论文质量 readiness。
+4. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
+5. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
+6. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
+7. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
 
 ## 默认验证
 

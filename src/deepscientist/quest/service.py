@@ -92,6 +92,27 @@ _MAS_MEDICAL_PROSE_REVIEW_REQUIRED_INPUTS = (
     "paper/figure_semantics_manifest.json",
     "artifacts/publication_eval/medical_prose_review_request.json",
 )
+_PAPER_QUALITY_AUTHORITY_SEMANTICS: dict[str, Any] = {
+    "mds_role": "controlled_backend",
+    "paper_contract_health_role": "backend_preflight",
+    "coverage_role": "mechanical_oracle",
+    "paper_quality_authority": "mas_publication_eval",
+    "medical_quality_authorities": [
+        "mas_ai_medical_writing_preflight",
+        "mas_ai_medical_prose_review",
+        "mas_publication_eval",
+    ],
+    "mechanical_oracle_only": True,
+    "medical_quality_ready_from_mds": False,
+    "non_authoritative_ready_fields": [
+        "draft_status",
+        "contract_ok",
+        "writing_ready",
+        "finalize_ready",
+        "manuscript_ready",
+        "submission_ready",
+    ],
+}
 
 
 def _oversized_event_placeholder(*, prefix: bytes, line_bytes: int) -> dict[str, Any]:
@@ -2310,6 +2331,24 @@ class QuestService:
             "prose_review": prose_review,
             "retrospective_audit": retrospective_audit,
         }
+
+    @staticmethod
+    def _paper_quality_authority_semantics_payload(
+        *,
+        mas_medical_writing_preflight_ready: bool | None = None,
+        managed_publication_gate_clear: bool | None = None,
+    ) -> dict[str, Any]:
+        payload = copy.deepcopy(_PAPER_QUALITY_AUTHORITY_SEMANTICS)
+        if mas_medical_writing_preflight_ready is not None:
+            payload["mas_medical_writing_preflight_ready"] = bool(mas_medical_writing_preflight_ready)
+        if managed_publication_gate_clear is not None:
+            payload["managed_publication_gate_clear"] = bool(managed_publication_gate_clear)
+        payload["medical_quality_ready_from_mds"] = False
+        payload["readiness_rule"] = (
+            "MDS paper_contract_health and coverage fields are backend preflight/mechanical oracle signals only; "
+            "medical manuscript quality readiness is driven by MAS AI preflight, prose review, and publication_eval."
+        )
+        return payload
 
     @classmethod
     def _latest_progress_timestamp(cls, *values: Any) -> str | None:
@@ -4973,6 +5012,10 @@ class QuestService:
             and bool(closure_evidence.get("final_claim_ledger_ready"))
             and bool(closure_evidence.get("finalize_resume_packet_ready"))
         )
+        authority_semantics = self._paper_quality_authority_semantics_payload(
+            mas_medical_writing_preflight_ready=mas_medical_writing_preflight_ready,
+            managed_publication_gate_clear=managed_publication_gate_clear,
+        )
         recommendation_scope = "paper_line_local_only"
         global_stage_authority = "publication_gate"
         global_stage_rule = "paper-line recommendations are subordinate until publication gate allows write"
@@ -5022,6 +5065,7 @@ class QuestService:
                 "managed_publication_gate_clear": managed_publication_gate_clear,
                 "write_preflight_status": str(mas_medical_writing_preflight.get("status") or "blocked"),
                 "mas_medical_writing_preflight_ready": mas_medical_writing_preflight_ready,
+                "medical_quality_ready_from_mds": False,
             },
             answer_checklist=PAPER_MILESTONE_ANSWER_CHECKLIST,
         )
@@ -5244,6 +5288,13 @@ class QuestService:
             "recommendation_scope": recommendation_scope,
             "global_stage_authority": global_stage_authority,
             "global_stage_rule": global_stage_rule,
+            "authority_semantics": authority_semantics,
+            "mds_surface_role": "controlled_backend",
+            "paper_contract_health_role": "backend_preflight",
+            "paper_quality_authority": "mas_publication_eval",
+            "mechanical_oracle_only": True,
+            "medical_quality_ready_from_mds": False,
+            "medical_quality_ready_authority": "mas_ai_preflight_prose_review_publication_eval",
             "unresolved_required_items": unresolved_required_items[:12],
             "unmapped_completed_items": unmapped_completed_items[:12],
             "blocking_pending_slices": blocking_pending_slices[:12],

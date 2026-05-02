@@ -45,6 +45,7 @@ from ..shared import (
     write_yaml,
 )
 from ..quest import QuestService
+from ..quest.service import _PAPER_QUALITY_AUTHORITY_SEMANTICS
 from ..memory.frontmatter import dump_markdown_document, load_markdown_document
 from ..prompts.builder import CONTINUATION_SKILLS
 from .arxiv import fetch_arxiv_metadata, read_arxiv_content
@@ -4237,7 +4238,10 @@ class ArtifactService:
         return {
             "schema_version": 1,
             "mechanical_coverage_only": True,
-            "quality_authority": "ai_reviewer_required",
+            "coverage_role": "mechanical_oracle",
+            "quality_authority": "mas_ai_preflight_prose_review_publication_eval",
+            "medical_quality_ready_from_mds": False,
+            "authority_semantics": copy.deepcopy(_PAPER_QUALITY_AUTHORITY_SEMANTICS),
             "package_type": package_type,
             "paper_root": str(paper_root),
             "manifest_path": str(manifest_path) if manifest_path.exists() else None,
@@ -6616,7 +6620,7 @@ class ArtifactService:
         cached_gate = read_json(gate_cache_path, {})
         cache_hit = (
             isinstance(cached_gate, dict)
-            and int(cached_gate.get("schema_version") or 0) == 1
+            and int(cached_gate.get("schema_version") or 0) == 2
             and cached_gate.get("input_fingerprint") == gate_fingerprint
             and isinstance(cached_gate.get("payload"), dict)
         )
@@ -6637,7 +6641,7 @@ class ArtifactService:
             write_json(
                 gate_cache_path,
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "generated_at": utc_now(),
                     "input_fingerprint": gate_fingerprint,
                     "payload": payload,
@@ -6695,7 +6699,10 @@ class ArtifactService:
             "active_workspace_root": str(workspace_root),
             "manuscript_coverage_path": str(coverage_path),
             "mechanical_coverage_only": True,
-            "quality_authority": "ai_reviewer_required",
+            "coverage_role": "mechanical_oracle",
+            "quality_authority": "mas_ai_preflight_prose_review_publication_eval",
+            "medical_quality_ready_from_mds": False,
+            "authority_semantics": copy.deepcopy(_PAPER_QUALITY_AUTHORITY_SEMANTICS),
             "manuscript_coverage": payload,
         }
 

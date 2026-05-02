@@ -1556,9 +1556,36 @@ class PromptBuilder:
                 if isinstance(paper_contract_health.get("status_narration_contract"), dict)
                 else {}
             )
+            authority_semantics = (
+                dict(paper_contract_health.get("authority_semantics") or {})
+                if isinstance(paper_contract_health.get("authority_semantics"), dict)
+                else {}
+            )
+            paper_contract_health_role = str(
+                paper_contract_health.get("paper_contract_health_role")
+                or authority_semantics.get("paper_contract_health_role")
+                or "backend_preflight"
+            ).strip() or "backend_preflight"
+            coverage_role = str(authority_semantics.get("coverage_role") or "mechanical_oracle").strip() or "mechanical_oracle"
+            paper_quality_authority = str(
+                paper_contract_health.get("paper_quality_authority")
+                or authority_semantics.get("paper_quality_authority")
+                or "mas_publication_eval"
+            ).strip() or "mas_publication_eval"
+            medical_quality_authorities = [
+                str(item).strip()
+                for item in (authority_semantics.get("medical_quality_authorities") or [])
+                if str(item).strip()
+            ]
+            medical_quality_ready_from_mds = bool(paper_contract_health.get("medical_quality_ready_from_mds"))
             lines.extend(
                 [
                     f"- paper_contract_health: {'ready' if bool(paper_contract_health.get('writing_ready')) else 'blocked'}",
+                    f"- paper_contract_health_role: {paper_contract_health_role}",
+                    f"- paper_coverage_role: {coverage_role}",
+                    f"- paper_quality_authority: {paper_quality_authority}",
+                    f"- paper_medical_quality_authorities: {', '.join(medical_quality_authorities) or 'mas_ai_medical_writing_preflight, mas_ai_medical_prose_review, mas_publication_eval'}",
+                    f"- paper_medical_quality_ready_from_mds: {medical_quality_ready_from_mds}",
                     f"- paper_health_counts: unresolved_required={int(paper_contract_health.get('unresolved_required_count') or 0)}, unmapped_completed={int(paper_contract_health.get('unmapped_completed_count') or 0)}, blocking_pending={int(paper_contract_health.get('blocking_open_supplementary_count') or 0)}",
                     f"- paper_recommended_next_stage: {str(paper_contract_health.get('recommended_next_stage') or 'none')}",
                     f"- paper_recommended_action: {str(paper_contract_health.get('recommended_action') or 'none')}",
@@ -1567,7 +1594,8 @@ class PromptBuilder:
                     f"- paper_global_stage_rule: {str(paper_contract_health.get('global_stage_rule') or 'none')}",
                     f"- paper_primary_blocker: {primary_blocker}",
                     "- paper_health_tool: call artifact.get_paper_contract_health(detail='full') before paper-facing write/finalize work when the exact blocking items matter.",
-                    "- paper_coverage_tool: call artifact.validate_manuscript_coverage(detail='full') before full-manuscript or submission-readiness claims, and treat it as mechanical coverage only; paper_contract_health and MAS AI preflight remain the quality authority.",
+                    "- paper_coverage_tool: call artifact.validate_manuscript_coverage(detail='full') before full-manuscript or submission-readiness claims, and treat it as mechanical_oracle coverage only; MAS AI preflight, prose review, and publication_eval remain the medical quality authority.",
+                    "- paper_quality_authority_rule: existing draft, coverage complete, and paper contract OK are backend preflight signals; they must not be treated as MAS medical manuscript quality ready.",
                     "- paper_outline_tool: call artifact.list_paper_outlines(...) when outline inventory or a valid outline_id is needed.",
                     "- paper_campaign_tool: call artifact.get_analysis_campaign(campaign_id='active') when exact supplementary slice status matters.",
                 ]

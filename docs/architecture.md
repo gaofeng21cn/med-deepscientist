@@ -17,6 +17,8 @@
 
 稳定收缩契约见 `docs/policies/mas_mds_transition_contract.md`。该契约不触发 physical migration，不新增产品入口，也不把医学研究设计、publication gate、submission authority 从 MAS 下沉到 MDS。
 
+论文相关 surface 也遵循同一边界：`paper_contract_health` 是 MDS 的 `backend_preflight`，`validate_manuscript_coverage` 是 `mechanical_oracle`。它们可以暴露 existing draft、coverage、contract health、bundle/proofing/submission packaging 等机械状态，但不能把这些状态提升为医学论文质量 ready。MAS AI medical writing preflight、AI prose review 与 `publication_eval/latest.json` 才能驱动 medical manuscript quality readiness。
+
 ## 核心模块
 
 ### 1. Runtime core
@@ -83,6 +85,7 @@
 - Quest 仍遵循“一题一仓”的 durable layout。
 - `quest.yaml`、`brief.md`、`plan.md`、`status.md`、`SUMMARY.md` 属于稳定 durable surface。
 - `MedAutoScience` 依赖的是协议与 durable surface，不是 prompt 细节或 UI 呈现细节。
+- `paper_contract_health` 与 coverage 字段只能作为 controlled backend / mechanical oracle 输入，不能成为第二套 paper-quality authority。
 - 当前最底层 AI 调用装配面是 `CodexRunner._build_command()`，不是 daemon API body 里的 repo-local 模型 pin。
 - 默认 `model = "inherit"` 与空的 `model_reasoning_effort` 表示跟随本机 `Codex` 默认配置；只有显式 override 才会改变这一点。
 - opt-in `Hermes-native` lane 也遵循相同原则：默认读取本机 `Hermes` 配置，不在 repo 内 pin model / reasoning。
