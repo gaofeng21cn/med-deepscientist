@@ -3541,7 +3541,7 @@ class DaemonApp:
         route_question = str(controller_auth.get("route_key_question") or "").strip()
         if not work_unit_id or not work_unit_fingerprint:
             return False
-        return not route_question or route_question == work_unit_id
+        return not route_question or route_question == work_unit_id or route_question.startswith(f"{work_unit_id}:")
 
     def _project_repeated_auto_hold_before_runner(
         self,

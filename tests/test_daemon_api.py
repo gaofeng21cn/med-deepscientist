@@ -7722,7 +7722,7 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
     runtime_state["last_controller_decision_authorization"] = {
         "source": "runtime_watch",
         "route_target": "analysis-campaign",
-        "route_key_question": "analysis_claim_evidence_repair",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence, story, figure, and results traceability blockers.",
         "work_unit_id": "analysis_claim_evidence_repair",
         "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
         "active_run_id": "run-stale-authorization",
