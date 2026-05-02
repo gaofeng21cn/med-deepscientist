@@ -12,6 +12,7 @@ from deepscientist.runners.codex import (
     _delta_aware_tool_result_event,
     _new_tool_budget_telemetry,
     _record_tool_budget_event,
+    _record_turn_progress_heartbeat,
     _tool_event,
 )
 from deepscientist.shared import read_json
@@ -67,6 +68,44 @@ def test_codex_tool_event_preserves_parseable_bash_exec_payload_and_metadata() -
     assert rendered["metadata"]["bash_id"] == "bash-123"
     assert rendered["metadata"]["command"] == "sed -n '1,220p' /tmp/example.txt"
     assert rendered["metadata"]["cwd"] == "/tmp/quest"
+
+
+def test_codex_runner_turn_progress_heartbeat_preserves_idempotency_key(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    run_root = quest_root / ".ds" / "runs" / "run-heartbeat-001"
+    quest_events = quest_root / ".ds" / "events.jsonl"
+    run_root.mkdir(parents=True)
+    telemetry = {
+        "version": 1,
+        "quest_id": "quest-heartbeat-001",
+        "run_id": "run-heartbeat-001",
+        "turn_id": "turn-heartbeat-001",
+        "idempotency_key": "turn-heartbeat-001",
+        "turn_reason": "auto_continue",
+        "turn_mode": "stage_execution",
+        "created_at": "2026-05-02T00:00:00+00:00",
+    }
+
+    _record_turn_progress_heartbeat(
+        telemetry=telemetry,
+        quest_events=quest_events,
+        run_root=run_root,
+        quest_id="quest-heartbeat-001",
+        run_id="run-heartbeat-001",
+        source="codex",
+        skill_id="write",
+        model="inherit",
+        summary="Long-running turn is still active.",
+    )
+
+    updated = read_json(run_root / "telemetry.json", {})
+    events = [json.loads(line) for line in quest_events.read_text(encoding="utf-8").splitlines()]
+    assert updated["turn_progress_kind"] == "heartbeat"
+    assert updated["turn_progress_heartbeat_count"] == 1
+    assert updated["idempotency_key"] == "turn-heartbeat-001"
+    assert events[-1]["type"] == "runner.turn_progress"
+    assert events[-1]["turn_progress_kind"] == "heartbeat"
+    assert events[-1]["idempotency_key"] == "turn-heartbeat-001"
 
 
 def test_codex_tool_event_truncates_oversized_bash_exec_log_but_keeps_json_parseable() -> None:

@@ -36,6 +36,7 @@ _TOOL_EVENT_ARGS_TEXT_LIMIT = 8_000
 _TOOL_EVENT_OUTPUT_TEXT_LIMIT = 16_000
 _MAX_QUEST_EVENT_JSON_BYTES = 2_000_000
 _OVERSIZED_EVENT_PREVIEW_TEXT_LIMIT = 12_000
+_TURN_PROGRESS_HEARTBEAT_SECONDS = 10.0
 _BUILTIN_MCP_TOOL_APPROVALS: dict[str, tuple[str, ...]] = {
     "memory": (
         "write",
@@ -223,6 +224,52 @@ def _encoded_json_size(value: object) -> int:
         return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
     except Exception:
         return len(str(value).encode("utf-8", errors="ignore"))
+
+
+def _record_turn_progress_heartbeat(
+    *,
+    telemetry: dict[str, Any],
+    quest_events: Path,
+    run_root: Path,
+    quest_id: str,
+    run_id: str,
+    source: str,
+    skill_id: str,
+    model: str,
+    summary: str,
+) -> None:
+    count = int(telemetry.get("turn_progress_heartbeat_count") or 0) + 1
+    turn_id = str(telemetry.get("turn_id") or "").strip() or None
+    idempotency_key = str(telemetry.get("idempotency_key") or turn_id or run_id).strip() or run_id
+    now = utc_now()
+    telemetry.update(
+        {
+            "turn_progress_kind": "heartbeat",
+            "turn_progress_heartbeat_count": count,
+            "last_turn_progress_heartbeat_at": now,
+            "turn_id": turn_id,
+            "idempotency_key": idempotency_key,
+        }
+    )
+    write_json(run_root / "telemetry.json", telemetry)
+    append_jsonl(
+        quest_events,
+        {
+            "event_id": generate_id("evt"),
+            "type": "runner.turn_progress",
+            "quest_id": quest_id,
+            "run_id": run_id,
+            "source": source,
+            "skill_id": skill_id,
+            "model": model,
+            "turn_id": turn_id,
+            "idempotency_key": idempotency_key,
+            "turn_progress_kind": "heartbeat",
+            "turn_progress_heartbeat_count": count,
+            "summary": summary,
+            "created_at": now,
+        },
+    )
 
 
 def _compact_tool_event_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -826,6 +873,10 @@ class CodexRunner:
                 "turn_reason": request.turn_reason,
                 "turn_intent": request.turn_intent,
                 "turn_mode": request.turn_mode,
+                "turn_id": request.turn_id,
+                "attempt_index": request.attempt_index,
+                "max_attempts": request.max_attempts,
+                "idempotency_key": request.turn_id or request.run_id,
             },
         )
         configured_tool_budget = runner_config.get("tool_call_budget")
@@ -862,6 +913,10 @@ class CodexRunner:
             "full_detail_tool_call_count": 0,
             **tool_budget_telemetry,
             "token_usage": {},
+            "turn_id": request.turn_id,
+            "attempt_index": request.attempt_index,
+            "max_attempts": request.max_attempts,
+            "idempotency_key": request.turn_id or request.run_id,
             "created_at": utc_now(),
         }
 
@@ -925,6 +980,30 @@ class CodexRunner:
             stdout_events = run_root / "stdout.jsonl"
             quest_events = request.quest_root / ".ds" / "events.jsonl"
             known_tool_names: dict[str, str] = {}
+            heartbeat_stop = threading.Event()
+
+            def _heartbeat_loop() -> None:
+                while not heartbeat_stop.wait(_TURN_PROGRESS_HEARTBEAT_SECONDS):
+                    if process.poll() is not None:
+                        return
+                    _record_turn_progress_heartbeat(
+                        telemetry=telemetry,
+                        quest_events=quest_events,
+                        run_root=run_root,
+                        quest_id=request.quest_id,
+                        run_id=request.run_id,
+                        source="codex",
+                        skill_id=request.skill_id,
+                        model=request.model,
+                        summary="Long-running turn is still active without a meaningful artifact delta.",
+                    )
+
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_loop,
+                name=f"codex-progress-heartbeat-{request.run_id}",
+                daemon=True,
+            )
+            heartbeat_thread.start()
 
             append_jsonl(
                 quest_events,
@@ -1039,6 +1118,8 @@ class CodexRunner:
                 output_parts.extend(message_output_parts)
 
             exit_code = process.wait()
+            heartbeat_stop.set()
+            heartbeat_thread.join(timeout=1.0)
             stderr_thread.join()
             with stderr_lock:
                 stderr_text = "".join(stderr_chunks)

@@ -24,6 +24,21 @@ def test_quest_runtime_audit_contract_normalizes_minimum_surface() -> None:
     }
 
 
+def test_quest_runtime_audit_contract_rejects_worker_without_active_run_id() -> None:
+    module = importlib.import_module("deepscientist.daemon.runtime_contract")
+
+    payload = module.build_quest_runtime_audit_contract(
+        active_run_id=None,
+        worker_running=True,
+        worker_pending=False,
+        stop_requested=False,
+    )
+
+    assert payload["status"] == "invalid"
+    assert payload["active_run_id"] is None
+    assert payload["worker_running"] is True
+
+
 def test_quest_control_contract_requires_minimum_keys() -> None:
     module = importlib.import_module("deepscientist.daemon.runtime_contract")
 

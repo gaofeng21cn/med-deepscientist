@@ -5098,6 +5098,8 @@ class QuestService:
             "active_baseline_id": active_baseline_id,
             "active_baseline_variant_id": active_baseline_variant_id,
             "active_run_id": runtime_state.get("active_run_id"),
+            "runtime_liveness_status": self._runtime_liveness_status_from_state(runtime_state),
+            "worker_running": bool(runtime_state.get("worker_running")),
             "continuation_policy": runtime_state.get("continuation_policy") or "auto",
             "continuation_anchor": runtime_state.get("continuation_anchor"),
             "continuation_reason": runtime_state.get("continuation_reason"),
@@ -5563,6 +5565,8 @@ class QuestService:
             "active_baseline_id": active_baseline_id,
             "active_baseline_variant_id": active_baseline_variant_id,
             "active_run_id": runtime_state.get("active_run_id"),
+            "runtime_liveness_status": self._runtime_liveness_status_from_state(runtime_state),
+            "worker_running": bool(runtime_state.get("worker_running")),
             "continuation_policy": runtime_state.get("continuation_policy") or "auto",
             "continuation_anchor": runtime_state.get("continuation_anchor"),
             "continuation_reason": runtime_state.get("continuation_reason"),
@@ -7250,9 +7254,12 @@ class QuestService:
 
     @staticmethod
     def _runtime_liveness_status_from_state(state: dict[str, Any]) -> str:
+        active_run_id = str(state.get("active_run_id") or "").strip()
         if bool(state.get("worker_running")):
+            if not active_run_id:
+                return "invalid"
             return "live"
-        if str(state.get("active_run_id") or "").strip():
+        if active_run_id:
             return "stale"
         return "none"
 

@@ -4459,27 +4459,79 @@ class DaemonApp:
         run_id: str,
         command_payload: dict[str, Any],
         result_payload: dict[str, Any],
+        turn_progress_kind: str = "parked_no_artifact_delta",
     ) -> None:
         run_root = self.quest_service._quest_root(quest_id) / ".ds" / "runs" / run_id
         telemetry_path = run_root / "telemetry.json"
         telemetry = read_json(telemetry_path, {}) if telemetry_path.exists() else {}
         if not isinstance(telemetry, dict):
             telemetry = {}
+        turn_id = str(command_payload.get("turn_id") or telemetry.get("turn_id") or "").strip() or None
+        idempotency_key = (
+            str(command_payload.get("idempotency_key") or telemetry.get("idempotency_key") or turn_id or run_id).strip()
+            or run_id
+        )
         telemetry.update(
             {
                 "run_id": run_id,
+                "turn_id": turn_id,
+                "idempotency_key": idempotency_key,
                 "turn_reason": command_payload.get("turn_reason"),
                 "turn_mode": command_payload.get("turn_mode"),
                 "turn_intent": command_payload.get("turn_intent"),
                 "exit_code": result_payload.get("exit_code"),
-                "turn_progress_kind": "parked_no_artifact_delta",
-                "meaningful_artifact_delta_at": None,
-                "meaningful_artifact_delta_kind": None,
-                "meaningful_artifact_delta_source_signature": None,
+                "turn_progress_kind": turn_progress_kind,
                 "completed_at": telemetry.get("completed_at") or result_payload.get("completed_at") or utc_now(),
             }
         )
+        if turn_progress_kind == "parked_no_artifact_delta":
+            telemetry.update(
+                {
+                    "meaningful_artifact_delta_at": None,
+                    "meaningful_artifact_delta_kind": None,
+                    "meaningful_artifact_delta_source_signature": None,
+                }
+            )
         write_json(telemetry_path, telemetry)
+
+    @staticmethod
+    def _parked_recovery_contract_from_command(
+        command_payload: dict[str, Any],
+        *,
+        run_id: str,
+    ) -> dict[str, Any] | None:
+        turn_id = str(command_payload.get("turn_id") or command_payload.get("idempotency_key") or "").strip()
+        if not turn_id:
+            return None
+        return {
+            "turn_id": turn_id,
+            "attempt_index": 1,
+            "max_attempts": 1,
+            "last_run_id": run_id,
+            "last_error": "Completed parked auto-continue run produced no artifact delta before controller redrive.",
+            "next_retry_at": None,
+        }
+
+    @staticmethod
+    def _parked_pending_closeout_kind(
+        snapshot: dict[str, Any],
+        *,
+        command_payload: dict[str, Any] | None = None,
+    ) -> str | None:
+        retry_state = snapshot.get("retry_state") if isinstance(snapshot.get("retry_state"), dict) else None
+        if retry_state:
+            return "controller_backoff_pending"
+        continuation_reason = str(snapshot.get("continuation_reason") or "").strip().lower()
+        if continuation_reason in {"controller_backoff_pending", "platform_repair_required"}:
+            return continuation_reason
+        command_reason = str((command_payload or {}).get("continuation_reason") or "").strip().lower()
+        if command_reason in {"controller_backoff_pending", "platform_repair_required"}:
+            return command_reason
+        if command_payload and str(command_payload.get("turn_id") or command_payload.get("idempotency_key") or "").strip():
+            return "controller_backoff_pending"
+        if DaemonApp._publication_gate_controller_pending(snapshot):
+            return "controller_work_unit_pending"
+        return None
 
     def _record_completed_parked_auto_continue_closeout(self, quest_id: str, *, run_id: str) -> bool:
         parked_payload = self._completed_parked_auto_continue_payload(quest_id, run_id=run_id)
@@ -4488,22 +4540,37 @@ class DaemonApp:
         command_payload, result_payload = parked_payload
         quest_root = self.quest_service._quest_root(quest_id)
         snapshot = self.quest_service.snapshot(quest_id)
-        controller_pending = self._publication_gate_controller_pending(snapshot)
-        continuation_policy = "auto" if controller_pending else "wait_for_user_or_resume"
-        continuation_reason = "controller_work_unit_pending" if controller_pending else "parked_after_checkpoint_no_new_message"
+        pending_closeout_kind = self._parked_pending_closeout_kind(snapshot, command_payload=command_payload)
+        if pending_closeout_kind:
+            continuation_policy = "auto"
+            continuation_reason = pending_closeout_kind
+            turn_progress_kind = pending_closeout_kind
+        else:
+            continuation_policy = "wait_for_user_or_resume"
+            continuation_reason = "parked_after_checkpoint_no_new_message"
+            turn_progress_kind = "parked_no_artifact_delta"
         self._write_parked_no_artifact_delta_telemetry(
             quest_id,
             run_id=run_id,
             command_payload=command_payload,
             result_payload=result_payload,
+            turn_progress_kind=turn_progress_kind,
         )
+        telemetry = read_json(quest_root / ".ds" / "runs" / run_id / "telemetry.json", {})
+        retry_state_update = None
+        if pending_closeout_kind == "controller_backoff_pending":
+            retry_state_update = (
+                dict(snapshot.get("retry_state"))
+                if isinstance(snapshot.get("retry_state"), dict)
+                else self._parked_recovery_contract_from_command(command_payload, run_id=run_id)
+            )
         self.quest_service.update_runtime_state(
             quest_root=quest_root,
             status="active",
             display_status="active",
             active_run_id=None,
             worker_running=False,
-            retry_state=None,
+            retry_state=retry_state_update,
             continuation_policy=continuation_policy,
             continuation_anchor=str(command_payload.get("continuation_anchor") or "").strip() or "decision",
             continuation_reason=continuation_reason,
@@ -4523,6 +4590,8 @@ class DaemonApp:
                 "turn_mode": command_payload.get("turn_mode"),
                 "continuation_policy": continuation_policy,
                 "continuation_reason": continuation_reason,
+                "turn_progress_kind": turn_progress_kind,
+                "idempotency_key": telemetry.get("idempotency_key"),
                 "telemetry_path": str(quest_root / ".ds" / "runs" / run_id / "telemetry.json"),
                 "summary": "Completed parked auto-continue run was closed without leaving a live worker projection.",
                 "created_at": utc_now(),
@@ -4547,7 +4616,13 @@ class DaemonApp:
             telemetry = read_json(run_root / "telemetry.json", {}) if (run_root / "telemetry.json").exists() else {}
             if (
                 isinstance(telemetry, dict)
-                and str(telemetry.get("turn_progress_kind") or "").strip() == "parked_no_artifact_delta"
+                and str(telemetry.get("turn_progress_kind") or "").strip()
+                in {
+                    "parked_no_artifact_delta",
+                    "controller_work_unit_pending",
+                    "controller_backoff_pending",
+                    "platform_repair_required",
+                }
             ):
                 return False
             return self._record_completed_parked_auto_continue_closeout(quest_id, run_id=run_id)

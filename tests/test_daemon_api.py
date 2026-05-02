@@ -7165,6 +7165,145 @@ def test_daemon_reconciles_completed_parked_auto_continue_even_if_turn_state_say
     assert telemetry["meaningful_artifact_delta_at"] is None
 
 
+def test_daemon_does_not_project_parked_no_artifact_delta_when_publication_gate_pending(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("completed parked controller pending quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+    run_id = "run-parked-controller-pending-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run_root / "command.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "parked",
+            "turn_intent": "continue_stage",
+        },
+    )
+    write_json(
+        run_root / "result.json",
+        {
+            "run_id": run_id,
+            "exit_code": 0,
+            "output_text": "No new user message or /resume; staying parked.",
+        },
+    )
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+        worker_running=True,
+        continuation_policy="auto",
+        continuation_anchor="decision",
+        continuation_reason="controller_work_unit_pending",
+    )
+
+    audit = app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot(quest_id)
+
+    assert audit["active_run_id"] is None
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+    telemetry = read_json(run_root / "telemetry.json", {})
+    assert telemetry.get("turn_progress_kind") != "parked_no_artifact_delta"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    closeouts = [item for item in events if item.get("type") == "runner.parked_turn_closeout"]
+    assert closeouts[-1]["turn_progress_kind"] == "controller_work_unit_pending"
+
+
+def test_daemon_does_not_project_parked_no_artifact_delta_when_recovery_contract_pending(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("completed parked recovery pending quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    run_id = "run-parked-recovery-pending-001"
+    run_root = quest_root / ".ds" / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    write_json(
+        run_root / "command.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "parked",
+            "turn_intent": "continue_stage",
+            "turn_id": "turn-redrive-001",
+            "idempotency_key": "turn-redrive-001",
+            "continuation_reason": "controller_backoff_pending",
+        },
+    )
+    write_json(
+        run_root / "result.json",
+        {
+            "run_id": run_id,
+            "exit_code": 0,
+            "output_text": "No new user message or /resume; staying parked.",
+        },
+    )
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=run_id,
+        worker_running=True,
+        continuation_policy="auto",
+        continuation_anchor="decision",
+        continuation_reason="controller_backoff_pending",
+        retry_state={
+            "turn_id": "turn-redrive-001",
+            "attempt_index": 1,
+            "max_attempts": 3,
+            "last_run_id": run_id,
+            "last_error": "No artifact delta before timeout.",
+            "next_retry_at": "2026-05-02T00:00:00+00:00",
+        },
+    )
+
+    app.quest_runtime_audit(quest_id)
+    snapshot = app.quest_service.snapshot(quest_id)
+
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == "controller_backoff_pending"
+    assert snapshot["retry_state"]["turn_id"] == "turn-redrive-001"
+    telemetry = read_json(run_root / "telemetry.json", {})
+    assert telemetry.get("turn_progress_kind") != "parked_no_artifact_delta"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    closeouts = [item for item in events if item.get("type") == "runner.parked_turn_closeout"]
+    assert closeouts[-1]["turn_progress_kind"] == "controller_backoff_pending"
+    assert closeouts[-1]["idempotency_key"] == "turn-redrive-001"
+
+
 def test_daemon_backfills_completed_parked_auto_continue_telemetry_after_active_run_cleared(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

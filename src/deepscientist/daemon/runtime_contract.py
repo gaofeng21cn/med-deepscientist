@@ -23,11 +23,18 @@ def build_quest_runtime_audit_contract(
     worker_pending: bool,
     stop_requested: bool,
 ) -> dict[str, Any]:
+    normalized_active_run_id = str(active_run_id or "").strip() or None
+    if worker_running and normalized_active_run_id is None:
+        status = "invalid"
+    elif worker_running:
+        status = "live"
+    else:
+        status = "none"
     return {
         "ok": True,
-        "status": "live" if worker_running else "none",
+        "status": status,
         "source": "daemon_turn_worker",
-        "active_run_id": str(active_run_id or "").strip() or None,
+        "active_run_id": normalized_active_run_id,
         "worker_running": bool(worker_running),
         "worker_pending": bool(worker_pending),
         "stop_requested": bool(stop_requested),

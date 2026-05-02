@@ -196,6 +196,30 @@ def test_reconcile_runtime_state_writes_native_runtime_event(temp_home: Path) ->
     assert event["transition"]["current"]["runtime_liveness_status"] == "none"
 
 
+def test_snapshot_marks_worker_running_without_active_run_id_as_invalid_liveness(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("native truth invalid liveness quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        status="running",
+        active_run_id=None,
+        worker_running=True,
+    )
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    event = _latest_runtime_event(quest_root)
+
+    assert snapshot["active_run_id"] is None
+    assert snapshot["worker_running"] is True
+    assert snapshot["runtime_liveness_status"] == "invalid"
+    assert event["status_snapshot"]["runtime_liveness_status"] == "invalid"
+
+
 def test_turn_error_writes_native_runtime_event_with_error_display_status(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
