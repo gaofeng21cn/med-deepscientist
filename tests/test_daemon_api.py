@@ -7953,6 +7953,16 @@ def test_publication_gate_repeated_auto_hold_does_not_wait_for_user_before_runne
             },
             "platform_repair_required",
         ),
+        (
+            {
+                "lifecycle_state": "gate_needs_specificity",
+                "latest_event_type": "gate_needs_specificity",
+                "delivery_blocked": True,
+                "block_reason": "gate_needs_specificity",
+                "terminal_consumed": True,
+            },
+            "gate_needs_specificity",
+        ),
     ],
 )
 def test_publication_gate_terminal_controller_work_unit_authorization_skips_runner(
@@ -8044,6 +8054,93 @@ def test_publication_gate_terminal_controller_work_unit_authorization_skips_runn
     assert skipped[-1]["turn_mode"] == terminal_lifecycle
     assert skipped[-1]["continuation_reason"] == terminal_lifecycle
     assert skipped[-1]["controller_projection"]["reason"] == terminal_lifecycle
+
+
+def test_publication_gate_controller_specificity_authorization_skips_runner_without_lifecycle(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate controller specificity authorization")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "002-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still needs concrete blocker targets",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "claim", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "gate emitted label-only blockers",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "controller",
+        "route_key_question": "publication gate must write concrete claim/figure/table/source path targets.",
+        "work_unit_id": "gate_needs_specificity",
+        "work_unit_fingerprint": "publication-blockers::specificity",
+        "next_work_unit": {
+            "unit_id": "gate_needs_specificity",
+            "lane": "controller",
+            "summary": "Ask publication gate to identify concrete blocker targets.",
+        },
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("controller specificity authorization should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_anchor"] == "decision"
+    assert snapshot["continuation_reason"] == "gate_needs_specificity"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "gate_needs_specificity"
+    assert skipped[-1]["continuation_reason"] == "gate_needs_specificity"
+    assert skipped[-1]["controller_projection"]["reason"] == "gate_needs_specificity"
 
 
 def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(temp_home: Path) -> None:

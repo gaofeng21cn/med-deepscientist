@@ -3862,16 +3862,16 @@ class DaemonApp:
         lifecycle_reason = DaemonApp._controller_work_unit_lifecycle_block_reason(snapshot)
         if lifecycle_reason is not None:
             return lifecycle_reason
-        route_target = str(controller_auth.get("route_target") or "").strip()
-        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
-            return "controller_work_unit_pending" if controller_auth else None
         work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
         work_unit_fingerprint = str(controller_auth.get("work_unit_fingerprint") or "").strip()
         route_question = str(controller_auth.get("route_key_question") or "").strip()
-        if not work_unit_id or not work_unit_fingerprint:
-            return "controller_work_unit_pending"
         if work_unit_id in {"gate_needs_specificity", "needs_specificity"}:
             return "gate_needs_specificity"
+        route_target = str(controller_auth.get("route_target") or "").strip()
+        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
+            return "controller_work_unit_pending" if controller_auth else None
+        if not work_unit_id or not work_unit_fingerprint:
+            return "controller_work_unit_pending"
         blockers = DaemonApp._controller_auth_blockers(snapshot, controller_auth)
         if (
             "stale_study_delivery_mirror" in blockers
