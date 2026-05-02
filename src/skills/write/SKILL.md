@@ -146,16 +146,27 @@ Before writing seriously, confirm:
 ### MAS medical manuscript prose gate
 
 For MAS-controlled medical original-research manuscripts, full drafting must consume the MAS
-`medical_prose_style_contract` and `medical_manuscript_blueprint` before prose generation.
+`medical_prose_style_contract`, `medical_manuscript_blueprint`, and AI-owned
+`medical_prose_review` before prose generation. Call
+`artifact.get_paper_contract_health(detail='full')` before any full-draft action. Full drafting is
+allowed only when that surface reports `mas_medical_writing_preflight_ready=true`, the MAS
+blueprint is present and valid, and the AI prose review is present, AI reviewer-owned, and clear.
 Read the blueprint together with `paper/results_narrative_map.json`,
-`paper/claim_evidence_map.json`, and `paper/figure_semantics_manifest.json`; if any of these
-surfaces are missing, incomplete, or inconsistent with the active claim set, route back to outline
-repair, analysis repair, or MAS contract completion before drafting.
+`paper/claim_evidence_map.json`, `paper/figure_semantics_manifest.json`, and the AI prose
+review diagnosis/representative rewrites; if any of these surfaces are missing, incomplete,
+blocked, or inconsistent with the active claim set, route back to MAS contract completion, outline
+repair, analysis repair, or write revision planning before drafting. In that blocked state, generate
+a route-back plan only; do not write a full draft.
 
 The MAS blueprint is the drafting input that turns evidence into a medical manuscript voice:
 clinical problem -> evidence gap -> objective, methods as reproducible clinical study design,
 Results with the clinical finding as the sentence subject, and Discussion as principal finding,
-prior work, interpretation, limitations, and restrained conclusion. Do not draft from run logs, controller checklists, or packaging metadata. Do not make a figure or table as the grammatical subject of a Results finding sentence; cite displays after the finding and quantitative result.
+prior work, interpretation, limitations, and restrained conclusion. The AI prose review is the
+subjective manuscript-style authority; mechanical flags can guide evidence snippets but cannot
+authorize full medical-journal prose quality. Consume the AI review's representative rewrites when
+revising and write the revision target back into the paper-facing plan. Do not draft from run logs,
+controller checklists, or packaging metadata. Do not make a figure or table as the grammatical
+subject of a Results finding sentence; cite displays after the finding and quantitative result.
 When the target is a medical original research paper, read
 `references/medical-journal-prose.md` before writing or revising the full draft.
 

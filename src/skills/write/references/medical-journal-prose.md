@@ -2,11 +2,26 @@
 
 Use this reference when writing MAS-controlled English medical original-research manuscripts.
 
+## Runtime Authority
+
+Before full drafting, `artifact.get_paper_contract_health(detail='full')` must show the MAS
+medical writing preflight as ready. The subjective style authority is the AI-owned
+`medical_prose_review`, read together with `medical_manuscript_blueprint`, claim-evidence,
+results narrative, and figure semantics surfaces. If the AI prose review is missing, not AI
+reviewer-owned, or not clear, produce a route-back plan instead of a full manuscript draft. When it
+contains representative rewrites, use them as the concrete revision target and write that target
+back into the paper-facing revision plan.
+
 ## Target Voice
 
 Write in a JAMA/NEJM/BMJ/Lancet-style original research voice: neutral, concrete, clinically
 framed, and restrained. The manuscript should sound like a medical paper written for clinicians,
 statistical reviewers, and editors, not a project progress report.
+
+Style sources: Zeiger's biomedical paper text model, Gopen and Swan's reader-expectation
+information flow, JAMA concise/specific/informative wording, Elsevier medical manuscript
+audience/relevance/avoid-overstatement guidance, and JAMA Network Open original investigation
+examples.
 
 ## Reader Flow
 
@@ -26,3 +41,5 @@ statistical reviewers, and editors, not a project progress report.
 - Controller, run-log, package, artifact, pipeline, or checklist language in the manuscript body.
 - Broad "best", "novel", "first", "unique", or practice-changing language unless the evidence map
   explicitly supports that exact claim.
+- Treating regex or pattern hits as the final style verdict. Mechanical checks are safety rails and
+  evidence snippets; the AI prose review owns the subjective medical-journal voice judgment.
