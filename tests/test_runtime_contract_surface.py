@@ -1,6 +1,14 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _read(relative_path: str) -> str:
+    return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
 def test_quest_runtime_audit_contract_normalizes_minimum_surface() -> None:
@@ -113,3 +121,18 @@ def test_artifact_completion_contract_preserves_minimum_surface() -> None:
     assert payload["status"] == "completed"
     assert payload["snapshot"]["status"] == "completed"
     assert payload["summary_refresh"]["ok"] is True
+
+
+def test_opl_module_healthcheck_uses_install_readiness_surface() -> None:
+    script = _read("scripts/opl-module-healthcheck.sh")
+
+    assert "scripts/verify.sh" not in script
+    assert "uv run pytest" not in script
+    assert 'command -v uv >/dev/null 2>&1' in script
+    assert 'ds_bin="$(command -v ds)"' in script
+    assert '"${ds_bin}" --help >/dev/null' in script
+    assert "uv run python - <<'PY'" in script
+    assert "from deepscientist.home import repo_root as resolved_repo_root" in script
+    assert "from deepscientist.skills import discover_skill_bundles" in script
+    assert '"src" / "skills" / "scout" / "SKILL.md"' in script
+    assert '"src" / "skills" / "figure-polish" / "SKILL.md"' in script

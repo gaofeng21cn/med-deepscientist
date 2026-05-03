@@ -4,6 +4,7 @@
 
 `MedDeepScientist` 是面向 `MedAutoScience` 的稳定 runtime substrate。
 当前它仍以受控 DeepScientist fork 的形态维护，同时承担 runtime contract 收敛、上游 intake 审计、以及 durable execution truth 维护。
+它不是独立医学研究产品入口，也不持有 MAS 的研究设计、publication readiness、submission authority 或用户可见进度 owner。
 
 ## 项目目标
 
@@ -22,6 +23,7 @@
 
 - 不做 upstream `DeepScientist` 的镜像同步分支。
 - 不把 prompt/skill 体系重新改造成新的产品主入口。
+- 不把 BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 或 upstream product docs 默认升级成 MAS-facing product contract。
 - 不为了兼容旧入口放松已经明确的 runtime protocol。
 
 ## 默认入口

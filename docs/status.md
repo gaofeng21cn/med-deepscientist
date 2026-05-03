@@ -11,6 +11,7 @@
 - 当前 opt-in proof lane：显式 `executor_kind = hermes_native_proof` 时，可路由到 `HermesNativeProofRunner -> run_agent.AIAgent.run_conversation`；它只接受真实 full agent loop proof，不接受 chat-only relay
 - 当前 `claude` / `opencode` 只保留为 reserved experimental runner ids；当前 release 只维护 config / doc / test contract，不开放真实 runner 产品面
 - OMX 状态：已退场，仅允许历史残留
+- 用户入口边界：医学研究任务继续从 `MedAutoScience` 进入；MDS 只承担 runtime substrate / compatibility surface，不成为独立医学研究产品入口。
 
 ## 当前主线
 
@@ -18,9 +19,9 @@
 - 迁移收缩契约：`docs/policies/mas_mds_transition_contract.md`
 - 核心工作方式入口：根 `AGENTS.md`
 - 当前文档骨架：`project / architecture / invariants / decisions / status`
-- BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线
+- BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线，但它仍是 fork-local capability / setup aid，不是 MAS-facing product contract
 - BenchStore maintainer docs 已补齐 YAML authoring 与 GitHub Releases packaging contract，文档口径继续停在当前 fork 的 read-only catalog + setup packet 边界
-- DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research
+- DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research，也不升级为 MAS 默认可消费 surface
 
 ## 当前执行链
 

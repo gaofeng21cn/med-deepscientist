@@ -16,10 +16,11 @@
 4. [硬约束](invariants.md)
 5. [关键决策](decisions.md)
 6. [最小稳定 runtime protocol](policies/runtime_protocol.md)
-7. [English docs index](en/README.md)
-8. [中文文档索引](zh/README.md)
-9. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
-10. [Windows WSL2 部署指南](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+7. [MAS/MDS 迁移收缩契约](policies/mas_mds_transition_contract.md)
+8. [English docs index](en/README.md)
+9. [中文文档索引](zh/README.md)
+10. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+11. [Windows WSL2 部署指南](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
 
 ## 文档角色
 
@@ -34,7 +35,12 @@
 ### 稳定规则
 
 - [policies/runtime_protocol.md](policies/runtime_protocol.md)
+- [policies/mas_mds_transition_contract.md](policies/mas_mds_transition_contract.md)
 - [policies/system_visibility_contract.md](policies/system_visibility_contract.md)
+
+## 当前边界提醒
+
+`MedDeepScientist` 是 `MedAutoScience` 下的 runtime substrate / compatibility surface，不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
 
 ### 公开用户文档
 
