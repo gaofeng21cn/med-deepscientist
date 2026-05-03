@@ -28,6 +28,7 @@ from .codex_delta_history import _delta_aware_stdout_record, _delta_aware_tool_r
 from .codex_telemetry import (
     DEFAULT_TURN_TOOL_CALL_BUDGET,
     _finalize_tool_budget_telemetry,
+    _latest_run_no_progress_classification,
     _new_tool_budget_telemetry,
     _public_tool_budget_telemetry_snapshot,
     _record_tool_budget_event,
