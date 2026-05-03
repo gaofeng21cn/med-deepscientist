@@ -4519,6 +4519,9 @@ class QuestService:
             str(managed_publication_gate.get("summary") or "").strip()
             or "managed publication gate status is unavailable"
         )
+        managed_publication_gate_current_required_action = (
+            str(managed_publication_gate.get("current_required_action") or "").strip() or None
+        )
         managed_study_root = (
             Path(str(managed_publication_gate.get("study_root") or "")).expanduser().resolve(strict=False)
             if str(managed_publication_gate.get("study_root") or "").strip()
@@ -4543,7 +4546,6 @@ class QuestService:
         mas_required_trigger_relpaths = (
             "paper/medical_manuscript_blueprint.json",
             "paper/medical_journal_style_corpus.json",
-            "artifacts/publication_eval/latest.json",
             "artifacts/publication_eval/medical_prose_review_request.json",
             "artifacts/publication_eval/medical_prose_review.json",
             "artifacts/publication_eval/retrospective_medical_prose_audit.json",
@@ -4564,10 +4566,17 @@ class QuestService:
                 ),
                 None,
             )
-        mas_medical_preflight_required = bool(managed_study_root) or any(
+        managed_publication_gate_action_types = {
+            str(item).strip()
+            for item in (managed_publication_gate.get("recommended_action_types") or [])
+            if str(item).strip()
+        }
+        mas_medical_preflight_required = any(
             (root / relative_path).exists()
             for root in candidate_mas_roots
             for relative_path in mas_required_trigger_relpaths
+        ) or managed_publication_gate_current_required_action == "return_to_mas_medical_writing_preflight" or (
+            "return_to_mas_medical_writing_preflight" in managed_publication_gate_action_types
         )
         mas_medical_writing_preflight = self._mas_medical_writing_preflight_payload(
             study_root=mas_surface_root,
@@ -4580,11 +4589,7 @@ class QuestService:
             for item in (mas_medical_writing_preflight.get("blocking_reasons") or [])
             if str(item).strip()
         ]
-        managed_publication_gate_recommended_action_types = {
-            str(item).strip()
-            for item in (managed_publication_gate.get("recommended_action_types") or [])
-            if str(item).strip()
-        }
+        managed_publication_gate_recommended_action_types = managed_publication_gate_action_types
         reference_gate = (
             dict(reference_materialization.get("reference_gate") or {})
             if isinstance(reference_materialization.get("reference_gate"), dict)
@@ -4723,9 +4728,6 @@ class QuestService:
             and review_outputs_ready
             and proofing_outputs_ready
             and submission_checklist_ready
-        )
-        managed_publication_gate_current_required_action = (
-            str(managed_publication_gate.get("current_required_action") or "").strip() or None
         )
         managed_publication_gate_complete_bundle_stage = (
             managed_publication_gate_current_required_action == "complete_bundle_stage"
