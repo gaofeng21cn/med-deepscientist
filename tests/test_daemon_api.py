@@ -8248,6 +8248,19 @@ def test_publication_gate_terminal_controller_work_unit_authorization_skips_runn
     )
     snapshot = app.quest_service.snapshot(quest_id)
     fingerprint = app._stage_state_fingerprint(snapshot)
+    run_id = "run-authorized-no-progress-telemetry-001"
+    run_root = ensure_dir(quest_root / ".ds" / "runs" / run_id)
+    write_json(
+        run_root / "telemetry.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "stage_execution",
+            "tool_call_budget_exceeded": True,
+            "meaningful_artifact_delta_at": None,
+            "turn_progress_kind": "status_or_tool_activity",
+        },
+    )
     app.quest_service.update_runtime_state(
         quest_root=quest_root,
         last_stage_fingerprint=fingerprint,
@@ -8482,6 +8495,8 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
     events = read_jsonl(quest_root / ".ds" / "events.jsonl")
     skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
     assert not skipped or skipped[-1].get("turn_mode") != "controller_work_unit_pending"
+    terminal_events = [item for item in events if item.get("type") == "quest.no_progress_failure_terminal"]
+    assert terminal_events == []
 
 
 @pytest.mark.parametrize(
@@ -8586,6 +8601,117 @@ def test_publication_gate_incomplete_controller_work_unit_authorization_skips_ru
     assert skipped[-1]["turn_mode"] == expected_reason
     assert skipped[-1]["continuation_reason"] == expected_reason
     assert skipped[-1]["controller_projection"]["reason"] == expected_reason
+
+
+def test_publication_gate_no_progress_telemetry_marks_terminal_without_runner(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate no progress anti spin")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+    run_id = "run-no-progress-001"
+    run_root = ensure_dir(quest_root / ".ds" / "runs" / run_id)
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(quest_root, baseline_gate="confirmed")
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    write_json(
+        run_root / "telemetry.json",
+        {
+            "run_id": run_id,
+            "turn_reason": "auto_continue",
+            "turn_mode": "stage_execution",
+            "tool_call_budget_exceeded": True,
+            "meaningful_artifact_delta_at": None,
+            "turn_progress_kind": "read_churn_without_artifact_delta",
+        },
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence blockers.",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
+    }
+    write_json(runtime_state_path, runtime_state)
+    snapshot = app.quest_service.snapshot(quest_id)
+    fingerprint = app._stage_state_fingerprint(snapshot)
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state.update(
+        {
+            "last_stage_fingerprint": fingerprint,
+            "same_fingerprint_auto_turn_count": 3,
+        }
+    )
+    write_json(runtime_state_path, runtime_state)
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("no-progress publication gate should not invoke the same runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == "gate_needs_specificity"
+    assert snapshot["retry_state"]["terminal"] is True
+    assert snapshot["retry_state"]["failure_kind"] == "publication_gate_no_progress"
+    lifecycle = snapshot["last_controller_decision_authorization"]["controller_work_unit_lifecycle"]
+    assert lifecycle["lifecycle_state"] == "terminal"
+    assert lifecycle["block_reason"] == "gate_needs_specificity"
+    assert lifecycle["failure_kind"] == "publication_gate_no_progress"
+    assert lifecycle["latest_run_id"] == run_id
+    handoff = snapshot["last_controller_decision_authorization"]["escalation_handoff"]
+    assert handoff["target"] == "mas_redrive"
+    assert handoff["reason"] == "gate_needs_specificity"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    terminal_events = [item for item in events if item.get("type") == "quest.no_progress_failure_terminal"]
+    assert terminal_events[-1]["classification"]["gate_needs_specificity"] is True
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "gate_needs_specificity"
 
 
 def test_publication_gate_current_package_freshness_signature_mismatch_skips_runner(

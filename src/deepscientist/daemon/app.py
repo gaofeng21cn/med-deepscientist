@@ -75,6 +75,7 @@ from ..prompts.builder import CONTINUATION_SKILLS, STANDARD_SKILLS, classify_tur
 from ..connector.qq_profiles import list_qq_profiles, merge_qq_profile_config, normalize_qq_connector_config
 from ..quest import QuestService
 from ..runners import CodexRunner, HermesNativeProofRunner, RunRequest, get_runner_factory, register_builtin_runners
+from ..runners.codex_telemetry import _latest_run_no_progress_classification
 from ..runtime_logs import JsonlLogger
 from ..runtime_storage import maintain_quest_runtime_storage
 from ..shared import append_jsonl, ensure_dir, generate_id, iter_jsonl, read_json, read_jsonl, read_jsonl_tail, read_text, resolve_within, run_command, slugify, utc_now, which, write_json
@@ -4067,6 +4068,8 @@ class DaemonApp:
         hold_projection: dict[str, Any] | None = None,
         same_fingerprint_auto_turn_count: int | None = None,
         stale_active_run_id: str | None = None,
+        no_progress_classification: dict[str, Any] | None = None,
+        retry_state: dict[str, Any] | None = None,
         update_fingerprint: bool = False,
     ) -> dict[str, Any]:
         quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
@@ -4088,6 +4091,8 @@ class DaemonApp:
         }
         if same_fingerprint_auto_turn_count is not None:
             runtime_updates["same_fingerprint_auto_turn_count"] = same_fingerprint_auto_turn_count
+        if retry_state is not None:
+            runtime_updates["retry_state"] = retry_state
         if update_fingerprint:
             runtime_updates["last_stage_fingerprint"] = self._stage_state_fingerprint(snapshot)
             runtime_updates["last_stage_fingerprint_at"] = utc_now()
@@ -4115,6 +4120,8 @@ class DaemonApp:
             payload["same_fingerprint_auto_turn_count"] = same_fingerprint_auto_turn_count
         if stale_active_run_id:
             payload["stale_active_run_id"] = stale_active_run_id
+        if no_progress_classification is not None:
+            payload["no_progress_classification"] = no_progress_classification
         append_jsonl(quest_root / ".ds" / "events.jsonl", payload)
         return payload
 
@@ -4171,6 +4178,14 @@ class DaemonApp:
         gate_snapshot = self._expanded_execution_gate_snapshot(quest_id, snapshot)
         controller_reason = self._controller_work_unit_authorization_block_reason(gate_snapshot)
         if controller_reason is not None:
+            no_progress_classification = self._publication_gate_no_progress_classification(gate_snapshot)
+            if bool(no_progress_classification.get("no_progress_failure")):
+                gate_snapshot = self._write_publication_gate_no_progress_terminal(
+                    quest_id,
+                    snapshot=gate_snapshot,
+                    classification=no_progress_classification,
+                    controller_reason=controller_reason,
+                )
             return self._record_execution_gate_skipped_attempt(
                 quest_id,
                 snapshot=gate_snapshot,
@@ -4178,6 +4193,17 @@ class DaemonApp:
                 terminal_reason=controller_reason,
                 terminal_source="controller_work_unit_authorization",
                 controller_projection={"reason": controller_reason},
+                no_progress_classification=(
+                    no_progress_classification
+                    if bool(no_progress_classification.get("no_progress_failure"))
+                    else None
+                ),
+                retry_state=(
+                    dict(gate_snapshot.get("retry_state") or {})
+                    if bool(no_progress_classification.get("no_progress_failure"))
+                    and isinstance(gate_snapshot.get("retry_state"), dict)
+                    else None
+                ),
                 summary="Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
                 update_fingerprint=True,
             )
@@ -4251,6 +4277,14 @@ class DaemonApp:
         controller_reason = self._controller_work_unit_authorization_block_reason(snapshot)
         if controller_reason is None:
             return False
+        no_progress_classification = self._publication_gate_no_progress_classification(snapshot)
+        if bool(no_progress_classification.get("no_progress_failure")):
+            snapshot = self._write_publication_gate_no_progress_terminal(
+                quest_id,
+                snapshot=snapshot,
+                classification=no_progress_classification,
+                controller_reason=controller_reason,
+            )
         self._record_execution_gate_skipped_attempt(
             quest_id,
             snapshot=snapshot,
@@ -4258,10 +4292,132 @@ class DaemonApp:
             terminal_reason=controller_reason,
             terminal_source="controller_work_unit_authorization",
             controller_projection={"reason": controller_reason},
+            no_progress_classification=(
+                no_progress_classification
+                if bool(no_progress_classification.get("no_progress_failure"))
+                else None
+            ),
+            retry_state=(
+                dict(snapshot.get("retry_state") or {})
+                if bool(no_progress_classification.get("no_progress_failure"))
+                and isinstance(snapshot.get("retry_state"), dict)
+                else None
+            ),
             summary="Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
             update_fingerprint=True,
         )
         return True
+
+    def _latest_run_telemetry(self, quest_root: Path) -> dict[str, Any]:
+        runs_root = quest_root / ".ds" / "runs"
+        if not runs_root.exists():
+            return {}
+        run_roots = sorted(
+            (item for item in runs_root.iterdir() if item.is_dir()),
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+        for run_root in run_roots:
+            telemetry = read_json(run_root / "telemetry.json", {})
+            if isinstance(telemetry, dict) and telemetry:
+                payload = dict(telemetry)
+                payload.setdefault("run_id", run_root.name)
+                return payload
+        return {}
+
+    def _publication_gate_no_progress_classification(self, snapshot: dict) -> dict[str, Any]:
+        if not self._publication_gate_controller_pending(snapshot):
+            return {"no_progress_failure": False}
+        controller_reason = self._controller_work_unit_authorization_block_reason(snapshot)
+        gate_needs_specificity = controller_reason == "gate_needs_specificity"
+        quest_root = Path(str(snapshot.get("quest_root") or ""))
+        telemetry = self._latest_run_telemetry(quest_root) if str(quest_root) else {}
+        if not telemetry:
+            return {"no_progress_failure": False}
+        return _latest_run_no_progress_classification(
+            telemetry,
+            same_fingerprint_auto_turn_count=int(snapshot.get("same_fingerprint_auto_turn_count") or 0),
+            gate_needs_specificity=gate_needs_specificity,
+        )
+
+    def _write_publication_gate_no_progress_terminal(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict,
+        classification: dict[str, Any],
+        controller_reason: str,
+    ) -> dict[str, Any]:
+        quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
+        runtime_state = self.quest_service._read_runtime_state(quest_root)
+        controller_auth = (
+            dict(runtime_state.get("last_controller_decision_authorization") or {})
+            if isinstance(runtime_state.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+        telemetry = self._latest_run_telemetry(quest_root)
+        latest_run_id = str(telemetry.get("run_id") or "").strip() or None
+        now = utc_now()
+        lifecycle = {
+            "lifecycle_state": "terminal",
+            "block_reason": controller_reason,
+            "failure_kind": classification.get("failure_kind"),
+            "latest_run_id": latest_run_id,
+            "terminal_at": now,
+            "delivery_blocked": True,
+            "classification": classification,
+        }
+        controller_auth["controller_work_unit_lifecycle"] = lifecycle
+        controller_auth["escalation_handoff"] = {
+            "target": "mas_redrive",
+            "reason": controller_reason,
+            "failure_kind": classification.get("failure_kind"),
+            "latest_run_id": latest_run_id,
+            "created_at": now,
+            "summary": "Publication gate no-progress anti-spin requires MAS redrive with a concrete controller target.",
+        }
+        retry_state = {
+            "terminal": True,
+            "turn_id": str(telemetry.get("turn_id") or "").strip() or None,
+            "attempt_index": int(telemetry.get("attempt_index") or 1),
+            "max_attempts": int(telemetry.get("max_attempts") or 1),
+            "last_run_id": latest_run_id,
+            "last_error": "Publication gate no-progress anti-spin: budget exhausted without artifact delta.",
+            "next_retry_at": None,
+            "failure_kind": classification.get("failure_kind"),
+            "gate_needs_specificity": True,
+            "classification": classification,
+            "escalation_target": "mas_redrive",
+        }
+        runtime_state["last_controller_decision_authorization"] = controller_auth
+        runtime_state["retry_state"] = retry_state
+        runtime_state["continuation_policy"] = "auto"
+        runtime_state["continuation_anchor"] = "decision"
+        runtime_state["continuation_reason"] = controller_reason
+        runtime_state["continuation_updated_at"] = now
+        self.quest_service._write_runtime_state(quest_root, runtime_state)
+        append_jsonl(
+            quest_root / ".ds" / "events.jsonl",
+            {
+                "event_id": generate_id("evt"),
+                "type": "quest.no_progress_failure_terminal",
+                "quest_id": quest_id,
+                "run_id": latest_run_id,
+                "continuation_reason": controller_reason,
+                "classification": classification,
+                "retry_state": retry_state,
+                "escalation_handoff": controller_auth["escalation_handoff"],
+                "summary": "Publication gate no-progress failure was marked terminal for MAS redrive.",
+                "created_at": now,
+            },
+        )
+        updated = dict(snapshot)
+        updated["last_controller_decision_authorization"] = controller_auth
+        updated["retry_state"] = retry_state
+        updated["continuation_policy"] = "auto"
+        updated["continuation_anchor"] = "decision"
+        updated["continuation_reason"] = controller_reason
+        return updated
 
     def _project_repeated_auto_hold_before_runner(
         self,
@@ -4334,6 +4490,14 @@ class DaemonApp:
             controller_projection_reason = lifecycle_reason or auth_block_reason or "publication_gate_blocker"
             if self._has_executable_controller_work_unit_authorization(snapshot):
                 return False
+            no_progress_classification = self._publication_gate_no_progress_classification(snapshot)
+            if bool(no_progress_classification.get("no_progress_failure")):
+                snapshot = self._write_publication_gate_no_progress_terminal(
+                    quest_id,
+                    snapshot=snapshot,
+                    classification=no_progress_classification,
+                    controller_reason=controller_reason,
+                )
             self._record_execution_gate_skipped_attempt(
                 quest_id,
                 snapshot=snapshot,
@@ -4344,6 +4508,17 @@ class DaemonApp:
                     "reason": controller_projection_reason,
                     "same_fingerprint_auto_turn_count": projected_count,
                 },
+                no_progress_classification=(
+                    no_progress_classification
+                    if bool(no_progress_classification.get("no_progress_failure"))
+                    else None
+                ),
+                retry_state=(
+                    dict(snapshot.get("retry_state") or {})
+                    if bool(no_progress_classification.get("no_progress_failure"))
+                    and isinstance(snapshot.get("retry_state"), dict)
+                    else None
+                ),
                 hold_projection=hold_projection,
                 same_fingerprint_auto_turn_count=projected_count,
                 summary="Auto-continue skipped before runner launch because MAS owns the pending publication-gate work unit.",
