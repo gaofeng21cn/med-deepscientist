@@ -5204,6 +5204,153 @@ def test_schedule_turn_uses_compact_snapshot_before_worker_launch(
     }
 
 
+@pytest.mark.parametrize(
+    ("continuation_reason", "expected_terminal_reason"),
+    [
+        ("stop-hold", "stop_hold"),
+        ("gate_needs_specificity", "gate_needs_specificity"),
+        ("platform_repair_required", "platform_repair_required"),
+    ],
+)
+def test_schedule_turn_preflight_gate_records_terminal_skip_without_worker(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    continuation_reason: str,
+    expected_terminal_reason: str,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create(f"schedule preflight terminal gate {expected_terminal_reason}")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    drained: list[str] = []
+
+    app.quest_service.update_settings(quest_id, active_anchor="decision")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason=continuation_reason,
+    )
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: drained.append(target_quest_id))
+
+    payload = app.schedule_turn(quest_id, reason="auto_continue")
+
+    assert payload == {
+        "scheduled": True,
+        "started": False,
+        "queued": False,
+        "reason": "execution_gate_skipped",
+        "terminal_reason": expected_terminal_reason,
+    }
+    assert drained == []
+    assert app._turn_state.get(quest_id, {}).get("running") is not True
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == expected_terminal_reason
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["source"] == "daemon_preflight_execution_gate"
+    assert skipped[-1]["terminal_reason"] == expected_terminal_reason
+    assert skipped[-1]["durable_skipped_attempt"] is True
+
+
+def test_schedule_turn_preflight_gate_records_stale_active_run_without_worker(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("schedule preflight stale active run")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    stale_run_id = "run-stale-schedule-001"
+    drained: list[str] = []
+
+    app.quest_service.mark_turn_started(quest_id, run_id=stale_run_id, status="running")
+    run_root = ensure_dir(quest_root / ".ds" / "runs" / stale_run_id)
+    write_json(
+        run_root / "result.json",
+        {
+            "ok": True,
+            "run_id": stale_run_id,
+            "exit_code": 0,
+            "output_text": "stale auto-continue result",
+            "completed_at": utc_now(),
+        },
+    )
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: drained.append(target_quest_id))
+
+    payload = app.schedule_turn(quest_id, reason="auto_continue")
+
+    assert payload == {
+        "scheduled": True,
+        "started": False,
+        "queued": False,
+        "reason": "execution_gate_skipped",
+        "terminal_reason": "stale_active_run",
+    }
+    assert drained == []
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+    assert snapshot["active_run_id"] is None
+    assert snapshot["continuation_reason"] == "stale_active_run"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["terminal_reason"] == "stale_active_run"
+    assert skipped[-1]["stale_active_run_id"] == stale_run_id
+    assert skipped[-1]["durable_skipped_attempt"] is True
+
+
+def test_schedule_turn_preflight_gate_records_same_fingerprint_no_delta_without_worker(
+    temp_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("schedule preflight same fingerprint")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    drained: list[str] = []
+
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="write",
+        reason="return_to_publishability_gate",
+    )
+    fingerprint = app._stage_state_fingerprint(app.quest_service.snapshot(quest_id))
+    app.quest_service.update_runtime_state(
+        quest_root=quest_root,
+        last_stage_fingerprint=fingerprint,
+        same_fingerprint_auto_turn_count=2,
+    )
+    monkeypatch.setattr(app, "_drain_turns", lambda target_quest_id: drained.append(target_quest_id))
+
+    payload = app.schedule_turn(quest_id, reason="auto_continue")
+
+    assert payload == {
+        "scheduled": True,
+        "started": False,
+        "queued": False,
+        "reason": "execution_gate_skipped",
+        "terminal_reason": "same_fingerprint_no_delta",
+    }
+    assert drained == []
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+    assert snapshot["continuation_policy"] == "wait_for_user_or_resume"
+    assert snapshot["continuation_reason"] == "repeated_auto_hold_projection"
+    assert snapshot["same_fingerprint_auto_turn_count"] >= 3
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["terminal_reason"] == "same_fingerprint_no_delta"
+    assert skipped[-1]["durable_skipped_attempt"] is True
+    assert skipped[-1]["hold_projection"]["anchor"] == "write"
+
+
 def test_resume_quest_preserves_waiting_completion_approval_without_auto_continue(
     temp_home: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -7674,6 +7821,90 @@ def test_daemon_projects_repeated_auto_hold_before_running_codex(temp_home: Path
     assert skipped[-1]["hold_projection"]["anchor"] == "write"
 
 
+def test_run_quest_turn_execution_gate_blocks_terminal_consumed_controller_authorization(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("run preflight terminal consumed gate")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate terminal state consumed by controller",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "terminal gate output is consumed",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence blockers.",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::consumed",
+        "claim_id": "claim-001",
+        "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
+        "controller_work_unit_lifecycle": {
+            "lifecycle_state": "closed",
+            "latest_event_type": "closed",
+            "terminal_consumed": True,
+        },
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("terminal consumed execution gate should not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    snapshot = app.quest_service.snapshot_fast(quest_id)
+    assert snapshot["continuation_policy"] == "auto"
+    assert snapshot["continuation_reason"] == "closed"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["source"] == "daemon_preflight_execution_gate"
+    assert skipped[-1]["terminal_reason"] == "closed"
+    assert skipped[-1]["durable_skipped_attempt"] is True
+
+
 def test_new_user_message_bypasses_repeated_auto_hold_projection(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()
@@ -8509,13 +8740,6 @@ def test_publication_gate_parked_continuation_auto_turn_starts_runner(temp_home:
         anchor="decision",
         reason="parked_after_checkpoint_no_new_message",
     )
-    fingerprint = app._stage_state_fingerprint(app.quest_service.snapshot(quest_id))
-    app.quest_service.update_runtime_state(
-        quest_root=quest_root,
-        last_stage_fingerprint=fingerprint,
-        same_fingerprint_auto_turn_count=17,
-    )
-
     class RecordingRunner:
         binary = ""
 

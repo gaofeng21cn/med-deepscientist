@@ -109,6 +109,17 @@ CODEX_RETRY_DEFAULT_MAX_BACKOFF_SEC = 1800.0
 LEGACY_CODEX_RETRY_INITIAL_BACKOFF_SEC = 1.0
 LEGACY_CODEX_RETRY_BACKOFF_MULTIPLIER = 2.0
 LEGACY_CODEX_RETRY_MAX_BACKOFF_SEC = 8.0
+EXECUTION_GATE_TERMINAL_REASONS = {
+    "closed",
+    "needs_specificity",
+    "gate_needs_specificity",
+    "platform_repair_required",
+    "await_artifact_delta_or_gate_replay",
+    "gate_reread_required",
+    "stop_hold",
+    "terminal_consumed",
+    "current_package_freshness_required",
+}
 _RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS = 0
 _RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB = 16
 _CRASH_AUTO_RESUME_COOLDOWN = timedelta(minutes=10)
@@ -1701,6 +1712,20 @@ class DaemonApp:
 
     def schedule_turn(self, quest_id: str, *, reason: str = "user_message") -> dict:
         snapshot = self._compact_snapshot_with_reconciled_turn_state(quest_id)
+        gate = self._controller_execution_gate_skip(
+            quest_id,
+            snapshot=snapshot,
+            turn_reason=reason,
+            source="schedule_turn",
+        )
+        if gate is not None:
+            return {
+                "scheduled": True,
+                "started": False,
+                "queued": False,
+                "reason": "execution_gate_skipped",
+                "terminal_reason": gate["terminal_reason"],
+            }
         turn_state = self._refresh_turn_worker_state(quest_id)
         if not turn_state.get("running"):
             active_run_id = str(snapshot.get("active_run_id") or "").strip()
@@ -2106,7 +2131,12 @@ class DaemonApp:
 
     def _compact_snapshot_with_reconciled_turn_state(self, quest_id: str) -> dict[str, Any]:
         snapshot = self.quest_service.snapshot_fast(quest_id)
-        return self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+        active_run_id = str(snapshot.get("active_run_id") or "").strip()
+        reconciled = self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+        if active_run_id and not str(reconciled.get("active_run_id") or "").strip():
+            reconciled = dict(reconciled)
+            reconciled["_execution_gate_stale_active_run_id"] = active_run_id
+        return reconciled
 
     def quest_runtime_audit(self, quest_id: str, *, snapshot: dict | None = None) -> dict[str, Any]:
         resolved_snapshot = dict(snapshot or self._compact_snapshot_with_reconciled_turn_state(quest_id))
@@ -3027,6 +3057,13 @@ class DaemonApp:
         latest_user_message = self._latest_runnable_user_message(quest_id, turn_reason=turn_reason)
         if turn_reason != "auto_continue" and latest_user_message is None:
             return
+        if self._controller_execution_gate_skip(
+            quest_id,
+            snapshot=snapshot,
+            turn_reason=turn_reason,
+            source="_run_quest_turn",
+        ):
+            return
 
         runner_name = self._runner_name_for(snapshot)
         runner_cfg = self.runners_config.get(runner_name, {})
@@ -3720,21 +3757,15 @@ class DaemonApp:
         state = normalize_state(lifecycle.get("lifecycle_state") or lifecycle.get("state"))
         block_reason = normalize_state(lifecycle.get("block_reason"))
         latest_event_type = normalize_state(lifecycle.get("latest_event_type"))
-        terminal_states = {
-            "closed",
-            "needs_specificity",
-            "gate_needs_specificity",
-            "platform_repair_required",
-            "await_artifact_delta_or_gate_replay",
-            "gate_reread_required",
-            "stop_hold",
-        }
+        terminal_states = EXECUTION_GATE_TERMINAL_REASONS
         if block_reason in terminal_states:
             return block_reason
         if state in terminal_states:
             return state
         if latest_event_type in terminal_states:
             return latest_event_type
+        if bool(lifecycle.get("terminal_consumed")):
+            return "terminal_consumed"
         if bool(lifecycle.get("delivery_blocked")):
             return block_reason or state or latest_event_type or "controller_work_unit_pending"
         return None
@@ -3913,6 +3944,287 @@ class DaemonApp:
             return False
         return DaemonApp._controller_work_unit_authorization_block_reason(snapshot) is None
 
+    @staticmethod
+    def _normalize_execution_gate_reason(value: object) -> str | None:
+        reason = str(value or "").strip().lower().replace("-", "_")
+        return reason or None
+
+    @staticmethod
+    def _continuation_execution_gate_terminal_reason(snapshot: dict) -> str | None:
+        reason = DaemonApp._normalize_execution_gate_reason(snapshot.get("continuation_reason"))
+        if reason in EXECUTION_GATE_TERMINAL_REASONS:
+            return reason
+        return None
+
+    def _expanded_execution_gate_snapshot(self, quest_id: str, snapshot: dict) -> dict:
+        if isinstance(snapshot.get("paper_contract_health"), dict):
+            return snapshot
+        controller_auth = snapshot.get("last_controller_decision_authorization")
+        continuation_reason = self._normalize_execution_gate_reason(snapshot.get("continuation_reason"))
+        needs_full_projection = (
+            int(snapshot.get("same_fingerprint_auto_turn_count") or 0) >= 2
+            or continuation_reason == "controller_work_unit_pending"
+            or isinstance(controller_auth, dict)
+        )
+        if not needs_full_projection:
+            return snapshot
+        return self.quest_service.snapshot(quest_id)
+
+    def _same_fingerprint_no_delta_gate_projection(self, snapshot: dict) -> dict[str, Any] | None:
+        previous_fingerprint = str(snapshot.get("last_stage_fingerprint") or "").strip()
+        if not previous_fingerprint:
+            return None
+        same_count = int(snapshot.get("same_fingerprint_auto_turn_count") or 0)
+        if same_count < 2:
+            return None
+        current_fingerprint = self._stage_state_fingerprint(snapshot)
+        if previous_fingerprint != current_fingerprint:
+            return None
+
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        active_anchor = str(snapshot.get("active_anchor") or "").strip().lower()
+        continuation_reason = str(snapshot.get("continuation_reason") or "").strip().lower()
+        recommended_action = str(paper_health.get("recommended_action") or "").strip().lower()
+        blockers = [str(item).strip() for item in (paper_health.get("blocking_reasons") or []) if str(item).strip()]
+        hold_markers = (
+            "hold",
+            "block",
+            "return_to_publishability_gate",
+            "unchanged_",
+            "external_metadata_pending",
+        )
+        hold_like = (
+            active_anchor in {"decision", "finalize", "write"}
+            and (
+                any(marker in continuation_reason for marker in hold_markers)
+                or any(marker in recommended_action for marker in hold_markers)
+                or bool(blockers)
+            )
+        )
+        if not hold_like:
+            return None
+
+        projected_count = same_count + 1
+        hold_projection = {
+            "anchor": active_anchor or None,
+            "recommended_action": recommended_action or None,
+            "blocking_reasons": blockers[:6],
+            "fingerprint": current_fingerprint,
+            "same_fingerprint_auto_turn_count": projected_count,
+        }
+        if self._publication_gate_controller_pending(snapshot):
+            lifecycle_reason = self._controller_work_unit_lifecycle_block_reason(snapshot)
+            auth_block_reason = self._controller_work_unit_authorization_block_reason(snapshot)
+            controller_reason = lifecycle_reason or auth_block_reason or "controller_work_unit_pending"
+            controller_projection_reason = lifecycle_reason or auth_block_reason or "publication_gate_blocker"
+            if self._has_executable_controller_work_unit_authorization(snapshot):
+                return None
+            return {
+                "terminal_reason": "same_fingerprint_no_delta",
+                "terminal_source": "same_fingerprint_no_delta",
+                "turn_mode": controller_reason,
+                "continuation_policy": "auto",
+                "continuation_anchor": "decision",
+                "continuation_reason": controller_reason,
+                "same_fingerprint_auto_turn_count": projected_count,
+                "controller_projection": {
+                    "reason": controller_projection_reason,
+                    "same_fingerprint_auto_turn_count": projected_count,
+                },
+                "hold_projection": hold_projection,
+                "summary": "Auto-continue skipped before runner launch because MAS owns the pending publication-gate work unit.",
+            }
+        return {
+            "terminal_reason": "same_fingerprint_no_delta",
+            "terminal_source": "same_fingerprint_no_delta",
+            "turn_mode": "deterministic_hold_projection",
+            "continuation_policy": "wait_for_user_or_resume",
+            "continuation_anchor": "decision",
+            "continuation_reason": "repeated_auto_hold_projection",
+            "same_fingerprint_auto_turn_count": projected_count,
+            "hold_projection": hold_projection,
+            "summary": "Auto-continue skipped before runner launch because the same anchor/blocker fingerprint was already held.",
+        }
+
+    def _record_execution_gate_skipped_attempt(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict,
+        turn_reason: str,
+        terminal_reason: str,
+        terminal_source: str,
+        summary: str,
+        continuation_policy: str = "auto",
+        continuation_anchor: str = "decision",
+        continuation_reason: str | None = None,
+        turn_mode: str | None = None,
+        controller_projection: dict[str, Any] | None = None,
+        hold_projection: dict[str, Any] | None = None,
+        same_fingerprint_auto_turn_count: int | None = None,
+        stale_active_run_id: str | None = None,
+        update_fingerprint: bool = False,
+    ) -> dict[str, Any]:
+        quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
+        normalized_terminal_reason = self._normalize_execution_gate_reason(terminal_reason) or terminal_reason
+        resolved_continuation_reason = (
+            self._normalize_execution_gate_reason(continuation_reason)
+            or normalized_terminal_reason
+        )
+        runtime_updates: dict[str, Any] = {
+            "active_run_id": None,
+            "worker_running": False,
+            "continuation_policy": continuation_policy,
+            "continuation_anchor": continuation_anchor,
+            "continuation_reason": resolved_continuation_reason,
+            "continuation_updated_at": utc_now(),
+            "event_source": "daemon_preflight_execution_gate",
+            "event_kind": "runtime_execution_gate_skipped",
+            "event_summary": summary,
+        }
+        if same_fingerprint_auto_turn_count is not None:
+            runtime_updates["same_fingerprint_auto_turn_count"] = same_fingerprint_auto_turn_count
+        if update_fingerprint:
+            runtime_updates["last_stage_fingerprint"] = self._stage_state_fingerprint(snapshot)
+            runtime_updates["last_stage_fingerprint_at"] = utc_now()
+        self.quest_service.update_runtime_state(quest_root=quest_root, **runtime_updates)
+        payload: dict[str, Any] = {
+            "event_id": generate_id("evt"),
+            "type": "runner.turn_skipped",
+            "quest_id": quest_id,
+            "source": "daemon_preflight_execution_gate",
+            "turn_reason": turn_reason,
+            "turn_mode": turn_mode or resolved_continuation_reason,
+            "continuation_policy": continuation_policy,
+            "continuation_reason": resolved_continuation_reason,
+            "terminal_reason": normalized_terminal_reason,
+            "terminal_source": terminal_source,
+            "durable_skipped_attempt": True,
+            "summary": summary,
+            "created_at": utc_now(),
+        }
+        if controller_projection is not None:
+            payload["controller_projection"] = controller_projection
+        if hold_projection is not None:
+            payload["hold_projection"] = hold_projection
+        if same_fingerprint_auto_turn_count is not None:
+            payload["same_fingerprint_auto_turn_count"] = same_fingerprint_auto_turn_count
+        if stale_active_run_id:
+            payload["stale_active_run_id"] = stale_active_run_id
+        append_jsonl(quest_root / ".ds" / "events.jsonl", payload)
+        return payload
+
+    def _controller_execution_gate_skip(
+        self,
+        quest_id: str,
+        *,
+        snapshot: dict,
+        turn_reason: str,
+        source: str,
+    ) -> dict[str, Any] | None:
+        if str(turn_reason or "").strip() != "auto_continue":
+            return None
+        if int(snapshot.get("pending_user_message_count") or 0) > 0:
+            return None
+        if str(snapshot.get("waiting_interaction_id") or "").strip():
+            return None
+
+        stale_active_run_id = str(snapshot.get("_execution_gate_stale_active_run_id") or "").strip()
+        if stale_active_run_id:
+            return self._record_execution_gate_skipped_attempt(
+                quest_id,
+                snapshot=snapshot,
+                turn_reason=turn_reason,
+                terminal_reason="stale_active_run",
+                terminal_source="stale_active_run",
+                continuation_policy="wait_for_user_or_resume",
+                continuation_anchor="decision",
+                continuation_reason="stale_active_run",
+                turn_mode="stale_active_run",
+                stale_active_run_id=stale_active_run_id,
+                summary="Auto-continue skipped because the previous active run was stale and required reconciliation.",
+            )
+
+        active_run_id = str(snapshot.get("active_run_id") or "").strip()
+        if source == "_run_quest_turn" and active_run_id:
+            quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
+            if not self._active_run_has_recent_external_activity(quest_root, active_run_id):
+                reconciled = self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+                return self._record_execution_gate_skipped_attempt(
+                    quest_id,
+                    snapshot=reconciled,
+                    turn_reason=turn_reason,
+                    terminal_reason="stale_active_run",
+                    terminal_source="stale_active_run",
+                    continuation_policy="wait_for_user_or_resume",
+                    continuation_anchor="decision",
+                    continuation_reason="stale_active_run",
+                    turn_mode="stale_active_run",
+                    stale_active_run_id=active_run_id,
+                    summary="Auto-continue skipped because the previous active run was stale and required reconciliation.",
+                )
+
+        gate_snapshot = self._expanded_execution_gate_snapshot(quest_id, snapshot)
+        controller_reason = self._controller_work_unit_authorization_block_reason(gate_snapshot)
+        if controller_reason is not None:
+            return self._record_execution_gate_skipped_attempt(
+                quest_id,
+                snapshot=gate_snapshot,
+                turn_reason=turn_reason,
+                terminal_reason=controller_reason,
+                terminal_source="controller_work_unit_authorization",
+                controller_projection={"reason": controller_reason},
+                summary="Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
+                update_fingerprint=True,
+            )
+
+        continuation_terminal_reason = self._continuation_execution_gate_terminal_reason(gate_snapshot)
+        if continuation_terminal_reason is not None:
+            return self._record_execution_gate_skipped_attempt(
+                quest_id,
+                snapshot=gate_snapshot,
+                turn_reason=turn_reason,
+                terminal_reason=continuation_terminal_reason,
+                terminal_source="continuation_reason",
+                controller_projection={"reason": continuation_terminal_reason},
+                summary="Auto-continue skipped before worker launch because the controller execution gate is terminal.",
+                update_fingerprint=True,
+            )
+
+        same_fingerprint_projection = self._same_fingerprint_no_delta_gate_projection(gate_snapshot)
+        if same_fingerprint_projection is None:
+            return None
+        return self._record_execution_gate_skipped_attempt(
+            quest_id,
+            snapshot=gate_snapshot,
+            turn_reason=turn_reason,
+            terminal_reason=str(same_fingerprint_projection["terminal_reason"]),
+            terminal_source=str(same_fingerprint_projection["terminal_source"]),
+            continuation_policy=str(same_fingerprint_projection["continuation_policy"]),
+            continuation_anchor=str(same_fingerprint_projection["continuation_anchor"]),
+            continuation_reason=str(same_fingerprint_projection["continuation_reason"]),
+            turn_mode=str(same_fingerprint_projection["turn_mode"]),
+            controller_projection=(
+                dict(same_fingerprint_projection["controller_projection"])
+                if isinstance(same_fingerprint_projection.get("controller_projection"), dict)
+                else None
+            ),
+            hold_projection=(
+                dict(same_fingerprint_projection["hold_projection"])
+                if isinstance(same_fingerprint_projection.get("hold_projection"), dict)
+                else None
+            ),
+            same_fingerprint_auto_turn_count=int(
+                same_fingerprint_projection.get("same_fingerprint_auto_turn_count") or 0
+            ),
+            summary=str(same_fingerprint_projection["summary"]),
+            update_fingerprint=True,
+        )
+
     def _project_controller_work_unit_block_before_runner(
         self,
         quest_id: str,
@@ -3939,33 +4251,15 @@ class DaemonApp:
         controller_reason = self._controller_work_unit_authorization_block_reason(snapshot)
         if controller_reason is None:
             return False
-        quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
-        self.quest_service.update_runtime_state(
-            quest_root=quest_root,
-            continuation_policy="auto",
-            continuation_anchor="decision",
-            continuation_reason=controller_reason,
-            continuation_updated_at=utc_now(),
-            last_stage_fingerprint=self._stage_state_fingerprint(snapshot),
-            last_stage_fingerprint_at=utc_now(),
-        )
-        append_jsonl(
-            quest_root / ".ds" / "events.jsonl",
-            {
-                "event_id": generate_id("evt"),
-                "type": "runner.turn_skipped",
-                "quest_id": quest_id,
-                "source": "daemon_turn_worker",
-                "turn_reason": turn_reason,
-                "turn_mode": controller_reason,
-                "continuation_policy": "auto",
-                "continuation_reason": controller_reason,
-                "controller_projection": {
-                    "reason": controller_reason,
-                },
-                "summary": "Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
-                "created_at": utc_now(),
-            },
+        self._record_execution_gate_skipped_attempt(
+            quest_id,
+            snapshot=snapshot,
+            turn_reason=turn_reason,
+            terminal_reason=controller_reason,
+            terminal_source="controller_work_unit_authorization",
+            controller_projection={"reason": controller_reason},
+            summary="Auto-continue skipped before runner launch because the controller work unit authorization is not executable.",
+            update_fingerprint=True,
         )
         return True
 
@@ -4040,35 +4334,20 @@ class DaemonApp:
             controller_projection_reason = lifecycle_reason or auth_block_reason or "publication_gate_blocker"
             if self._has_executable_controller_work_unit_authorization(snapshot):
                 return False
-            self.quest_service.update_runtime_state(
-                quest_root=quest_root,
-                continuation_policy="auto",
-                continuation_anchor="decision",
-                continuation_reason=controller_reason,
-                continuation_updated_at=utc_now(),
-                same_fingerprint_auto_turn_count=projected_count,
-                last_stage_fingerprint=current_fingerprint,
-                last_stage_fingerprint_at=utc_now(),
-            )
-            append_jsonl(
-                quest_root / ".ds" / "events.jsonl",
-                {
-                    "event_id": generate_id("evt"),
-                    "type": "runner.turn_skipped",
-                    "quest_id": quest_id,
-                    "source": "daemon_turn_worker",
-                    "turn_reason": turn_reason,
-                    "turn_mode": controller_reason,
-                    "continuation_policy": "auto",
-                    "continuation_reason": controller_reason,
-                    "controller_projection": {
-                        "reason": controller_projection_reason,
-                        "same_fingerprint_auto_turn_count": projected_count,
-                    },
-                    "hold_projection": hold_projection,
-                    "summary": "Auto-continue skipped before runner launch because MAS owns the pending publication-gate work unit.",
-                    "created_at": utc_now(),
+            self._record_execution_gate_skipped_attempt(
+                quest_id,
+                snapshot=snapshot,
+                turn_reason=turn_reason,
+                terminal_reason=controller_reason,
+                terminal_source="same_fingerprint_no_delta",
+                controller_projection={
+                    "reason": controller_projection_reason,
+                    "same_fingerprint_auto_turn_count": projected_count,
                 },
+                hold_projection=hold_projection,
+                same_fingerprint_auto_turn_count=projected_count,
+                summary="Auto-continue skipped before runner launch because MAS owns the pending publication-gate work unit.",
+                update_fingerprint=True,
             )
             return True
         self.quest_service.update_runtime_state(
