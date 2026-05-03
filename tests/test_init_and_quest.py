@@ -1993,6 +1993,88 @@ def test_snapshot_requires_mas_ai_preflight_even_when_medical_draft_exists(temp_
     assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
 
 
+def test_snapshot_requires_mas_ai_preflight_when_managed_study_root_has_no_ai_surfaces(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    service = QuestService(temp_home, skill_installer=SkillInstaller(repo_root(), temp_home))
+    snapshot = service.create("managed medical draft without MAS AI surfaces")
+    quest_root = Path(snapshot["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+    paper_root = ensure_dir(quest_root / "paper")
+    study_root.mkdir(parents=True, exist_ok=True)
+
+    write_json(
+        paper_root / "selected_outline.json",
+        {
+            "outline_id": "outline-001",
+            "title": "Managed Draft Outline",
+            "sections": [],
+        },
+    )
+    write_json(
+        paper_root / "paper_line_state.json",
+        {
+            "paper_line_id": "paper-line-managed-draft",
+            "paper_branch": "paper/managed-draft",
+            "selected_outline_ref": "outline-001",
+            "title": "Managed Draft Outline",
+            "draft_status": "present",
+            "bundle_status": "missing",
+            "updated_at": "2026-04-10T00:00:00Z",
+        },
+    )
+    write_json(
+        paper_root / "medical_reporting_contract.json",
+        {
+            "status": "resolved",
+            "study_root": str(study_root),
+            "publication_profile": "general_medical_journal",
+            "manuscript_family": "prediction_model",
+            "reporting_guideline_family": "TRIPOD",
+        },
+    )
+    write_json(paper_root / "claim_evidence_map.json", {"claims": []})
+    write_json(
+        paper_root / "results_narrative_map.json",
+        {
+            "sections": [
+                {
+                    "section_id": "results-main",
+                    "direct_answer": "The managed paper line has a draft but no MAS AI writing preflight.",
+                    "supporting_display_items": ["F1"],
+                }
+            ]
+        },
+    )
+    write_json(
+        paper_root / "figure_semantics_manifest.json",
+        {
+            "figures": [
+                {
+                    "figure_id": "F1",
+                    "story_role": "result_primary",
+                    "direct_message": "Supports the primary clinical finding.",
+                }
+            ]
+        },
+    )
+    write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
+    _write_citation_rich_draft(paper_root)
+    _materialize_reference_materials(quest_root, paper_root)
+
+    refreshed = service.snapshot(snapshot["quest_id"])
+    health = refreshed["paper_contract_health"]
+
+    assert health["draft_status"] == "present"
+    assert health["managed_study_root"] == str(study_root)
+    assert health["write_preflight_status"] == "blocked"
+    assert health["mas_medical_writing_preflight_ready"] is False
+    assert health["medical_quality_ready_from_mds"] is False
+    assert health["writing_ready"] is False
+    assert health["recommended_action"] == "return_to_mas_medical_writing_preflight"
+    assert "MAS medical manuscript blueprint is missing" in health["blocking_reasons"]
+
+
 def test_snapshot_requires_ai_authorized_mas_medical_blueprint(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

@@ -4571,7 +4571,7 @@ class QuestService:
             for item in (managed_publication_gate.get("recommended_action_types") or [])
             if str(item).strip()
         }
-        mas_medical_preflight_required = any(
+        mas_medical_preflight_required = bool(managed_study_root) or any(
             (root / relative_path).exists()
             for root in candidate_mas_roots
             for relative_path in mas_required_trigger_relpaths
