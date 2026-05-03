@@ -209,6 +209,55 @@ test('syncUvProjectEnvironment prints the original uv failure and follow-up guid
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
+test('ensureInitialized honors a valid init stamp without requiring global stage skills', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-init-no-global-skills-'));
+  const home = path.join(tempDir, 'home');
+  const fakePython = path.join(tempDir, process.platform === 'win32' ? 'python.cmd' : 'python');
+  const initMarker = path.join(tempDir, 'init-ran.marker');
+  const originalHomeDir = os.homedir;
+  const originalMarkerEnv = process.env.DS_INIT_MARKER;
+  const stampDir = path.join(home, 'runtime', 'bundle');
+  fs.mkdirSync(stampDir, { recursive: true });
+  fs.mkdirSync(path.join(home, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'config', 'config.yaml'), 'version: 1\n', 'utf8');
+  fs.writeFileSync(
+    path.join(stampDir, 'init-stamp.json'),
+    `${JSON.stringify(
+      {
+        version: require('../package.json').version,
+        skills_hash: __internal.hashSkillTree(),
+      },
+      null,
+      2
+    )}\n`,
+    'utf8'
+  );
+  fs.writeFileSync(
+    fakePython,
+    process.platform === 'win32'
+      ? '@echo off\r\necho init-ran > "%DS_INIT_MARKER%"\r\necho init should not run 1>&2\r\nexit /b 99\r\n'
+      : '#!/usr/bin/env bash\nprintf "init-ran\\n" > "$DS_INIT_MARKER"\necho "init should not run" >&2\nexit 99\n',
+    { encoding: 'utf8', mode: 0o755 }
+  );
+
+  os.homedir = () => tempDir;
+  process.env.DS_INIT_MARKER = initMarker;
+  try {
+    assert.doesNotThrow(() => __internal.ensureInitialized(home, fakePython));
+    assert.equal(fs.existsSync(initMarker), false);
+    assert.equal(fs.existsSync(path.join(tempDir, '.codex', 'skills')), false);
+    assert.equal(fs.existsSync(path.join(tempDir, '.claude', 'agents')), false);
+  } finally {
+    os.homedir = originalHomeDir;
+    if (originalMarkerEnv === undefined) {
+      delete process.env.DS_INIT_MARKER;
+    } else {
+      process.env.DS_INIT_MARKER = originalMarkerEnv;
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('performSelfUpdate resolves npm before invoking npm install latest', () => {
   const source = fs.readFileSync(path.join(process.cwd(), 'bin', 'ds.js'), 'utf8');
   const functionStart = source.indexOf('async function performSelfUpdate');

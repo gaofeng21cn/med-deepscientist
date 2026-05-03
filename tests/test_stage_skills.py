@@ -190,6 +190,29 @@ def test_quest_creation_syncs_all_stage_skills(temp_home: Path) -> None:
     assert (quest_root / ".codex" / "prompts" / "connectors" / "qq.md").exists()
 
 
+def test_sync_quest_keeps_stage_skills_available_in_quest_and_worktree_without_global_install(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    installer = SkillInstaller(repo_root(), temp_home)
+    quest = QuestService(temp_home, skill_installer=installer).create("paper workspace skill availability")
+    quest_root = Path(quest["quest_root"])
+    worktree_root = quest_root / ".ds" / "worktrees" / "paper-main"
+    worktree_root.mkdir(parents=True)
+
+    result = installer.sync_quest(quest_root)
+
+    assert result["worktrees"]
+    for root in (quest_root, worktree_root):
+        for skill_id in EXPECTED_STAGE_SKILLS:
+            assert (root / ".codex" / "skills" / f"deepscientist-{skill_id}" / "SKILL.md").exists()
+            assert (root / ".claude" / "agents" / f"deepscientist-{skill_id}.md").exists()
+        assert (root / ".codex" / "prompts" / "system.md").exists()
+        assert (root / ".codex" / "prompts" / "contracts" / "shared_interaction.md").exists()
+
+    assert not (temp_home / ".codex" / "skills").exists()
+    assert not (temp_home / ".claude" / "agents").exists()
+
+
 def test_skill_resync_repairs_frontmatter_and_removes_stale_files(temp_home: Path) -> None:
     ensure_home_layout(temp_home)
     ConfigManager(temp_home).ensure_files()

@@ -2005,34 +2005,6 @@ function hashPythonSourceTree() {
   return hashDirectoryTree(path.join(repoRoot, 'src', 'deepscientist'), (filePath) => filePath.endsWith('.py'));
 }
 
-function discoverSkillIds() {
-  const skillsRoot = path.join(repoRoot, 'src', 'skills');
-  if (!fs.existsSync(skillsRoot)) {
-    return [];
-  }
-  return fs
-    .readdirSync(skillsRoot, { withFileTypes: true })
-    .filter(
-      (entry) =>
-        entry.isDirectory() &&
-        !entry.name.startsWith('.') &&
-        fs.existsSync(path.join(skillsRoot, entry.name, 'SKILL.md'))
-    )
-    .map((entry) => entry.name)
-    .sort();
-}
-
-function globalSkillsInstalled() {
-  const skillIds = discoverSkillIds();
-  const codexRoot = path.join(os.homedir(), '.codex', 'skills');
-  const claudeRoot = path.join(os.homedir(), '.claude', 'agents');
-  return skillIds.every((skillId) => {
-    const codexSkill = path.join(codexRoot, `deepscientist-${skillId}`, 'SKILL.md');
-    const claudeSkill = path.join(claudeRoot, `deepscientist-${skillId}.md`);
-    return fs.existsSync(codexSkill) && fs.existsSync(claudeSkill);
-  });
-}
-
 function runSync(binary, args, options = {}) {
   const result = spawnSync(binary, args, {
     cwd: options.cwd || repoRoot,
@@ -2671,7 +2643,6 @@ function ensureInitialized(home, runtimePython) {
     && currentStamp.version === desired.version
     && currentStamp.skills_hash === desired.skills_hash
     && fs.existsSync(configPath)
-    && globalSkillsInstalled()
   ) {
     return;
   }
@@ -4590,6 +4561,8 @@ module.exports = {
     updateManualCommand,
     buildUpdateStatus,
     buildDaemonStatusPayload,
+    hashSkillTree,
+    ensureInitialized,
     parseYesNoAnswer,
     normalizeLauncherRelaunchArgs,
     officialRepositoryLine,
