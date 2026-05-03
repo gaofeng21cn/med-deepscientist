@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 DEFAULT_TURN_TOOL_CALL_BUDGET = 24
+NO_PROGRESS_SAME_FINGERPRINT_THRESHOLD = 3
+NO_PROGRESS_TURN_PROGRESS_KINDS = {
+    "status_or_tool_activity",
+    "read_churn_without_artifact_delta",
+}
 
 
 def _parse_tool_args(raw_args: object) -> dict[str, Any]:
@@ -172,3 +177,43 @@ def _public_tool_budget_telemetry_snapshot(telemetry: dict[str, Any]) -> dict[st
     snapshot["repeated_read_ratio"] = (repeated_count / read_count) if read_count else 0.0
     snapshot["read_churn_ratio"] = snapshot["repeated_read_ratio"]
     return snapshot
+
+
+def _latest_run_no_progress_classification(
+    telemetry: dict[str, Any],
+    *,
+    same_fingerprint_auto_turn_count: int,
+    gate_needs_specificity: bool,
+    same_fingerprint_threshold: int = NO_PROGRESS_SAME_FINGERPRINT_THRESHOLD,
+) -> dict[str, Any]:
+    turn_progress_kind = str(telemetry.get("turn_progress_kind") or "").strip()
+    reasons: list[str] = []
+    if bool(telemetry.get("tool_call_budget_exceeded")):
+        reasons.append("tool_call_budget_exceeded")
+    if telemetry.get("meaningful_artifact_delta_at") is None:
+        reasons.append("no_meaningful_artifact_delta")
+    if turn_progress_kind in NO_PROGRESS_TURN_PROGRESS_KINDS:
+        reasons.append(turn_progress_kind)
+    if int(same_fingerprint_auto_turn_count or 0) >= max(1, int(same_fingerprint_threshold or 1)):
+        reasons.append("same_fingerprint_auto_turn_count_exceeded")
+    if gate_needs_specificity:
+        reasons.append("gate_needs_specificity")
+
+    required = {
+        "tool_call_budget_exceeded",
+        "no_meaningful_artifact_delta",
+        "same_fingerprint_auto_turn_count_exceeded",
+        "gate_needs_specificity",
+    }
+    has_no_progress_turn_kind = bool(set(NO_PROGRESS_TURN_PROGRESS_KINDS).intersection(reasons))
+    no_progress_failure = required.issubset(reasons) and has_no_progress_turn_kind
+    return {
+        "no_progress_failure": no_progress_failure,
+        "failure_kind": "publication_gate_no_progress" if no_progress_failure else None,
+        "gate_needs_specificity": bool(gate_needs_specificity),
+        "terminal_lifecycle_state": "gate_needs_specificity" if no_progress_failure else None,
+        "same_fingerprint_threshold": max(1, int(same_fingerprint_threshold or 1)),
+        "same_fingerprint_auto_turn_count": int(same_fingerprint_auto_turn_count or 0),
+        "turn_progress_kind": turn_progress_kind or None,
+        "reasons": reasons,
+    }

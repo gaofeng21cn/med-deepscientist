@@ -10,6 +10,7 @@ from deepscientist.runners.codex import (
     _compact_tool_event_payload,
     _delta_aware_stdout_record,
     _delta_aware_tool_result_event,
+    _latest_run_no_progress_classification,
     _new_tool_budget_telemetry,
     _record_tool_budget_event,
     _record_turn_progress_heartbeat,
@@ -482,6 +483,44 @@ def test_codex_runner_tool_budget_telemetry_records_meaningful_artifact_delta() 
     assert telemetry["meaningful_artifact_delta_kind"] == "paper-writeback"
     assert telemetry["meaningful_artifact_delta_source_signature"] == "source-signature-001"
     assert telemetry["turn_progress_kind"] == "meaningful_artifact_delta"
+
+
+def test_latest_run_telemetry_classifies_budget_exhausted_no_delta_as_no_progress() -> None:
+    classification = _latest_run_no_progress_classification(
+        {
+            "tool_call_budget_exceeded": True,
+            "meaningful_artifact_delta_at": None,
+            "turn_progress_kind": "read_churn_without_artifact_delta",
+        },
+        same_fingerprint_auto_turn_count=3,
+        gate_needs_specificity=True,
+    )
+
+    assert classification["no_progress_failure"] is True
+    assert classification["failure_kind"] == "publication_gate_no_progress"
+    assert classification["gate_needs_specificity"] is True
+    assert classification["terminal_lifecycle_state"] == "gate_needs_specificity"
+    assert classification["reasons"] == [
+        "tool_call_budget_exceeded",
+        "no_meaningful_artifact_delta",
+        "read_churn_without_artifact_delta",
+        "same_fingerprint_auto_turn_count_exceeded",
+        "gate_needs_specificity",
+    ]
+
+
+def test_latest_run_telemetry_does_not_classify_with_artifact_delta() -> None:
+    classification = _latest_run_no_progress_classification(
+        {
+            "tool_call_budget_exceeded": True,
+            "meaningful_artifact_delta_at": "2026-05-02T00:00:00+00:00",
+            "turn_progress_kind": "read_churn_without_artifact_delta",
+        },
+        same_fingerprint_auto_turn_count=3,
+        gate_needs_specificity=True,
+    )
+
+    assert classification["no_progress_failure"] is False
 
 
 def test_codex_tool_event_carries_bash_id_from_id_only_monitor_call() -> None:
