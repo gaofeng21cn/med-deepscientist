@@ -261,6 +261,11 @@ class ArtifactService:
         return cls._normalize_decision_action(action) in {
             "controller_work_unit_pending",
             "controller_backoff_pending",
+        }
+
+    @classmethod
+    def _is_parked_hold_decision_action(cls, action: object) -> bool:
+        return cls._normalize_decision_action(action) in {
             "platform_repair_required",
         }
 
@@ -4330,6 +4335,277 @@ class ArtifactService:
             "return_to_controller",
         }
 
+    @classmethod
+    def _publication_gate_controller_pending_from_snapshot(cls, snapshot: dict[str, Any]) -> bool:
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        return cls._publication_gate_controller_pending_from_health(paper_health)
+
+    @staticmethod
+    def _controller_authorization_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
+        return (
+            dict(snapshot.get("last_controller_decision_authorization") or {})
+            if isinstance(snapshot.get("last_controller_decision_authorization"), dict)
+            else {}
+        )
+
+    @classmethod
+    def _controller_work_unit_lifecycle_block_reason(cls, snapshot: dict[str, Any]) -> str | None:
+        controller_auth = cls._controller_authorization_payload(snapshot)
+
+        def normalize_state(value: object) -> str | None:
+            state = str(value or "").strip().lower().replace("-", "_")
+            return state or None
+
+        lifecycle = controller_auth.get("controller_work_unit_lifecycle")
+        if isinstance(lifecycle, str):
+            return normalize_state(lifecycle)
+        if not isinstance(lifecycle, dict):
+            return None
+        state = normalize_state(lifecycle.get("lifecycle_state") or lifecycle.get("state"))
+        block_reason = normalize_state(lifecycle.get("block_reason"))
+        latest_event_type = normalize_state(lifecycle.get("latest_event_type"))
+        terminal_states = {
+            "closed",
+            "needs_specificity",
+            "gate_needs_specificity",
+            "platform_repair_required",
+            "await_artifact_delta_or_gate_replay",
+            "gate_reread_required",
+            "stop_hold",
+        }
+        if block_reason in terminal_states:
+            return block_reason
+        if state in terminal_states:
+            return state
+        if latest_event_type in terminal_states:
+            return latest_event_type
+        if bool(lifecycle.get("delivery_blocked")):
+            return block_reason or state or latest_event_type or "controller_work_unit_pending"
+        return None
+
+    @staticmethod
+    def _controller_text_values(payload: dict[str, Any], *keys: str) -> list[str]:
+        values: list[str] = []
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, list):
+                values.extend(str(item or "").strip() for item in value if str(item or "").strip())
+            else:
+                text = str(value or "").strip()
+                if text:
+                    values.append(text)
+        return values
+
+    @classmethod
+    def _mapping_has_actionable_controller_target(cls, payload: dict[str, Any]) -> bool:
+        actionable_keys = {
+            "claim_id",
+            "claim_ref",
+            "figure_id",
+            "figure_ref",
+            "table_id",
+            "table_ref",
+            "metric_id",
+            "metric_ref",
+            "citation_id",
+            "citation_ref",
+            "evidence_row_id",
+            "evidence_row_ref",
+            "package_artifact",
+            "artifact_path",
+            "source_path",
+        }
+        if any(str(payload.get(key) or "").strip() for key in actionable_keys):
+            return True
+        for key in (
+            "blocking_artifact_refs",
+            "blocker_details",
+            "gate_blocker_details",
+            "specificity_targets",
+            "work_unit_targets",
+            "gaps",
+        ):
+            value = payload.get(key)
+            if isinstance(value, dict) and cls._mapping_has_actionable_controller_target(dict(value)):
+                return True
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict) and cls._mapping_has_actionable_controller_target(dict(item)):
+                        return True
+        return False
+
+    @classmethod
+    def _controller_auth_blockers(
+        cls,
+        snapshot: dict[str, Any],
+        controller_auth: dict[str, Any],
+    ) -> set[str]:
+        blockers = set(
+            cls._controller_text_values(
+                controller_auth,
+                "blockers",
+                "fingerprint_blockers",
+                "work_unit_blockers",
+                "gate_blockers",
+                "blocking_reasons",
+            )
+        )
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        blockers.update(
+            cls._controller_text_values(
+                paper_health,
+                "blocking_reasons",
+                "completion_blocking_reasons",
+                "managed_publication_gate_gap_summaries",
+            )
+        )
+        return {item.strip() for item in blockers if item.strip()}
+
+    @staticmethod
+    def _has_current_package_freshness_blocker(blockers: set[str]) -> bool:
+        return any(
+            item.strip().lower() == "stale_study_delivery_mirror"
+            or item.strip().lower().startswith("stale_study_delivery_mirror/")
+            for item in blockers
+        )
+
+    @staticmethod
+    def _current_package_freshness_proof_current(payload: dict[str, Any]) -> bool:
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in {"current", "fresh", "synced", "updated", "unchanged", "ready"}:
+            return False
+        if not (
+            str(payload.get("proof_path") or "").strip()
+            and str(payload.get("submission_manifest_path") or "").strip()
+            and (
+                str(payload.get("current_package_root") or "").strip()
+                or str(payload.get("current_package_zip") or "").strip()
+            )
+        ):
+            return False
+        source_signature = str(
+            payload.get("source_signature") or payload.get("evaluated_source_signature") or ""
+        ).strip()
+        authority_signature = str(payload.get("authority_source_signature") or "").strip()
+        return not (source_signature and authority_signature and source_signature != authority_signature)
+
+    @staticmethod
+    def _current_package_freshness_payload(
+        snapshot: dict[str, Any],
+        controller_auth: dict[str, Any],
+    ) -> dict[str, Any]:
+        paper_health = (
+            dict(snapshot.get("paper_contract_health") or {})
+            if isinstance(snapshot.get("paper_contract_health"), dict)
+            else {}
+        )
+        for payload in (
+            controller_auth.get("current_package_freshness"),
+            snapshot.get("current_package_freshness"),
+            paper_health.get("current_package_freshness"),
+        ):
+            if isinstance(payload, dict):
+                return dict(payload)
+        return {}
+
+    @classmethod
+    def _controller_work_unit_authorization_block_reason(cls, snapshot: dict[str, Any]) -> str | None:
+        controller_auth = cls._controller_authorization_payload(snapshot)
+        lifecycle_reason = cls._controller_work_unit_lifecycle_block_reason(snapshot)
+        if lifecycle_reason is not None:
+            return lifecycle_reason
+        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
+        work_unit_fingerprint = str(controller_auth.get("work_unit_fingerprint") or "").strip()
+        route_question = str(controller_auth.get("route_key_question") or "").strip()
+        if work_unit_id in {"gate_needs_specificity", "needs_specificity"}:
+            return "gate_needs_specificity"
+        route_target = str(controller_auth.get("route_target") or "").strip()
+        if route_target not in CONTINUATION_SKILLS or route_target == "decision":
+            return "controller_work_unit_pending" if controller_auth else None
+        if not work_unit_id or not work_unit_fingerprint:
+            return "controller_work_unit_pending"
+        blockers = cls._controller_auth_blockers(snapshot, controller_auth)
+        if (
+            cls._has_current_package_freshness_blocker(blockers)
+            and not cls._current_package_freshness_proof_current(
+                cls._current_package_freshness_payload(snapshot, controller_auth)
+            )
+        ):
+            return "current_package_freshness_required"
+        if (
+            route_target == "analysis-campaign"
+            and work_unit_id == "analysis_claim_evidence_repair"
+            and not cls._mapping_has_actionable_controller_target(controller_auth)
+        ):
+            return "gate_needs_specificity"
+        if route_question and not (
+            route_question == work_unit_id or route_question.startswith(f"{work_unit_id}:")
+        ):
+            return "controller_work_unit_pending"
+        return None
+
+    @classmethod
+    def _has_executable_controller_work_unit_authorization(cls, snapshot: dict[str, Any]) -> bool:
+        if not cls._publication_gate_controller_pending_from_snapshot(snapshot):
+            return False
+        controller_auth = cls._controller_authorization_payload(snapshot)
+        if not controller_auth:
+            return False
+        return cls._controller_work_unit_authorization_block_reason(snapshot) is None
+
+    def _parked_continuation_state_from_snapshot(
+        self,
+        quest_root: Path,
+        snapshot: dict[str, Any],
+    ) -> dict[str, str] | None:
+        policy = str(snapshot.get("continuation_policy") or "").strip().lower()
+        if policy != "wait_for_user_or_resume":
+            return None
+        anchor = str(snapshot.get("continuation_anchor") or "decision").strip() or "decision"
+        reason = str(snapshot.get("continuation_reason") or "").strip()
+        normalized_reason = reason.lower().replace("-", "_")
+        if (
+            normalized_reason.startswith("unchanged_")
+            and normalized_reason.endswith("_state")
+        ):
+            return {"policy": policy, "anchor": anchor, "reason": reason}
+        if normalized_reason in {
+            "closed",
+            "needs_specificity",
+            "gate_needs_specificity",
+            "platform_repair_required",
+            "await_artifact_delta_or_gate_replay",
+            "gate_reread_required",
+            "stop_hold",
+            "current_package_freshness_required",
+            "repeated_auto_hold_projection",
+        }:
+            return {"policy": policy, "anchor": anchor, "reason": reason}
+        route = self._continuation_action_projection(
+            quest_root,
+            continuation_policy=policy,
+            continuation_reason=reason,
+        )
+        canonical_action = str(route.get("canonical_action") or "").strip().lower().replace("-", "_")
+        display_action = str(route.get("display_action") or "").strip().lower().replace("-", "_")
+        if canonical_action == "stop" or canonical_action in {
+            "controller_work_unit_pending",
+            "controller_backoff_pending",
+            "platform_repair_required",
+        }:
+            return {"policy": policy, "anchor": anchor, "reason": reason}
+        if display_action in {"stop_hold", "hold"}:
+            return {"policy": policy, "anchor": anchor, "reason": reason}
+        return None
+
     def _paper_bundle_continuation_state(self, quest_root: Path) -> dict[str, str]:
         snapshot = self.quest_service.snapshot(self._quest_id(quest_root))
         paper_health = (
@@ -4337,7 +4613,23 @@ class ArtifactService:
             if isinstance(snapshot.get("paper_contract_health"), dict)
             else {}
         )
+        parked_state = self._parked_continuation_state_from_snapshot(quest_root, snapshot)
+        if parked_state is not None:
+            return parked_state
         if self._publication_gate_controller_pending_from_health(paper_health):
+            controller_reason = self._controller_work_unit_authorization_block_reason(snapshot)
+            if controller_reason is not None:
+                return {
+                    "policy": "wait_for_user_or_resume",
+                    "anchor": "decision",
+                    "reason": controller_reason,
+                }
+            if not self._has_executable_controller_work_unit_authorization(snapshot):
+                return {
+                    "policy": "wait_for_user_or_resume",
+                    "anchor": "decision",
+                    "reason": "paper_bundle_submitted",
+                }
             return {
                 "policy": "auto",
                 "anchor": "decision",
@@ -4387,6 +4679,7 @@ class ArtifactService:
             protocol_step = str(record.get("protocol_step") or "").strip().lower()
             if (
                 self._is_controller_pending_decision_action(action)
+                or self._is_parked_hold_decision_action(action)
                 or self._is_parked_decision_action(action)
                 or action in {"reset", "request_user_decision"}
             ):
@@ -7789,7 +8082,10 @@ class ArtifactService:
                     "auto"
                     if self._is_controller_pending_decision_action(record.get("action"))
                     else "wait_for_user_or_resume"
-                    if self._is_parked_decision_action(record.get("action"))
+                    if (
+                        self._is_parked_decision_action(record.get("action"))
+                        or self._is_parked_hold_decision_action(record.get("action"))
+                    )
                     else "auto"
                 ),
                 continuation_anchor=decision_continuation_anchor,
