@@ -73,8 +73,18 @@ MDS surface 的后续演进只能沿以下阶梯移动，不能跳级：
 
 `strangler_registry` 必须能为每个登记 surface 输出 MAS consumption contract report，字段至少包括：当前 owner、目标 owner、阶梯状态、promotion gate、parity proof、rollback surface 与 MAS-consumable status。
 
+`strangler_registry` 同时提供 MDS runtime/substrate 防回流 guard。该 guard 只约束 MDS runtime、substrate、oracle 与 protocol promotion 边界，用来阻断 MAS owner 语义回流到 MDS；它不是新的 MAS 产品入口，不替代 MAS product entry、medical controller、publication gate 或用户进度面。
+
+read-model 必须把每个 MDS surface 显式投影到四档之一：
+
+- `retain_backend`：对应 `retain_in_mds_backend`，只保留为 MDS backend 内部实现。
+- `oracle_only`：对应 `oracle_only`，只作为 parity/oracle 或 intake 参考。
+- `promote_runtime_protocol`：对应 `promote_to_runtime_protocol`，只能通过 `docs/policies/runtime_protocol.md` 成为 MAS-consumable runtime contract。
+- `mas_owned_or_absorbed`：对应 `mas_owned_or_absorbed`，表示 owner 语义已在 MAS 或已被 MAS 吸收。
+
 报告必须 fail-closed：
 
 - 带有 MAS owner authority 的 surface 若未处于 `mas_owned_or_absorbed`，必须报 `owner_reflux_risk`。
+- MAS owner authority 至少包括 `publication_readiness`、`submission_authority`、`medical_research_design`、`medical_evidence_interpretation`、`user_visible_research_progress`。
 - 标记为 MAS-consumable 的 surface 若未以 `docs/policies/runtime_protocol.md` 作为 promotion gate，必须阻断。
 - 标记为 MAS-consumable 的 surface 若没有 parity proof，必须阻断。

@@ -545,14 +545,24 @@ def test_mas_mds_transition_contract_docs_define_backend_oracle_boundary() -> No
     assert "mas_owned_or_absorbed" in transition_source
     assert "publication readiness" in transition_source
     assert "parity proof" in transition_source
+    assert "runtime/substrate 防回流 guard" in transition_source
+    assert "不是新的 MAS 产品入口" in transition_source
+    assert "publication_readiness" in transition_source
+    assert "submission_authority" in transition_source
+    assert "medical_research_design" in transition_source
+    assert "medical_evidence_interpretation" in transition_source
+    assert "user_visible_research_progress" in transition_source
 
     assert "docs/policies/mas_mds_transition_contract.md" in runtime_protocol_source
     assert "controlled backend, behavior oracle, and upstream intake buffer" in runtime_protocol_source
     assert "oracle-only MDS surface" in runtime_protocol_source
+    assert "runtime/substrate guard" in runtime_protocol_source
 
     assert "docs/policies/mas_mds_transition_contract.md" in architecture_source
     assert "MAS owner 消费的是 `docs/policies/runtime_protocol.md`" in architecture_source
     assert "不能默认升级为 MAS product contract" in architecture_source
+    assert "runtime/substrate 防回流 guard" in architecture_source
+    assert "不是新的 MAS 产品入口" in architecture_source
 
     assert "docs/policies/mas_mds_transition_contract.md" in status_source
     assert "controlled backend" in status_source

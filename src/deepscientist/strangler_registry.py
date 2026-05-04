@@ -15,6 +15,13 @@ PROMOTION_LADDER_STAGES = (
     "mas_owned_or_absorbed",
 )
 
+BOUNDARY_STATUS_BY_STAGE = {
+    "retain_in_mds_backend": "retain_backend",
+    "oracle_only": "oracle_only",
+    "promote_to_runtime_protocol": "promote_runtime_protocol",
+    "mas_owned_or_absorbed": "mas_owned_or_absorbed",
+}
+
 DEFAULT_AUDIT_FILE_SUFFIXES = (".py", ".md", ".toml", ".yaml", ".yml", ".sh")
 DEFAULT_SKIP_DIR_NAMES = (
     ".git",
@@ -137,6 +144,28 @@ _BASE_SURFACES: tuple[dict[str, Any], ...] = (
         "owner_authority": "publication_readiness",
     },
     {
+        "surface": "medical_research_design_authority",
+        "current_owner": "MedAutoScience product owner",
+        "target_owner": "MedAutoScience product owner",
+        "strangler_stage": "mas_owned_or_absorbed",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "MAS study intake and medical controller proof",
+        "rollback_surface": "MDS oracle fixture only",
+        "owner_authority": "medical_research_design",
+    },
+    {
+        "surface": "medical_evidence_interpretation_authority",
+        "current_owner": "MedAutoScience product owner",
+        "target_owner": "MedAutoScience product owner",
+        "strangler_stage": "mas_owned_or_absorbed",
+        "mas_consumable_contract": False,
+        "promotion_gate": TRANSITION_CONTRACT_REF,
+        "parity_proof": "MAS evidence ledger and publication evaluation proof",
+        "rollback_surface": "MDS oracle fixture only",
+        "owner_authority": "medical_evidence_interpretation",
+    },
+    {
         "surface": "submission_package_authority",
         "current_owner": "MedAutoScience product owner",
         "target_owner": "MedAutoScience product owner",
@@ -204,6 +233,11 @@ def normalize_surface_record(record: Mapping[str, Any]) -> dict[str, Any]:
     owner_authority = str(record.get("owner_authority") or "").strip()
     if owner_authority:
         normalized["owner_authority"] = owner_authority
+    owner_authorities = _owner_authorities(record)
+    if owner_authorities:
+        normalized["owner_authorities"] = list(owner_authorities)
+        if len(owner_authorities) == 1:
+            normalized["owner_authority"] = owner_authorities[0]
     notes = record.get("notes")
     if isinstance(notes, Sequence) and not isinstance(notes, str):
         normalized["notes"] = [str(item).strip() for item in notes if str(item).strip()]
@@ -232,6 +266,27 @@ def mas_consumption_contract_report(
 
 def mas_consumption_contract_issues(surfaces: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return mas_consumption_contract_report(surfaces)["issues"]
+
+
+def surface_boundary_read_model(
+    surfaces: Iterable[Mapping[str, Any]] | Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    contract_report = mas_consumption_contract_report(surfaces)
+    read_model_surfaces: list[dict[str, Any]] = []
+    for surface in contract_report["surfaces"]:
+        entry = dict(surface)
+        entry["boundary_status"] = BOUNDARY_STATUS_BY_STAGE.get(str(entry.get("stage") or ""), "invalid")
+        read_model_surfaces.append(entry)
+    return {
+        "schema_version": 1,
+        "ok": contract_report["ok"],
+        "boundary_statuses": [surface["boundary_status"] for surface in read_model_surfaces],
+        "surface_count": len(read_model_surfaces),
+        "surfaces": read_model_surfaces,
+        "issue_count": contract_report["issue_count"],
+        "issues": contract_report["issues"],
+        "mas_consumption_contract_report": contract_report,
+    }
 
 
 def default_strangler_registry() -> dict[str, dict[str, Any]]:
@@ -265,18 +320,21 @@ def owner_reflux_issues(surfaces: Iterable[Mapping[str, Any]]) -> list[dict[str,
                 }
             )
             continue
-        owner_authority = str(record.get("owner_authority") or "").strip()
-        if owner_authority in MAS_OWNER_AUTHORITIES and record["strangler_stage"] != "mas_owned_or_absorbed":
+        owner_authorities = [authority for authority in _owner_authorities(record) if authority in MAS_OWNER_AUTHORITIES]
+        if owner_authorities and record["strangler_stage"] != "mas_owned_or_absorbed":
+            issue = {
+                "code": "owner_reflux_risk",
+                "surface": record["surface"],
+                "owner_authorities": owner_authorities,
+                "strangler_stage": record["strangler_stage"],
+                "current_owner": record["current_owner"],
+                "target_owner": record["target_owner"],
+                "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
+            }
+            if len(owner_authorities) == 1:
+                issue["owner_authority"] = owner_authorities[0]
             issues.append(
-                {
-                    "code": "owner_reflux_risk",
-                    "surface": record["surface"],
-                    "owner_authority": owner_authority,
-                    "strangler_stage": record["strangler_stage"],
-                    "current_owner": record["current_owner"],
-                    "target_owner": record["target_owner"],
-                    "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
-                }
+                issue
             )
     return issues
 
@@ -311,6 +369,11 @@ def _mas_consumption_contract_entry(record: Mapping[str, Any]) -> tuple[dict[str
     owner_authority = _text(raw.get("owner_authority"))
     if owner_authority:
         entry["owner_authority"] = owner_authority
+    owner_authorities = _owner_authorities(raw)
+    if owner_authorities:
+        entry["owner_authorities"] = list(owner_authorities)
+        if len(owner_authorities) == 1:
+            entry["owner_authority"] = owner_authorities[0]
 
     issues = _mas_consumption_contract_entry_issues(entry, raw)
     if not issues:
@@ -342,6 +405,8 @@ def _mas_consumption_contract_entry(record: Mapping[str, Any]) -> tuple[dict[str
             )
             if "owner_authority" in normalized:
                 entry["owner_authority"] = normalized["owner_authority"]
+            if "owner_authorities" in normalized:
+                entry["owner_authorities"] = list(normalized["owner_authorities"])
     entry["mas_consumable_status"] = _mas_consumable_status(entry, issues)
     entry["report_fields"] = list(_CONSUMPTION_REPORT_FIELDS)
     if issues:
@@ -408,19 +473,20 @@ def _mas_consumption_contract_entry_issues(
                 }
             )
 
-    owner_authority = str(entry.get("owner_authority") or "").strip()
-    if owner_authority in MAS_OWNER_AUTHORITIES and stage != "mas_owned_or_absorbed":
-        issues.append(
-            {
-                "code": "owner_reflux_risk",
-                "surface": surface,
-                "owner_authority": owner_authority,
-                "strangler_stage": stage,
-                "current_owner": entry["current_owner"],
-                "target_owner": entry["target_owner"],
-                "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
-            }
-        )
+    owner_authorities = [authority for authority in _owner_authorities(entry) if authority in MAS_OWNER_AUTHORITIES]
+    if owner_authorities and stage != "mas_owned_or_absorbed":
+        issue = {
+            "code": "owner_reflux_risk",
+            "surface": surface,
+            "owner_authorities": owner_authorities,
+            "strangler_stage": stage,
+            "current_owner": entry["current_owner"],
+            "target_owner": entry["target_owner"],
+            "message": "MAS owner authority must stay on the `mas_owned_or_absorbed` side of the boundary.",
+        }
+        if len(owner_authorities) == 1:
+            issue["owner_authority"] = owner_authorities[0]
+        issues.append(issue)
     return issues
 
 
@@ -443,6 +509,21 @@ def _mas_consumable_status(entry: Mapping[str, Any], issues: Sequence[Mapping[st
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _owner_authorities(record: Mapping[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    raw_authorities = record.get("owner_authorities")
+    if isinstance(raw_authorities, Sequence) and not isinstance(raw_authorities, str):
+        values.extend(str(item).strip() for item in raw_authorities)
+    elif raw_authorities:
+        values.append(str(raw_authorities).strip())
+
+    owner_authority = str(record.get("owner_authority") or "").strip()
+    if owner_authority:
+        values.append(owner_authority)
+
+    return tuple(dict.fromkeys(value for value in values if value))
 
 
 def oversized_file_issues(

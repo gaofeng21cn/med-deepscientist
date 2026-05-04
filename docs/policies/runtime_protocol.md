@@ -20,6 +20,12 @@ controlled backend, behavior oracle, and upstream intake buffer. This document
 remains the stable runtime authority; the transition contract explains how MAS
 may consume that authority without treating MDS prompt, UI, product, or
 experimental surfaces as stable MAS-facing product contracts.
+The MDS `strangler_registry` runtime/substrate guard is a fail-closed
+read-model for this boundary. It prevents MAS owner authority from refluxing
+into MDS runtime/substrate surfaces; it does not create a new MAS product
+entry and does not authorize MDS-side publication readiness, submission
+authority, medical research design, medical evidence interpretation, or
+user-visible research progress.
 
 Paper-facing health surfaces keep the same boundary. `paper_contract_health`
 reports `backend_preflight` state and manuscript coverage reports

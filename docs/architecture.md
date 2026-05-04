@@ -17,6 +17,8 @@
 
 稳定收缩契约见 `docs/policies/mas_mds_transition_contract.md`。该契约不触发 physical migration，不新增产品入口，也不把医学研究设计、publication gate、submission authority 从 MAS 下沉到 MDS。
 
+MDS 侧的 `strangler_registry` 是 runtime/substrate 防回流 guard：它把 MDS surface 显式投影到 `retain backend`、`oracle only`、`promote runtime protocol`、`MAS-owned or absorbed` 四档，并对 MAS owner authority 做 fail-closed 检查。它不是新的 MAS 产品入口，也不授权 MDS 生成 publication readiness、submission authority、医学研究设计、医学证据解释或用户可见研究进度。
+
 论文相关 surface 也遵循同一边界：`paper_contract_health` 是 MDS 的 `backend_preflight`，`validate_manuscript_coverage` 是 `mechanical_oracle`。它们可以暴露 existing draft、coverage、contract health、bundle/proofing/submission packaging 等机械状态，但不能把这些状态提升为医学论文质量 ready。MAS AI medical writing preflight、AI prose review 与 `publication_eval/latest.json` 才能驱动 medical manuscript quality readiness。
 
 ## 核心模块
