@@ -161,14 +161,15 @@ def test_runtime_storage_maintenance_updates_sqlite_sidecar_index(tmp_path: Path
     runtime_index = result["runtime_index"]
     db_path = Path(runtime_index["db_path"])
     assert db_path == quest_root.resolve() / ".ds" / "runtime_index.sqlite"
-    assert runtime_index["schema_version"] == 1
+    assert runtime_index["schema_version"] == 2
     assert runtime_index["status"] == "updated"
     assert ".ds/cold_archive" in runtime_index["indexed_buckets"]
     assert "artifacts/reports" in runtime_index["indexed_buckets"]
+    assert runtime_index["retention_action_count"] == 3
 
     with sqlite3.connect(db_path) as connection:
         schema_version = connection.execute("SELECT value FROM metadata WHERE key = 'schema_version'").fetchone()
-        assert schema_version == ("1",)
+        assert schema_version == ("2",)
         run = connection.execute(
             """
             SELECT include_worktrees, root_count, worktrees_pruned, files_archived
@@ -205,6 +206,31 @@ def test_runtime_storage_maintenance_updates_sqlite_sidecar_index(tmp_path: Path
     assert "worktree_runtime_payload" in kinds
     assert any(row[3] == result["worktree_runtime_prune"]["restore_index_ref"] for row in refs)
     assert any(row[4] == result["roots"][0]["report_history_retention"]["ledger_ref"] for row in refs)
+
+    with sqlite3.connect(db_path) as connection:
+        actions = connection.execute(
+            """
+            SELECT action_kind, ledger_ref, restore_index_ref, action_count, payload_json
+            FROM retention_actions
+            WHERE run_id = ?
+            ORDER BY action_kind
+            """,
+            (runtime_index["run_id"],),
+        ).fetchall()
+    action_by_kind = {row[0]: row for row in actions}
+    assert set(action_by_kind) == {
+        "cold_archive_retention",
+        "report_history_retention",
+        "worktree_runtime_retention",
+    }
+    report_action = action_by_kind["report_history_retention"]
+    assert report_action[1] == result["roots"][0]["report_history_retention"]["ledger_ref"]
+    assert report_action[3] == 1
+    report_payload = json.loads(report_action[4])
+    assert report_payload["retention_contract"]["older_sampling"] == "daily"
+    worktree_action = action_by_kind["worktree_runtime_retention"]
+    assert worktree_action[2] == result["worktree_runtime_prune"]["restore_index_ref"]
+    assert worktree_action[3] == 1
 
 
 def test_runtime_storage_maintenance_compacts_large_single_line_terminal_logs(tmp_path: Path) -> None:

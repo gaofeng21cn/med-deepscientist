@@ -73,7 +73,7 @@ _BASH_SESSION_LOG_SPECS = (
     ("monitor.log", "text"),
 )
 _COMPACT_TEXT_WINDOW_MAX_BYTES = 512 * 1024
-_RUNTIME_INDEX_SCHEMA_VERSION = 1
+_RUNTIME_INDEX_SCHEMA_VERSION = 2
 _RUNTIME_INDEX_BUCKET_REFS = (
     ".ds/bash_exec",
     ".ds/runs",
@@ -592,6 +592,19 @@ def _init_runtime_index(connection: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL,
             FOREIGN KEY (run_id) REFERENCES maintenance_runs(run_id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS retention_actions (
+            run_id INTEGER NOT NULL,
+            action_kind TEXT NOT NULL,
+            root_ref TEXT,
+            subject_ref TEXT,
+            ledger_ref TEXT,
+            restore_index_ref TEXT,
+            action_count INTEGER NOT NULL,
+            bytes_total INTEGER,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES maintenance_runs(run_id) ON DELETE CASCADE
+        );
         """
     )
     connection.execute(
@@ -681,6 +694,78 @@ def _collect_archive_refs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return refs
 
 
+def _json_dumps_stable(payload: object) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _collect_retention_actions(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    prune_manifest = manifest.get("worktree_runtime_prune")
+    if isinstance(prune_manifest, dict) and not prune_manifest.get("skipped"):
+        action_count = int(prune_manifest.get("directories_removed") or 0) + int(
+            prune_manifest.get("expanded_worktrees_removed") or 0
+        )
+        actions.append(
+            {
+                "action_kind": "worktree_runtime_retention",
+                "root_ref": ".",
+                "subject_ref": ".ds/worktrees",
+                "restore_index_ref": prune_manifest.get("restore_index_ref"),
+                "action_count": action_count,
+                "bytes_total": prune_manifest.get("bytes_archived"),
+                "payload": {
+                    "worktrees_examined": prune_manifest.get("worktrees_examined"),
+                    "worktrees_pruned": prune_manifest.get("worktrees_pruned"),
+                    "directories_removed": prune_manifest.get("directories_removed"),
+                    "expanded_worktrees_removed": prune_manifest.get("expanded_worktrees_removed"),
+                    "files_archived": prune_manifest.get("files_archived"),
+                    "archive_kind": prune_manifest.get("archive_kind"),
+                },
+            }
+        )
+    for root_manifest in manifest.get("roots") or []:
+        if not isinstance(root_manifest, dict):
+            continue
+        root_ref = str(root_manifest.get("root") or "")
+        retention = root_manifest.get("report_history_retention")
+        if isinstance(retention, dict) and retention.get("ledger_ref"):
+            actions.append(
+                {
+                    "action_kind": "report_history_retention",
+                    "root_ref": root_ref,
+                    "subject_ref": retention.get("reports_root"),
+                    "ledger_ref": retention.get("ledger_ref"),
+                    "action_count": int(retention.get("archived_file_count") or 0),
+                    "bytes_total": None,
+                    "payload": {
+                        "archived_file_count": retention.get("archived_file_count"),
+                        "kept_file_count": retention.get("kept_file_count"),
+                        "retention_contract": retention.get("retention_contract"),
+                        "archived_samples": retention.get("archived_samples"),
+                        "kept_samples": retention.get("kept_samples"),
+                    },
+                }
+            )
+        cold_archive = root_manifest.get("cold_archive")
+        if isinstance(cold_archive, dict) and cold_archive.get("ledger_ref"):
+            actions.append(
+                {
+                    "action_kind": "cold_archive_retention",
+                    "root_ref": root_ref,
+                    "subject_ref": ".ds/cold_archive",
+                    "ledger_ref": cold_archive.get("ledger_ref"),
+                    "action_count": int(cold_archive.get("moved_file_count") or 0),
+                    "bytes_total": None,
+                    "payload": {
+                        "moved_file_count": cold_archive.get("moved_file_count"),
+                        "moved_by_kind": cold_archive.get("moved_by_kind"),
+                        "moved_samples": cold_archive.get("moved_samples"),
+                    },
+                }
+            )
+    return actions
+
+
 def update_runtime_storage_index(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     resolved_root = Path(root).expanduser().resolve()
     db_path = _runtime_index_path(resolved_root)
@@ -688,6 +773,7 @@ def update_runtime_storage_index(root: Path, manifest: dict[str, Any]) -> dict[s
     processed_at = str(manifest.get("processed_at") or utc_now())
     bucket_snapshots = _iter_runtime_bucket_snapshots(resolved_root)
     archive_refs = _collect_archive_refs(manifest)
+    retention_actions = _collect_retention_actions(manifest)
     prune_manifest = manifest.get("worktree_runtime_prune")
     if not isinstance(prune_manifest, dict):
         prune_manifest = {}
@@ -775,6 +861,38 @@ def update_runtime_storage_index(root: Path, manifest: dict[str, Any]) -> dict[s
                 for item in archive_refs
             ],
         )
+        connection.executemany(
+            """
+            INSERT INTO retention_actions(
+                run_id,
+                action_kind,
+                root_ref,
+                subject_ref,
+                ledger_ref,
+                restore_index_ref,
+                action_count,
+                bytes_total,
+                payload_json,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id,
+                    item.get("action_kind"),
+                    item.get("root_ref"),
+                    item.get("subject_ref"),
+                    item.get("ledger_ref"),
+                    item.get("restore_index_ref"),
+                    int(item.get("action_count") or 0),
+                    item.get("bytes_total"),
+                    _json_dumps_stable(item.get("payload") or {}),
+                    utc_now(),
+                )
+                for item in retention_actions
+            ],
+        )
     indexed_buckets = [item["bucket"] for item in bucket_snapshots if item["exists_on_disk"] or item["file_count"]]
     return {
         "db_path": str(db_path),
@@ -784,6 +902,7 @@ def update_runtime_storage_index(root: Path, manifest: dict[str, Any]) -> dict[s
         "run_id": run_id,
         "bucket_count": len(bucket_snapshots),
         "archive_ref_count": len(archive_refs),
+        "retention_action_count": len(retention_actions),
     }
 
 
