@@ -75,9 +75,33 @@ def test_resume_control_mode_reconciliation_writes_native_runtime_event(temp_hom
     assert event["event_kind"] == "runtime_continuation_changed"
     assert event["status_snapshot"]["quest_status"] == "active"
     assert event["status_snapshot"]["continuation_policy"] == "wait_for_user_or_resume"
+    assert "continuation_anchor" in event["status_snapshot"]
+    assert event["status_snapshot"]["continuation_anchor"] is None
     assert event["status_snapshot"]["continuation_reason"] == "control_mode_copilot"
     assert session["runtime_event_ref"]["event_id"] == event["event_id"]
     assert session["runtime_event"]["event_id"] == event["event_id"]
+
+
+def test_runtime_execution_gate_event_includes_continuation_anchor(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("native truth execution gate anchor quest")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="gate_needs_specificity",
+    )
+
+    event = _latest_runtime_event(quest_root)
+
+    assert event["event_kind"] == "runtime_continuation_changed"
+    assert event["status_snapshot"]["continuation_anchor"] == "decision"
+    assert event["outer_loop_input"]["continuation_anchor"] == "decision"
 
 
 def test_waiting_for_user_transition_writes_native_runtime_event(temp_home: Path) -> None:

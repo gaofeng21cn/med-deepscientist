@@ -1721,11 +1721,13 @@ class DaemonApp:
         )
         if gate is not None:
             return {
-                "scheduled": True,
+                "scheduled": False,
                 "started": False,
                 "queued": False,
                 "reason": "execution_gate_skipped",
+                "blocked_reason": gate["terminal_reason"],
                 "terminal_reason": gate["terminal_reason"],
+                "terminal_source": gate.get("terminal_source"),
             }
         turn_state = self._refresh_turn_worker_state(quest_id)
         if not turn_state.get("running"):

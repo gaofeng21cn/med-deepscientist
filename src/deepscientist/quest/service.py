@@ -7866,6 +7866,7 @@ class QuestService:
             "worker_running": bool(state.get("worker_running")),
             "stop_reason": str(state.get("stop_reason") or "").strip() or None,
             "continuation_policy": str(state.get("continuation_policy") or "").strip() or None,
+            "continuation_anchor": str(state.get("continuation_anchor") or "").strip() or None,
             "continuation_reason": str(state.get("continuation_reason") or "").strip() or None,
             "pending_user_message_count": int(state.get("pending_user_message_count") or 0),
             "interaction_action": interaction_action,

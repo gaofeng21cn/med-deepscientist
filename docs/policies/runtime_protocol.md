@@ -217,6 +217,7 @@ Stable `status_snapshot` / `outer_loop_input` minimum keys:
 - `worker_running`
 - `stop_reason`
 - `continuation_policy`
+- `continuation_anchor`
 - `continuation_reason`
 - `pending_user_message_count`
 - `interaction_action`

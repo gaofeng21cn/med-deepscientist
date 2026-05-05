@@ -5238,11 +5238,13 @@ def test_schedule_turn_preflight_gate_records_terminal_skip_without_worker(
     payload = app.schedule_turn(quest_id, reason="auto_continue")
 
     assert payload == {
-        "scheduled": True,
+        "scheduled": False,
         "started": False,
         "queued": False,
         "reason": "execution_gate_skipped",
+        "blocked_reason": expected_terminal_reason,
         "terminal_reason": expected_terminal_reason,
+        "terminal_source": "continuation_reason",
     }
     assert drained == []
     assert app._turn_state.get(quest_id, {}).get("running") is not True
@@ -5286,11 +5288,13 @@ def test_schedule_turn_preflight_gate_records_stale_active_run_without_worker(
     payload = app.schedule_turn(quest_id, reason="auto_continue")
 
     assert payload == {
-        "scheduled": True,
+        "scheduled": False,
         "started": False,
         "queued": False,
         "reason": "execution_gate_skipped",
+        "blocked_reason": "stale_active_run",
         "terminal_reason": "stale_active_run",
+        "terminal_source": "stale_active_run",
     }
     assert drained == []
     snapshot = app.quest_service.snapshot_fast(quest_id)
@@ -5333,11 +5337,13 @@ def test_schedule_turn_preflight_gate_records_same_fingerprint_no_delta_without_
     payload = app.schedule_turn(quest_id, reason="auto_continue")
 
     assert payload == {
-        "scheduled": True,
+        "scheduled": False,
         "started": False,
         "queued": False,
         "reason": "execution_gate_skipped",
+        "blocked_reason": "same_fingerprint_no_delta",
         "terminal_reason": "same_fingerprint_no_delta",
+        "terminal_source": "same_fingerprint_no_delta",
     }
     assert drained == []
     snapshot = app.quest_service.snapshot_fast(quest_id)
@@ -5673,6 +5679,89 @@ def test_resume_quest_controller_owned_publication_gate_clears_stale_runner_erro
     runtime_state = read_json(quest_root / ".ds" / "runtime_state.json", {})
     assert runtime_state["continuation_policy"] == "auto"
     assert runtime_state["continuation_reason"] == "controller_work_unit_pending"
+
+
+def test_resume_quest_reports_controller_gate_skip_as_blocked_not_scheduled(temp_home: Path) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("resume controller gate specificity should not look scheduled")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "002-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still needs concrete blocker targets",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "claim", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "gate emitted label-only blockers",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "controller",
+        "route_key_question": "publication gate must write concrete claim/figure/table/source path targets.",
+        "work_unit_id": "gate_needs_specificity",
+        "work_unit_fingerprint": "publication-blockers::specificity",
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class FailingRunner:
+        binary = ""
+
+        def run(self, request):  # noqa: ANN001
+            raise AssertionError("blocked controller gate resume must not invoke the runner")
+
+    app.runners["codex"] = FailingRunner()
+
+    payload = app.resume_quest(quest_id, source="runtime_watch")
+
+    assert payload["ok"] is True
+    assert payload["scheduled"] is False
+    assert payload["started"] is False
+    assert payload["queued"] is False
+    assert payload["reason"] == "execution_gate_skipped"
+    assert payload["blocked_reason"] == "gate_needs_specificity"
+    assert payload["terminal_reason"] == "gate_needs_specificity"
+    assert payload["terminal_source"] == "controller_work_unit_authorization"
+    assert payload["snapshot"]["active_run_id"] is None
+    assert app._turn_state.get(quest_id, {}).get("running") is not True
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert skipped[-1]["turn_mode"] == "gate_needs_specificity"
+    assert skipped[-1]["controller_projection"]["reason"] == "gate_needs_specificity"
 
 
 def test_quest_control_pause_marks_quest_paused_and_interrupts_runner(temp_home: Path) -> None:
