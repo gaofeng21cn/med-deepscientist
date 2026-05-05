@@ -104,6 +104,11 @@
       "commit": "df714e6b3831e044f9f56100412089d1c74a1f7f",
       "kind": "runtime_intake",
       "summary": "Absorb latest DeepScientist file-search, start-setup planning, manuscript-coverage, and bounded-await slices"
+    },
+    {
+      "commit": "f1f3d0fbddd1b8389d2ec21b3cfa41c16febb307",
+      "kind": "runtime_bugfix",
+      "summary": "Mirror refreshed quest summaries to quest root"
     }
   ],
   "lock_policy": {

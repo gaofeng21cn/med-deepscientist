@@ -181,6 +181,14 @@ Remote semantics are explicit:
   - `uv run pytest -q tests/test_init_and_quest.py::test_search_files_matches_paths_and_normalizes_simple_globs tests/test_mcp_servers.py::test_start_setup_profile_artifact_server_exposes_prepare_form_only tests/test_mcp_servers.py::test_artifact_mcp_server_tools_cover_core_flows tests/test_memory_and_artifact.py::test_validate_manuscript_coverage_blocks_short_memo_as_full_paper tests/test_memory_and_artifact.py::test_get_paper_contract_health_prefers_ready_duplicate_ledger_item tests/test_prompt_builder.py::test_prompt_builder_includes_paper_contract_health_block tests/test_skill_contracts.py::test_system_prompt_strengthens_bash_exec_only_terminal_contract tests/test_skill_contracts.py::test_experiment_and_analysis_skills_require_smoke_then_detach_tail_monitoring`
   - `git diff --check`
 
+### Round 5 quest-root summary mirror intake
+
+- local_commit: `f1f3d0fbddd1b8389d2ec21b3cfa41c16febb307`
+- upstream_commit: `9f5066b7e222b438d50d6efa284d6ac5f98b6995`
+- kind: `runtime_bugfix`
+- reason: `artifact.refresh_summary(...)` now writes the active workspace `SUMMARY.md` and mirrors the same compact state to canonical `quest_root/SUMMARY.md`, so supervisors and MAS-side readers can inspect current quest state without depending on the active branch worktree.
+- verification: `PYTHONPATH=src uv run pytest -q tests/test_memory_and_artifact.py -k 'refresh_summary'`
+
 ## Lock Policy
 
 - mode: `regenerate_in_fork`
