@@ -10,7 +10,7 @@ case "$lane" in
       tests/test_api_contract_surface.py \
       tests/test_skill_contracts.py
     ;;
-  docs)
+  contracts)
     uv run pytest \
       tests/test_runtime_contract_surface.py \
       tests/test_api_contract_surface.py \
@@ -27,7 +27,7 @@ case "$lane" in
     ;;
   *)
     echo "Unknown lane: $lane" >&2
-    echo "Usage: scripts/verify.sh [smoke|fast|docs|full|release]" >&2
+    echo "Usage: scripts/verify.sh [smoke|fast|contracts|full|release]" >&2
     exit 1
     ;;
 esac

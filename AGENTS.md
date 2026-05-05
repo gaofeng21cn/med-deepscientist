@@ -43,6 +43,7 @@
 - 能删就别加；能复用现有模式就别新起抽象。
 - 没有明确、可验证的必要性，不要新增依赖。
 - 只要改动 daemon API、quest layout、built-in MCP surface、prompt/skill 名单，就必须同步更新实现、测试与相关文档。
+- 叙述性 `README*`、`docs/**` 和参考文档不作为脚本/测试的断言对象；可以测试 machine-readable contract、schema、CLI/API 行为、生成产物结构与路径，但不要用测试固定文档措辞、章节或状态文案。
 - 默认最小验证入口是 `scripts/verify.sh`；默认 smoke lane 运行 `uv run pytest` 的契约切片。
 - 涉及发布/打包改动时，额外运行 `npm run build:release` 与 `npm pack --dry-run`。
 - 完成前必须运行与改动匹配的测试、类型检查和验证命令。
