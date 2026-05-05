@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import tarfile
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -72,6 +73,18 @@ _BASH_SESSION_LOG_SPECS = (
     ("monitor.log", "text"),
 )
 _COMPACT_TEXT_WINDOW_MAX_BYTES = 512 * 1024
+_RUNTIME_INDEX_SCHEMA_VERSION = 1
+_RUNTIME_INDEX_BUCKET_REFS = (
+    ".ds/bash_exec",
+    ".ds/runs",
+    ".ds/codex_history",
+    ".ds/codex_homes",
+    ".ds/worktrees",
+    ".ds/cold_archive",
+    ".ds/events",
+    ".ds/slim_backups",
+    "artifacts/reports",
+)
 
 
 def _parse_timestamp(value: object) -> datetime | None:
@@ -488,6 +501,27 @@ def _directory_file_manifest(source_dir: Path, *, root: Path) -> dict[str, Any]:
     }
 
 
+def _directory_file_counts(path: Path) -> tuple[int, int]:
+    if not path.exists():
+        return 0, 0
+    if path.is_file():
+        try:
+            return 1, path.stat().st_size
+        except OSError:
+            return 0, 0
+    file_count = 0
+    total_bytes = 0
+    for item in path.rglob("*"):
+        if not item.is_file():
+            continue
+        try:
+            total_bytes += item.stat().st_size
+        except OSError:
+            continue
+        file_count += 1
+    return file_count, total_bytes
+
+
 def _append_worktree_runtime_restore_index(
     root: Path,
     *,
@@ -510,6 +544,247 @@ def _append_worktree_runtime_restore_index(
     payload["updated_at"] = utc_now()
     write_json(index_path, payload)
     return _relative_ref(index_path, root=root)
+
+
+def _runtime_index_path(root: Path) -> Path:
+    return root / ".ds" / "runtime_index.sqlite"
+
+
+def _init_runtime_index(connection: sqlite3.Connection) -> None:
+    connection.executescript(
+        """
+        PRAGMA foreign_keys = ON;
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS maintenance_runs (
+            run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quest_root TEXT NOT NULL,
+            processed_at TEXT NOT NULL,
+            include_worktrees INTEGER NOT NULL,
+            root_count INTEGER NOT NULL,
+            worktrees_pruned INTEGER NOT NULL,
+            files_archived INTEGER NOT NULL,
+            bytes_archived INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS bucket_snapshots (
+            run_id INTEGER NOT NULL,
+            bucket TEXT NOT NULL,
+            path_ref TEXT NOT NULL,
+            file_count INTEGER NOT NULL,
+            bytes_total INTEGER NOT NULL,
+            exists_on_disk INTEGER NOT NULL,
+            PRIMARY KEY (run_id, bucket, path_ref),
+            FOREIGN KEY (run_id) REFERENCES maintenance_runs(run_id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS archive_refs (
+            run_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            source_path TEXT,
+            archive_ref TEXT,
+            restore_index_ref TEXT,
+            ledger_ref TEXT,
+            bytes_original INTEGER,
+            bytes_archived INTEGER,
+            file_count INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES maintenance_runs(run_id) ON DELETE CASCADE
+        );
+        """
+    )
+    connection.execute(
+        "INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)",
+        ("schema_version", str(_RUNTIME_INDEX_SCHEMA_VERSION)),
+    )
+
+
+def _iter_runtime_bucket_snapshots(root: Path) -> list[dict[str, Any]]:
+    snapshots: list[dict[str, Any]] = []
+    for bucket_ref in _RUNTIME_INDEX_BUCKET_REFS:
+        bucket_path = root / bucket_ref
+        file_count, bytes_total = _directory_file_counts(bucket_path)
+        snapshots.append(
+            {
+                "bucket": bucket_ref,
+                "path_ref": bucket_ref,
+                "file_count": file_count,
+                "bytes_total": bytes_total,
+                "exists_on_disk": bucket_path.exists(),
+            }
+        )
+    return snapshots
+
+
+def _collect_archive_refs(manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    prune_manifest = manifest.get("worktree_runtime_prune")
+    if isinstance(prune_manifest, dict):
+        restore_index_ref = prune_manifest.get("restore_index_ref")
+        for item in prune_manifest.get("removed") or []:
+            if not isinstance(item, dict):
+                continue
+            archived_worktree = item.get("archived_worktree")
+            if isinstance(archived_worktree, dict):
+                refs.append(
+                    {
+                        "kind": str(archived_worktree.get("kind") or "worktree_runtime_payload"),
+                        "source_path": archived_worktree.get("source_path"),
+                        "archive_ref": archived_worktree.get("archive_ref"),
+                        "restore_index_ref": restore_index_ref,
+                        "bytes_original": archived_worktree.get("bytes_original"),
+                        "bytes_archived": archived_worktree.get("archive_bytes"),
+                        "file_count": archived_worktree.get("file_count"),
+                    }
+                )
+            for archived_directory in item.get("archived_directories") or []:
+                if not isinstance(archived_directory, dict):
+                    continue
+                refs.append(
+                    {
+                        "kind": str(archived_directory.get("kind") or "worktree_runtime_payload"),
+                        "source_path": archived_directory.get("source_path"),
+                        "archive_ref": archived_directory.get("archive_ref"),
+                        "restore_index_ref": restore_index_ref,
+                        "bytes_original": archived_directory.get("bytes_original"),
+                        "bytes_archived": archived_directory.get("archive_bytes"),
+                        "file_count": archived_directory.get("file_count"),
+                    }
+                )
+    for root_manifest in manifest.get("roots") or []:
+        if not isinstance(root_manifest, dict):
+            continue
+        retention = root_manifest.get("report_history_retention")
+        if isinstance(retention, dict) and retention.get("ledger_ref"):
+            refs.append(
+                {
+                    "kind": "report_history_retention",
+                    "source_path": retention.get("reports_root"),
+                    "ledger_ref": retention.get("ledger_ref"),
+                    "file_count": retention.get("archived_file_count"),
+                }
+            )
+        cold_archive = root_manifest.get("cold_archive")
+        if isinstance(cold_archive, dict):
+            for sample in cold_archive.get("moved_samples") or []:
+                if not isinstance(sample, dict):
+                    continue
+                refs.append(
+                    {
+                        "kind": str(sample.get("kind") or "cold_runtime_payload"),
+                        "source_path": sample.get("source_path"),
+                        "archive_ref": sample.get("cold_archive_ref"),
+                        "ledger_ref": cold_archive.get("ledger_ref"),
+                    }
+                )
+    return refs
+
+
+def update_runtime_storage_index(root: Path, manifest: dict[str, Any]) -> dict[str, Any]:
+    resolved_root = Path(root).expanduser().resolve()
+    db_path = _runtime_index_path(resolved_root)
+    ensure_dir(db_path.parent)
+    processed_at = str(manifest.get("processed_at") or utc_now())
+    bucket_snapshots = _iter_runtime_bucket_snapshots(resolved_root)
+    archive_refs = _collect_archive_refs(manifest)
+    prune_manifest = manifest.get("worktree_runtime_prune")
+    if not isinstance(prune_manifest, dict):
+        prune_manifest = {}
+    with sqlite3.connect(db_path) as connection:
+        _init_runtime_index(connection)
+        cursor = connection.execute(
+            """
+            INSERT INTO maintenance_runs(
+                quest_root,
+                processed_at,
+                include_worktrees,
+                root_count,
+                worktrees_pruned,
+                files_archived,
+                bytes_archived,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(resolved_root),
+                processed_at,
+                1 if manifest.get("include_worktrees") else 0,
+                len(manifest.get("roots") or []),
+                int(prune_manifest.get("worktrees_pruned") or 0),
+                int(prune_manifest.get("files_archived") or 0),
+                int(prune_manifest.get("bytes_archived") or 0),
+                utc_now(),
+            ),
+        )
+        run_id = int(cursor.lastrowid)
+        connection.executemany(
+            """
+            INSERT INTO bucket_snapshots(
+                run_id,
+                bucket,
+                path_ref,
+                file_count,
+                bytes_total,
+                exists_on_disk
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id,
+                    item["bucket"],
+                    item["path_ref"],
+                    int(item["file_count"]),
+                    int(item["bytes_total"]),
+                    1 if item["exists_on_disk"] else 0,
+                )
+                for item in bucket_snapshots
+            ],
+        )
+        connection.executemany(
+            """
+            INSERT INTO archive_refs(
+                run_id,
+                kind,
+                source_path,
+                archive_ref,
+                restore_index_ref,
+                ledger_ref,
+                bytes_original,
+                bytes_archived,
+                file_count,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    run_id,
+                    item.get("kind"),
+                    item.get("source_path"),
+                    item.get("archive_ref"),
+                    item.get("restore_index_ref"),
+                    item.get("ledger_ref"),
+                    item.get("bytes_original"),
+                    item.get("bytes_archived"),
+                    item.get("file_count"),
+                    utc_now(),
+                )
+                for item in archive_refs
+            ],
+        )
+    indexed_buckets = [item["bucket"] for item in bucket_snapshots if item["exists_on_disk"] or item["file_count"]]
+    return {
+        "db_path": str(db_path),
+        "schema_version": _RUNTIME_INDEX_SCHEMA_VERSION,
+        "indexed_buckets": indexed_buckets,
+        "status": "updated",
+        "run_id": run_id,
+        "bucket_count": len(bucket_snapshots),
+        "archive_ref_count": len(archive_refs),
+    }
 
 
 def _collect_line_windows(path: Path, *, head_lines: int, tail_lines: int) -> tuple[list[str], list[str], int]:
@@ -1850,4 +2125,5 @@ def maintain_quest_runtime_storage(
             older_than_seconds=older_than_seconds,
             min_bytes=max(1, dedupe_worktree_min_mb) * 1024 * 1024,
         )
+    manifest["runtime_index"] = update_runtime_storage_index(resolved_quest_root, manifest)
     return manifest

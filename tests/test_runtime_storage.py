@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 import gzip
 import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 import tarfile
@@ -112,6 +113,98 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     assert ".ds/codex_history/" in gitignore_text
     assert ".ds/codex_homes/" in gitignore_text
     assert ".ds/runs/" in gitignore_text
+
+
+def test_runtime_storage_maintenance_updates_sqlite_sidecar_index(tmp_path: Path) -> None:
+    quest_root = tmp_path / "quest"
+    bash_root = quest_root / ".ds" / "bash_exec" / "bash-indexed"
+    bash_root.mkdir(parents=True, exist_ok=True)
+    (bash_root / "meta.json").write_text(
+        json.dumps(
+            {
+                "bash_id": "bash-indexed",
+                "status": "terminated",
+                "finished_at": "2026-04-10T00:00:00+00:00",
+                "updated_at": "2026-04-10T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bash_root / "terminal.log").write_text("terminal\n" * 10, encoding="utf-8")
+    reports_root = quest_root / "artifacts" / "reports" / "runtime_events"
+    reports_root.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    for name, age_hours in (
+        ("20260419T010000Z_runtime_state_observed.json", 120),
+        ("20260419T020000Z_runtime_state_observed.json", 120),
+    ):
+        path = reports_root / name
+        path.write_text(json.dumps({"name": name}, ensure_ascii=False) + "\n", encoding="utf-8")
+        timestamp = (now - timedelta(hours=age_hours)).timestamp()
+        os.utime(path, (timestamp, timestamp))
+    worktree_runtime = quest_root / ".ds" / "worktrees" / "wt-indexed" / ".ds" / "runs" / "run-001"
+    worktree_runtime.mkdir(parents=True, exist_ok=True)
+    (worktree_runtime / "stdout.jsonl").write_text('{"line":"stdout"}\n', encoding="utf-8")
+    _mark_tree_old(quest_root / ".ds" / "worktrees" / "wt-indexed")
+
+    result = maintain_quest_runtime_storage(
+        quest_root,
+        include_worktrees=True,
+        older_than_seconds=3600,
+        text_max_mb=1,
+        dedupe_worktree_min_mb=None,
+    )
+
+    runtime_index = result["runtime_index"]
+    db_path = Path(runtime_index["db_path"])
+    assert db_path == quest_root.resolve() / ".ds" / "runtime_index.sqlite"
+    assert runtime_index["schema_version"] == 1
+    assert runtime_index["status"] == "updated"
+    assert ".ds/cold_archive" in runtime_index["indexed_buckets"]
+    assert "artifacts/reports" in runtime_index["indexed_buckets"]
+
+    with sqlite3.connect(db_path) as connection:
+        schema_version = connection.execute("SELECT value FROM metadata WHERE key = 'schema_version'").fetchone()
+        assert schema_version == ("1",)
+        run = connection.execute(
+            """
+            SELECT include_worktrees, root_count, worktrees_pruned, files_archived
+            FROM maintenance_runs
+            WHERE run_id = ?
+            """,
+            (runtime_index["run_id"],),
+        ).fetchone()
+        assert run == (1, 2, 1, 1)
+        cold_archive_bucket = connection.execute(
+            """
+            SELECT file_count, bytes_total, exists_on_disk
+            FROM bucket_snapshots
+            WHERE run_id = ? AND bucket = '.ds/cold_archive'
+            """,
+            (runtime_index["run_id"],),
+        ).fetchone()
+        assert cold_archive_bucket is not None
+        assert cold_archive_bucket[0] > 0
+        assert cold_archive_bucket[1] > 0
+        assert cold_archive_bucket[2] == 1
+        refs = connection.execute(
+            """
+            SELECT kind, source_path, archive_ref, restore_index_ref, ledger_ref
+            FROM archive_refs
+            WHERE run_id = ?
+            ORDER BY kind, source_path
+            """,
+            (runtime_index["run_id"],),
+        ).fetchall()
+    kinds = {row[0] for row in refs}
+    assert "bash_exec_session_log" in kinds
+    assert "report_history_retention" in kinds
+    assert "worktree_runtime_payload" in kinds
+    assert any(row[3] == result["worktree_runtime_prune"]["restore_index_ref"] for row in refs)
+    assert any(row[4] == result["roots"][0]["report_history_retention"]["ledger_ref"] for row in refs)
 
 
 def test_runtime_storage_maintenance_compacts_large_single_line_terminal_logs(tmp_path: Path) -> None:
