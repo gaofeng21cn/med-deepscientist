@@ -53,7 +53,12 @@ RUNTIME_GITIGNORE_ENTRIES = (
     ".ds/codex_history/",
     ".ds/codex_homes/",
     ".ds/runs/",
+    ".ds/restore_proof_archives/",
+    ".ds/runtime_index.sqlite",
     ".ds/slim_backups/",
+    "artifacts/runtime/runtime_lifecycle.sqlite",
+    "artifacts/runtime/runtime_lifecycle.sqlite-wal",
+    "artifacts/runtime/runtime_lifecycle.sqlite-shm",
 )
 
 

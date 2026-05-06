@@ -113,6 +113,9 @@ def test_runtime_storage_maintenance_compacts_completed_bash_logs_and_prunes_tem
     assert ".ds/codex_history/" in gitignore_text
     assert ".ds/codex_homes/" in gitignore_text
     assert ".ds/runs/" in gitignore_text
+    assert ".ds/restore_proof_archives/" in gitignore_text
+    assert ".ds/runtime_index.sqlite" in gitignore_text
+    assert "artifacts/runtime/runtime_lifecycle.sqlite" in gitignore_text
 
 
 def test_runtime_storage_maintenance_updates_sqlite_sidecar_index(tmp_path: Path) -> None:
