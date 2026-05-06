@@ -40,7 +40,7 @@ MAS 的 product entry、medical controller、profile、overlay、study intake、
 ## 4. 明确非目标
 
 - No physical migration：本契约只收缩 runtime boundary，不移动仓库、不搬迁源码、不执行 monorepo absorb。
-- No new product entry：MDS 不新增 MAS-facing 产品入口，不暴露新的默认 CLI/UI/frontdesk。
+- No new product entry：MDS 不新增 MAS-facing 产品入口，不暴露新的默认 CLI/UI/产品入口。
 - No ownership inversion：医学研究设计、证据规则、publication readiness 与 submission authority 不从 MAS 下沉到 MDS。
 - No silent surface widening：未写入 runtime protocol 的 MDS 行为不得被下游当成稳定 adapter contract。
 

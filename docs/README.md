@@ -81,4 +81,4 @@
 - `docs/en/` 与 `docs/zh/`：公开用户文档
 - `docs/references/`：仍可作为当前判断参考的审计与背景材料
 - `docs/history/`：历史归档，不作为当前活跃入口
-- `docs/superpowers/`：本地 AI 过程文档，必须保持未跟踪
+- 本地 AI / Superpowers 过程草稿默认保持未跟踪，必要时放入用户级 `~/.codex/` 归档，不作为 repo-tracked docs 层级

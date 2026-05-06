@@ -91,7 +91,7 @@ Create a worktree:
 ```bash
 cd <med-deepscientist-root>
 git fetch upstream
-git worktree add .worktree/intake-2026-03-31-daemon-fix -b intake/2026-03-31-daemon-fix
+git worktree add .worktrees/intake-2026-03-31-daemon-fix -b intake/2026-03-31-daemon-fix
 ```
 
 ### 2. Ask `MedAutoScience` whether intake is appropriate
@@ -207,4 +207,4 @@ This is the human-readable changelog for the controlled fork. Record:
 
 The governance-side view of the same process lives in:
 
-- `med-autoscience/guides/upstream_intake.md`
+- `med-autoscience/docs/program/upstream_intake.md`
