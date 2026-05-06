@@ -8,16 +8,11 @@ Upstream changes must enter through a dedicated intake worktree, pass fork-level
 
 This workflow exists to filter occasional upstream changes. It is not the primary development loop for this repository.
 
-## Active Intake Audits
+## Active Intake Entry
 
-- [`docs/upstream_intake_round_2026_04_01.md`](./upstream_intake_round_2026_04_01.md): first audited upstream intake split for the current `behind_count=7` gap against `upstream/main`
-- [`docs/upstream_intake_round_2026_04_19.md`](./upstream_intake_round_2026_04_19.md): targeted runtime and launcher hardening intake for stalled-turn recovery, Codex provider compatibility, and launcher management diagnostics
-- [`docs/upstream_intake_round_2026_04_19_followup.md`](./upstream_intake_round_2026_04_19_followup.md): follow-up classification for publishability-gate policy drift and partial backend-only absorption from the baseline-compare preview bundle
-- [`docs/upstream_intake_round_2026_04_20.md`](./upstream_intake_round_2026_04_20.md): UI build alignment, quest lazy-load intake, zombie-turn reconciliation, and branch cleanup on `main`
-- [`docs/upstream_intake_round_2026_04_20_followup.md`](./upstream_intake_round_2026_04_20_followup.md): follow-up classification confirming the remaining valuable slices as frontend circular-safe serialization and TUI quest-browser key handling
-- [`docs/upstream_intake_round_2026_04_28.md`](./upstream_intake_round_2026_04_28.md): latest-update learning round for path-aware file search, durable start-setup planning patches, manuscript coverage validation, duplicate evidence ledger selection, and bounded await discipline
-- [`docs/upstream_intake_round_2026_04_30.md`](./upstream_intake_round_2026_04_30.md): latest-update learning round for academic outline gates, paper-outline workflow, paper-quality review prompts, runner evidence packets, log hygiene, and provider/UI deferrals
-- [`docs/upstream_intake_round_2026_05_05.md`](./upstream_intake_round_2026_05_05.md): latest-update learning round for quest-root summary mirroring, upstream PR branch cleanup, and BenchStore/Nature/UI/product deferrals
+This file is the active intake policy and procedure entry.
+
+Historical round records live under [`docs/history/upstream-intake/`](./history/upstream-intake/README.md). Those files preserve past audit evidence and decisions, but they are not current policy entries.
 
 ## Remote Convention
 

@@ -187,7 +187,7 @@ At that checkpoint, until the full-green gate was met, the branch was treated as
 The final closeout report should land in three places:
 
 1. merge or PR summary for the final integration step
-2. this intake audit file (`docs/upstream_intake_round_2026_04_01.md`) as the durable maintainer note
+2. this intake audit file (`docs/history/upstream-intake/upstream_intake_round_2026_04_01.md`) as the durable maintainer note
 3. team task result / leader summary with exact verification command output references
 
 Minimum report payload:

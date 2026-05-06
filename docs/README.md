@@ -38,6 +38,14 @@
 - [policies/mas_mds_transition_contract.md](policies/mas_mds_transition_contract.md)
 - [policies/system_visibility_contract.md](policies/system_visibility_contract.md)
 
+### 文档组合边界
+
+- Active：核心五件套、`docs/upstream_intake.md` 和当前 status，描述现在仍生效的项目事实、流程入口和执行边界。
+- Policies：`docs/policies/`，只放长期稳定的 protocol、contract 与可复用治理规则。
+- References：`docs/references/` 与 `docs/medical_fork_baseline.md`，放仍有参考价值的审计、baseline 与 owner split 材料。
+- History：`docs/history/`，放历史轮次记录、退役材料和不再作为当前入口的过程归档。
+- Public user docs：`docs/en/` 与 `docs/zh/`，保持公开用户文档双语入口；内部维护和规划文档默认中文。
+
 ## 当前边界提醒
 
 `MedDeepScientist` 是 `MedAutoScience` 下的 runtime substrate / compatibility surface，不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
@@ -52,8 +60,12 @@
 ### 参考 / 审计材料
 
 - [upstream_intake.md](upstream_intake.md)
-- [upstream_intake_round_2026_04_01.md](upstream_intake_round_2026_04_01.md)
 - [medical_fork_baseline.md](medical_fork_baseline.md)
+
+### 历史归档
+
+- [history/README.md](history/README.md)
+- [history/upstream-intake/README.md](history/upstream-intake/README.md)
 
 ## 开发入口
 
@@ -67,4 +79,6 @@
 - `docs/project.md` / `architecture.md` / `invariants.md` / `decisions.md` / `status.md`：AI 和维护者的核心知识入口
 - `docs/policies/`：稳定规则
 - `docs/en/` 与 `docs/zh/`：公开用户文档
+- `docs/references/`：仍可作为当前判断参考的审计与背景材料
+- `docs/history/`：历史归档，不作为当前活跃入口
 - `docs/superpowers/`：本地 AI 过程文档，必须保持未跟踪

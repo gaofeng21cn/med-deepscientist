@@ -69,6 +69,7 @@
 ## 补充材料
 
 - 上游 intake 说明：`docs/upstream_intake.md`
+- 历史 upstream intake 轮次：`docs/history/upstream-intake/`
 - workspace-mode / continuation 语义说明：`docs/zh/20_WORKSPACE_MODES_GUIDE.md`、`docs/en/20_WORKSPACE_MODES_GUIDE.md`
 - 五个核心 skill owner split 参考：`docs/references/upstream_skill_owner_split_2026_04_20.md`
 - baseline / 审计说明：`docs/medical_fork_baseline.md`
