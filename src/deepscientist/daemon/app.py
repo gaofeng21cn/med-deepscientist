@@ -121,6 +121,12 @@ EXECUTION_GATE_TERMINAL_REASONS = {
     "terminal_consumed",
     "current_package_freshness_required",
 }
+DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS = {
+    "publication_gate_replay",
+    "submission_authority_sync_closure",
+    "submission_delivery_sync_closure",
+    "submission_minimal_refresh",
+}
 _RUNTIME_STORAGE_AUTO_MAINTENANCE_OLDER_THAN_SECONDS = 0
 _RUNTIME_STORAGE_AUTO_DEDUPE_WORKTREE_MIN_MB = 16
 _CRASH_AUTO_RESUME_COOLDOWN = timedelta(minutes=10)
@@ -3860,6 +3866,13 @@ class DaemonApp:
         )
 
     @staticmethod
+    def _controller_work_unit_is_downstream_package_freshness(controller_auth: dict) -> bool:
+        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
+        if not work_unit_id and isinstance(controller_auth.get("next_work_unit"), dict):
+            work_unit_id = str(controller_auth["next_work_unit"].get("unit_id") or "").strip()
+        return work_unit_id in DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS
+
+    @staticmethod
     def _current_package_freshness_proof_current(payload: dict) -> bool:
         status = str(payload.get("status") or "").strip().lower()
         if status not in {"current", "fresh", "synced", "updated", "unchanged", "ready"}:
@@ -3916,7 +3929,8 @@ class DaemonApp:
             return "controller_work_unit_pending"
         blockers = DaemonApp._controller_auth_blockers(snapshot, controller_auth)
         if (
-            DaemonApp._has_current_package_freshness_blocker(blockers)
+            DaemonApp._controller_work_unit_is_downstream_package_freshness(controller_auth)
+            and DaemonApp._has_current_package_freshness_blocker(blockers)
             and not DaemonApp._current_package_freshness_proof_current(
                 DaemonApp._current_package_freshness_payload(snapshot, controller_auth)
             )

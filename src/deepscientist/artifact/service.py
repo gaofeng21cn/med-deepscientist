@@ -111,6 +111,12 @@ _ASCII_COMPLETION_APPROVAL_TERMS = tuple(term for term in _COMPLETION_APPROVAL_T
 _ASCII_COMPLETION_REJECTION_TERMS = tuple(term for term in _COMPLETION_REJECTION_TERMS if term.isascii())
 _NON_ASCII_COMPLETION_APPROVAL_TERMS = tuple(term for term in _COMPLETION_APPROVAL_TERMS if not term.isascii())
 _NON_ASCII_COMPLETION_REJECTION_TERMS = tuple(term for term in _COMPLETION_REJECTION_TERMS if not term.isascii())
+DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS = {
+    "publication_gate_replay",
+    "submission_authority_sync_closure",
+    "submission_delivery_sync_closure",
+    "submission_minimal_refresh",
+}
 _START_SETUP_FORM_META_KEYS = {"form_patch", "session_patch"}
 
 
@@ -4478,6 +4484,13 @@ class ArtifactService:
         )
 
     @staticmethod
+    def _controller_work_unit_is_downstream_package_freshness(controller_auth: dict[str, Any]) -> bool:
+        work_unit_id = str(controller_auth.get("work_unit_id") or "").strip()
+        if not work_unit_id and isinstance(controller_auth.get("next_work_unit"), dict):
+            work_unit_id = str(controller_auth["next_work_unit"].get("unit_id") or "").strip()
+        return work_unit_id in DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS
+
+    @staticmethod
     def _current_package_freshness_proof_current(payload: dict[str, Any]) -> bool:
         status = str(payload.get("status") or "").strip().lower()
         if status not in {"current", "fresh", "synced", "updated", "unchanged", "ready"}:
@@ -4534,7 +4547,8 @@ class ArtifactService:
             return "controller_work_unit_pending"
         blockers = cls._controller_auth_blockers(snapshot, controller_auth)
         if (
-            cls._has_current_package_freshness_blocker(blockers)
+            cls._controller_work_unit_is_downstream_package_freshness(controller_auth)
+            and cls._has_current_package_freshness_blocker(blockers)
             and not cls._current_package_freshness_proof_current(
                 cls._current_package_freshness_payload(snapshot, controller_auth)
             )

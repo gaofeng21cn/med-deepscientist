@@ -8588,6 +8588,112 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
     assert terminal_events == []
 
 
+def test_publication_gate_upstream_controller_work_unit_with_stale_package_starts_runner(
+    temp_home: Path,
+) -> None:
+    ensure_home_layout(temp_home)
+    ConfigManager(temp_home).ensure_files()
+    app = DaemonApp(temp_home)
+    quest = app.quest_service.create("publication gate upstream controller work unit with stale package")
+    quest_id = quest["quest_id"]
+    quest_root = Path(quest["quest_root"])
+    study_root = temp_home / "studies" / "001-risk"
+
+    _write_managed_publication_eval_latest(
+        study_root,
+        quest_id=quest_id,
+        payload={
+            "verdict": {
+                "overall_verdict": "blocked",
+                "primary_claim_status": "partial",
+                "summary": "publication gate still blocks completion",
+                "stop_loss_pressure": "watch",
+            },
+            "gaps": [{"gap_id": "gap-001", "gap_type": "reporting", "severity": "must_fix"}],
+            "recommended_actions": [
+                {
+                    "action_id": "action-001",
+                    "action_type": "return_to_controller",
+                    "priority": "now",
+                    "reason": "publication gate still blocks completion",
+                    "requires_controller_decision": True,
+                }
+            ],
+        },
+    )
+    _materialize_ready_paper_line_for_publication_gate(
+        quest_root,
+        study_root_ref=str(study_root),
+    )
+    app.quest_service.update_baseline_state(
+        quest_root,
+        baseline_gate="confirmed",
+    )
+    app.quest_service.update_settings(quest_id, active_anchor="write")
+    app.quest_service.set_continuation_state(
+        quest_root,
+        policy="auto",
+        anchor="decision",
+        reason="controller_work_unit_pending",
+    )
+    runtime_state_path = quest_root / ".ds" / "runtime_state.json"
+    runtime_state = read_json(runtime_state_path, {})
+    runtime_state["last_controller_decision_authorization"] = {
+        "source": "runtime_watch",
+        "route_target": "analysis-campaign",
+        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence blockers.",
+        "work_unit_id": "analysis_claim_evidence_repair",
+        "work_unit_fingerprint": "publication-blockers::claim-story-figure",
+        "blockers": ["stale_study_delivery_mirror/current_package"],
+        "claim_id": "claim-001",
+        "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
+    }
+    write_json(runtime_state_path, runtime_state)
+
+    class RecordingRunner:
+        binary = ""
+
+        def __init__(self) -> None:
+            self.requests: list[dict[str, str]] = []
+
+        def run(self, request):  # noqa: ANN001
+            self.requests.append(
+                {
+                    "skill_id": request.skill_id,
+                    "turn_reason": request.turn_reason,
+                    "message": request.message,
+                }
+            )
+            history_root = ensure_dir(request.quest_root / ".ds" / "codex_history" / request.run_id)
+            run_root = ensure_dir(request.quest_root / ".ds" / "runs" / request.run_id)
+            return RunResult(
+                ok=True,
+                run_id=request.run_id,
+                model=request.model,
+                output_text="upstream controller work unit accepted before package refresh",
+                exit_code=0,
+                history_root=history_root,
+                run_root=run_root,
+                stderr_text="",
+            )
+
+    runner = RecordingRunner()
+    app.runners["codex"] = runner
+    with app._turn_lock:
+        app._turn_state[quest_id] = {"reason": "auto_continue", "running": True, "pending": False}
+
+    app._run_quest_turn(quest_id)
+
+    assert len(runner.requests) == 1
+    assert runner.requests[0]["turn_reason"] == "auto_continue"
+    assert runner.requests[0]["skill_id"] == "analysis-campaign"
+    snapshot = app.quest_service.snapshot(quest_id)
+    assert snapshot["continuation_reason"] == "controller_work_unit_pending"
+    events = read_jsonl(quest_root / ".ds" / "events.jsonl")
+    skipped = [item for item in events if item.get("type") == "runner.turn_skipped"]
+    assert not skipped or skipped[-1].get("turn_mode") != "current_package_freshness_required"
+
+
 @pytest.mark.parametrize(
     ("authorization_extra", "expected_reason"),
     [
@@ -8599,9 +8705,11 @@ def test_publication_gate_authorized_controller_work_unit_redrive_starts_runner(
         ),
         (
             {
+                "route_target": "finalize",
+                "route_key_question": "submission_minimal_refresh: Refresh the stale submission package.",
+                "work_unit_id": "submission_minimal_refresh",
+                "work_unit_fingerprint": "publication-blockers::submission-refresh",
                 "blockers": ["stale_study_delivery_mirror"],
-                "claim_id": "claim-001",
-                "source_path": "/tmp/study/paper/claim_evidence_map.json",
             },
             "current_package_freshness_required",
         ),
@@ -8855,10 +8963,10 @@ def test_publication_gate_current_package_freshness_signature_mismatch_skips_run
     runtime_state = read_json(runtime_state_path, {})
     runtime_state["last_controller_decision_authorization"] = {
         "source": "runtime_watch",
-        "route_target": "analysis-campaign",
-        "route_key_question": "analysis_claim_evidence_repair: Repair claim-evidence, story, figure, and results traceability blockers.",
-        "work_unit_id": "analysis_claim_evidence_repair",
-        "work_unit_fingerprint": "publication-blockers::f11710a114497b27",
+        "route_target": "finalize",
+        "route_key_question": "submission_minimal_refresh: Refresh the stale submission package.",
+        "work_unit_id": "submission_minimal_refresh",
+        "work_unit_fingerprint": "publication-blockers::submission-refresh",
         "blockers": ["stale_study_delivery_mirror/current_package"],
         "claim_id": "claim-001",
         "source_path": str(study_root / "paper" / "claim_evidence_map.json"),

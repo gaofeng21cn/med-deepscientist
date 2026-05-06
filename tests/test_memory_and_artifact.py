@@ -2725,6 +2725,7 @@ def test_submit_paper_bundle_uses_auto_only_for_executable_controller_authorizat
         ),
         "work_unit_id": "analysis_claim_evidence_repair",
         "work_unit_fingerprint": "publication-blockers::specific",
+        "blockers": ["stale_study_delivery_mirror/current_package"],
         "claim_id": "claim-001",
         "source_path": str(study_root / "paper" / "claim_evidence_map.json"),
     }
@@ -2783,9 +2784,11 @@ def test_submit_paper_bundle_uses_auto_only_for_executable_controller_authorizat
         ),
         (
             {
+                "route_target": "finalize",
+                "route_key_question": "submission_minimal_refresh: Refresh the stale submission package.",
+                "work_unit_id": "submission_minimal_refresh",
+                "work_unit_fingerprint": "publication-blockers::submission-refresh",
                 "blockers": ["stale_study_delivery_mirror/current_package"],
-                "claim_id": "claim-001",
-                "source_path": "/tmp/study/paper/claim_evidence_map.json",
             },
             "current_package_freshness_required",
         ),
