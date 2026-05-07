@@ -17,7 +17,7 @@
 - 第三优先级：只吸收对当前 runtime 真正有价值、可验证的 upstream 变化。
 - 不做降级处理、兜底补丁、启发式修补或“先糊住再说”式实现。
 
-## 文档体系
+## 文档分层与生命周期治理
 
 - `README*` 与 `docs/README*` 是默认人类/AI 入口。
 - `docs/project.md`：项目概览与目标。
@@ -25,16 +25,20 @@
 - `docs/invariants.md`：硬约束与不能破坏的边界。
 - `docs/decisions.md`：仍有效的关键决策与取舍。
 - `docs/status.md`：当前状态、活跃主线、下一步和验证口径。
+- `docs/docs_portfolio_consolidation.md` 是当前文档组合治理入口；维护者应先读核心五件套，再按该文件判断新增、更新、归档或 tombstone。
+- 每份长期文档都必须能说明 `owner`、`purpose`、`state`、`machine boundary`；缺少任一信号时，先补入口或归位，再继续扩写。
 - `docs/policies/`：稳定、长期保留的规则文档。
-- `docs/en/` 与 `docs/zh/`：公开用户文档。
-- `docs/references/`：repo-tracked 参考材料、审计材料、上游 intake 记录。
+- `docs/en/` 与 `docs/zh/`：上游/用户-facing guide corpus，可服务 operator/user workflows，但不定义 MAS/MDS ownership 或 promotion authority。
+- `docs/references/`：repo-tracked 参考材料、审计材料、controlled-fork baseline 与上游 intake 记录；`docs/references/upstream_intake.md` 与 `docs/references/medical_fork_baseline.md` 是当前 canonical 参考位置。
 - `docs/history/`：历史归档与退役材料，不作为当前活跃入口。
+- `docs/policies/runtime_native_truth_and_outer_loop_input_contract.md` 是 runtime-native truth 与 outer-loop input 规则的 canonical policy 位置；旧 root docs 路径仅作人读兼容指针，不制造第二真相源。
 - 本地 AI / Superpowers 过程草稿默认保持未跟踪，必要时放入用户级 `~/.codex/` 归档，不作为 repo-tracked docs 层级。
 
 ## 文档规则
 
 - 公开用户文档保持中英双语；内部技术、维护与规划文档默认中文。
 - 新文档先判断角色，再决定落点；不允许把参考材料、历史记录、当前状态和稳定规则混在同一层。
+- `README*`、`docs/**` 与参考文档是人读面。代码、测试、contracts、dashboard 或 runtime 不得把 prose path、Markdown 章节或文案当成稳定机器接口；确需关联人读材料时，使用 structured surface、policy ID 或 `human_doc:*` 语义 ID。
 - 如果某条规则已经稳定并需要长期遵守，应写入 `docs/invariants.md` 或 `docs/policies/*`，不要继续堆在 `AGENTS.md`。
 
 ## 变更与验证
