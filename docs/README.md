@@ -17,10 +17,11 @@
 5. [关键决策](decisions.md)
 6. [最小稳定 runtime protocol](policies/runtime_protocol.md)
 7. [MAS/MDS 迁移收缩契约](policies/mas_mds_transition_contract.md)
-8. [English docs index](en/README.md)
-9. [中文文档索引](zh/README.md)
-10. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
-11. [Windows WSL2 部署指南](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+8. [Docs portfolio consolidation](docs_portfolio_consolidation.md)
+9. [English docs index](en/README.md)
+10. [中文文档索引](zh/README.md)
+11. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
+12. [Windows WSL2 部署指南](zh/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
 
 ## 文档角色
 
@@ -40,15 +41,15 @@
 
 ### 文档组合边界
 
-- Active：核心五件套、`docs/upstream_intake.md` 和当前 status，描述现在仍生效的项目事实、流程入口和执行边界。
-- Policies：`docs/policies/`，只放长期稳定的 protocol、contract 与可复用治理规则。
-- References：`docs/references/` 与 `docs/medical_fork_baseline.md`，放仍有参考价值的审计、baseline 与 owner split 材料。
+- Active：核心五件套和当前 status，描述现在仍生效的项目事实、流程入口和执行边界。
+- Policies：`docs/policies/`，只放长期稳定的 protocol、contract 与可复用治理规则，包括 native runtime truth / outer-loop input contract。
+- References：`docs/references/`，放仍有当前参考价值的 upstream intake procedure、controlled-fork baseline 与 owner split 审计材料。
 - History：`docs/history/`，放历史轮次记录、退役材料和不再作为当前入口的过程归档。
-- Public user docs：`docs/en/` 与 `docs/zh/`，保持公开用户文档双语入口；内部维护和规划文档默认中文。
+- Public user docs：`docs/en/` 与 `docs/zh/`，保持 upstream / user-facing guide corpus；repo-specific MAS/MDS transition truth 放在 core、policies 与 references。
 
 ## 当前边界提醒
 
-`MedDeepScientist` 是 `MedAutoScience` 下的 runtime substrate / compatibility surface，不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
+`MedDeepScientist` 是 `MedAutoScience` 控制下的 runtime/backend companion，承担 controlled backend、behavior oracle 和 upstream intake buffer 职责。它不是 OPL 默认 active domain agent，也不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
 
 `README*` 与 `docs/**` 是人读面。运行时 report、测试、脚本和 dashboard 可以使用 `human_doc:*` 语义 ID 指向人类可读上下文，但不应把 `docs/**/*.md` 路径当作稳定机读 contract、promotion gate 或兼容性约束。
 
@@ -61,8 +62,13 @@
 
 ### 参考 / 审计材料
 
-- [upstream_intake.md](upstream_intake.md)
-- [medical_fork_baseline.md](medical_fork_baseline.md)
+- [references/upstream_intake.md](references/upstream_intake.md)
+- [references/medical_fork_baseline.md](references/medical_fork_baseline.md)
+
+### 文档治理
+
+- [docs_portfolio_consolidation.md](docs_portfolio_consolidation.md)
+- [policies/runtime_native_truth_and_outer_loop_input_contract.md](policies/runtime_native_truth_and_outer_loop_input_contract.md)
 
 ### 历史归档
 
@@ -80,7 +86,7 @@
 - `README*` 与 `docs/README*`：默认入口
 - `docs/project.md` / `architecture.md` / `invariants.md` / `decisions.md` / `status.md`：AI 和维护者的核心知识入口
 - `docs/policies/`：稳定规则
-- `docs/en/` 与 `docs/zh/`：公开用户文档
+- `docs/en/` 与 `docs/zh/`：upstream / user-facing guide corpus
 - `docs/references/`：仍可作为当前判断参考的审计与背景材料
 - `docs/history/`：历史归档，不作为当前活跃入口
 - 本地 AI / Superpowers 过程草稿默认保持未跟踪，必要时放入用户级 `~/.codex/` 归档，不作为 repo-tracked docs 层级

@@ -100,4 +100,4 @@ MDS 侧的 `strangler_registry` 是 runtime/substrate 防回流 guard：它把 M
 - 当前架构说明看本文件。
 - 硬约束看 `docs/invariants.md`。
 - 当前状态与活跃主线看 `docs/status.md`。
-- 历史 intake 轮次看 `docs/history/upstream-intake/`；仍有当前参考价值的 baseline / owner-split 审计材料看 `docs/references/*` 与 `docs/medical_fork_baseline.md`。
+- 历史 intake 轮次看 `docs/history/upstream-intake/`；仍有当前参考价值的 baseline / owner-split 审计材料看 `docs/references/*`。

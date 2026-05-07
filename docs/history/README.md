@@ -11,7 +11,7 @@
 ## 与当前文档的边界
 
 - 当前项目事实：看 `../project.md`、`../architecture.md`、`../invariants.md`、`../decisions.md`、`../status.md`。
-- 当前 intake policy：看 `../upstream_intake.md`。
+- 当前 intake procedure：看 `../references/upstream_intake.md`。
 - 稳定规则与协议：看 `../policies/`。
-- 仍有当前参考价值的审计 / baseline：看 `../references/` 与 `../medical_fork_baseline.md`。
+- 仍有当前参考价值的审计 / baseline：看 `../references/`。
 - 公开用户文档：看 `../en/` 与 `../zh/`。

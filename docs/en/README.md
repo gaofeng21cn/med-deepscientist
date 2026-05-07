@@ -23,9 +23,9 @@ Compatibility names currently remain:
   The authoritative minimal protocol that `MedAutoScience` depends on.
 - [Repository README](../../README.md)
   Project positioning, fork rationale, architecture, and compatibility policy.
-- [Fork Baseline](../medical_fork_baseline.md)
+- [Fork Baseline](../references/medical_fork_baseline.md)
   Human-readable freeze baseline and applied patch history.
-- [Upstream Intake Guide](../upstream_intake.md)
+- [Upstream Intake Guide](../references/upstream_intake.md)
   The required process for absorbing upstream `DeepScientist` changes.
 
 ## Runtime Maintenance
@@ -72,6 +72,8 @@ These documents still describe the underlying runtime behavior that this fork cu
 - [18 Feishu Connector Guide](./18_FEISHU_CONNECTOR_GUIDE.md)
 
 ## Note On Scope
+
+`docs/en/` is the upstream/user-facing guide corpus for operator workflows. Repo-specific MAS/MDS transition truth lives in `docs/project.md`, `docs/architecture.md`, `docs/status.md`, `docs/policies/`, and `docs/references/`.
 
 This repository stays narrower than upstream `DeepScientist`.
 

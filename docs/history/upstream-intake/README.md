@@ -2,7 +2,7 @@
 
 这里保存已完成的 upstream intake 轮次记录。
 
-`../../upstream_intake.md` 是当前 active intake policy / procedure entry；本目录只保存历史 audit evidence、decision matrix、verification 和 closeout 记录。
+`../../references/upstream_intake.md` 是当前 active intake procedure entry；本目录只保存历史 audit evidence、decision matrix、verification 和 closeout 记录。
 
 ## 轮次记录
 
