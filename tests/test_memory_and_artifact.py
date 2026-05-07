@@ -157,6 +157,137 @@ def _write_citation_rich_draft(paper_root: Path, *, count: int = 20) -> None:
     )
 
 
+def _materialize_mas_medical_writing_preflight(
+    study_root: Path,
+    paper_root: Path,
+    *,
+    include_default_results_surface: bool = True,
+) -> None:
+    write_json(
+        study_root / "paper" / "medical_manuscript_blueprint.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_manuscript_blueprint",
+            "authoring_provenance": {
+                "owner": "ai_author",
+                "ai_reviewer_required": False,
+                "policy_id": "medical_manuscript_ai_first_blueprint_v1",
+            },
+            "clinical_problem": "Clinical interpretation requires a stable manuscript frame.",
+            "evidence_gap": "The current evidence set needs journal-style synthesis.",
+            "target_population": "Adults in the managed clinical study cohort.",
+            "study_design": "Retrospective clinical cohort study.",
+            "main_findings_by_clinical_importance": [
+                {
+                    "rank": 1,
+                    "clinical_finding": "The primary finding supports restrained clinical interpretation.",
+                    "supporting_display_items": ["F1"],
+                }
+            ],
+            "clinical_interpretation": "The evidence supports bounded interpretation in original-research prose.",
+            "limitations": ["Residual confounding remains possible."],
+            "claim_evidence_map": [
+                {"claim_id": "C1", "statement": "Primary manuscript claim is evidence-mapped."}
+            ],
+            "figure_table_rhetorical_roles": [
+                {"display_id": "F1", "rhetorical_role": "Supports the primary clinical finding."}
+            ],
+            "discussion_claim_boundary": "The Discussion should avoid causal treatment claims.",
+            "journal_voice_target": {
+                "voice": "neutral_clinical_original_research",
+                "style_sources": ["JAMA", "Zeiger", "Gopen and Swan"],
+            },
+        },
+    )
+    write_json(
+        study_root / "paper" / "medical_journal_style_corpus.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_journal_style_corpus",
+            "corpus_id": "general_medical_journal_style_corpus_v1",
+            "style_profile": {"target_voice": "neutral_clinical_original_research"},
+            "source_refs": [
+                {"source_id": "zeiger_biomedical_papers"},
+                {"source_id": "gopen_swan_reader_expectations"},
+                {"source_id": "jama_author_instructions"},
+            ],
+            "principles": {
+                "introduction": ["clinical problem to evidence gap"],
+                "results": ["clinical finding as sentence subject"],
+                "discussion": ["restrained interpretation"],
+            },
+        },
+    )
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "medical_prose_review_request.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_prose_review_request",
+            "review_owner": "ai_reviewer",
+            "review_policy_id": "medical_publication_critique_v1",
+            "structured_response_contract": {
+                "owner": "ai_reviewer",
+                "mechanical_flags_role": "evidence_snippets_only",
+            },
+        },
+    )
+    write_json(
+        study_root / "artifacts" / "publication_eval" / "medical_prose_review.json",
+        {
+            "schema_version": 1,
+            "surface": "medical_prose_review",
+            "assessment_provenance": {
+                "owner": "ai_reviewer",
+                "source_kind": "medical_prose_review",
+                "policy_id": "medical_publication_critique_v1",
+                "ai_reviewer_required": False,
+            },
+            "medical_journal_prose_quality": {
+                "status": "ready",
+                "overall_style_verdict": "clear",
+                "summary": "AI reviewer cleared the manuscript prose for medical-journal style.",
+                "section_level_diagnosis": {
+                    "results": "Results prose leads with clinical findings.",
+                    "discussion": "Discussion prose is restrained and limitation-aware.",
+                },
+                "representative_bad_sentences": [],
+                "representative_rewrites": [],
+                "route_back_recommendation": {
+                    "required": False,
+                    "route_target": "none",
+                    "reason": "Medical journal prose review cleared.",
+                },
+            },
+        },
+    )
+    if include_default_results_surface and not (paper_root / "results_narrative_map.json").exists():
+        write_json(
+            paper_root / "results_narrative_map.json",
+            {
+                "sections": [
+                    {
+                        "section_id": "results-main",
+                        "direct_answer": "The managed paper line has a stable primary clinical finding.",
+                        "supporting_display_items": ["F1"],
+                    }
+                ]
+            },
+        )
+    if not (paper_root / "figure_semantics_manifest.json").exists():
+        write_json(
+            paper_root / "figure_semantics_manifest.json",
+            {
+                "figures": [
+                    {
+                        "figure_id": "F1",
+                        "story_role": "result_primary",
+                        "direct_message": "Supports the primary clinical finding.",
+                    }
+                ]
+            },
+        )
+
+
 def _materialize_submission_minimal_projection(
     paper_root: Path,
     *,
@@ -9421,6 +9552,7 @@ def test_get_paper_contract_health_keeps_nonfinal_write_review_maintenance_route
     write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
     _write_citation_rich_draft(paper_root, count=20)
     _materialize_reference_materials(quest_root, paper_root, count=20)
+    _materialize_mas_medical_writing_preflight(quest_root / "managed-study", paper_root)
 
     review_root = paper_root / "review"
     review_root.mkdir(parents=True, exist_ok=True)
@@ -9857,6 +9989,7 @@ def test_get_paper_contract_health_keeps_nonfinal_write_review_route_when_public
     write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
     _write_citation_rich_draft(paper_root, count=20)
     _materialize_reference_materials(quest_root, paper_root, count=20)
+    _materialize_mas_medical_writing_preflight(quest_root / "managed-study", paper_root)
 
     review_root = paper_root / "review"
     review_root.mkdir(parents=True, exist_ok=True)
@@ -10019,6 +10152,7 @@ def test_get_paper_contract_health_treats_optional_publication_eval_gap_as_clear
     write_json(paper_root / "evidence_ledger.json", {"selected_outline_ref": "outline-001", "items": []})
     _write_citation_rich_draft(paper_root, count=20)
     _materialize_reference_materials(quest_root, paper_root, count=20)
+    _materialize_mas_medical_writing_preflight(quest_root / "managed-study", paper_root)
 
     review_root = paper_root / "review"
     review_root.mkdir(parents=True, exist_ok=True)
@@ -11559,6 +11693,11 @@ def test_get_paper_contract_health_routes_back_to_write_when_result_display_surf
                 }
             ]
         },
+    )
+    _materialize_mas_medical_writing_preflight(
+        temp_home / "studies" / "001-risk",
+        paper_root,
+        include_default_results_surface=False,
     )
     write_json(
         paper_root / "figure_catalog.json",
