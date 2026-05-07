@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
+const https = require('node:https');
 const os = require('node:os');
 const path = require('node:path');
 const readline = require('node:readline');
@@ -3108,6 +3110,73 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function daemonHttpJsonRequest(url, { method = 'GET', headers = {}, body = null, timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    const client = parsed.protocol === 'http:' ? http : parsed.protocol === 'https:' ? https : null;
+    if (!client) {
+      reject(new Error(`Unsupported daemon URL protocol: ${parsed.protocol}`));
+      return;
+    }
+
+    const requestHeaders = { ...headers };
+    let requestBody = null;
+    if (body !== null && body !== undefined) {
+      requestBody = typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body);
+      requestHeaders['Content-Length'] = Buffer.byteLength(requestBody);
+    }
+
+    const request = client.request(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers: requestHeaders,
+      },
+      (response) => {
+        const chunks = [];
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          const text = chunks.join('');
+          let payload = null;
+          if (text.trim()) {
+            try {
+              payload = JSON.parse(text);
+            } catch (error) {
+              reject(error);
+              return;
+            }
+          }
+          resolve({
+            ok: response.statusCode >= 200 && response.statusCode < 300,
+            status: response.statusCode,
+            statusText: response.statusMessage || '',
+            payload,
+          });
+        });
+      }
+    );
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error(`Daemon HTTP request timed out after ${timeoutMs}ms`));
+    });
+    request.on('error', reject);
+    if (requestBody !== null) {
+      request.write(requestBody);
+    }
+    request.end();
+  });
+}
+
 async function isHealthy(url) {
   const payload = await fetchHealth(url);
   return Boolean(payload && payload.status === 'ok');
@@ -3115,11 +3184,15 @@ async function isHealthy(url) {
 
 async function fetchHealth(url) {
   try {
-    const response = await fetch(`${url}/api/health`);
+    const response = await daemonHttpJsonRequest(`${url}/api/health`, {
+      headers: {
+        Accept: 'application/json',
+      },
+    });
     if (!response.ok) {
       return null;
     }
-    return await response.json();
+    return response.payload;
   } catch {
     return null;
   }
@@ -3167,17 +3240,18 @@ function daemonIdentityError({ url, home, health, state }) {
 
 async function requestDaemonShutdown(url, daemonId) {
   try {
-    const response = await fetch(`${url}/api/admin/shutdown`, {
+    const response = await daemonHttpJsonRequest(`${url}/api/admin/shutdown`, {
       method: 'POST',
       headers: {
+        Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ source: 'ds-launcher', daemon_id: daemonId || null }),
+      body: { source: 'ds-launcher', daemon_id: daemonId || null },
     });
     if (!response.ok) {
       return false;
     }
-    const payload = await response.json().catch(() => ({}));
+    const payload = response.payload || {};
     return payload.ok !== false;
   } catch {
     return false;
@@ -4561,6 +4635,9 @@ module.exports = {
     updateManualCommand,
     buildUpdateStatus,
     buildDaemonStatusPayload,
+    daemonHttpJsonRequest,
+    fetchHealth,
+    requestDaemonShutdown,
     hashSkillTree,
     ensureInitialized,
     parseYesNoAnswer,

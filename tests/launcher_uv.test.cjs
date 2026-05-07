@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -207,6 +208,65 @@ test('syncUvProjectEnvironment prints the original uv failure and follow-up guid
   assert.match(output, /Proxy or certificate overrides were detected/i);
 
   fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+test('launcher daemon management HTTP avoids global fetch for local health and shutdown', async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('global fetch must not be used for launcher daemon management');
+  };
+  t.after(() => {
+    global.fetch = originalFetch;
+  });
+
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    const chunks = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      const body = chunks.join('');
+      requests.push({ method: request.method, url: request.url, body });
+      response.setHeader('Content-Type', 'application/json');
+      if (request.method === 'GET' && request.url === '/api/health') {
+        response.end(JSON.stringify({ status: 'ok', home: '/tmp/ds-home', daemon_id: 'daemon-1' }));
+        return;
+      }
+      if (request.method === 'POST' && request.url === '/api/admin/shutdown') {
+        response.end(JSON.stringify({ ok: true }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end(JSON.stringify({ ok: false }));
+    });
+  });
+
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => {
+    server.close();
+  });
+
+  const { port } = server.address();
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const health = await __internal.fetchHealth(baseUrl);
+  assert.equal(health.status, 'ok');
+  assert.equal(health.daemon_id, 'daemon-1');
+
+  const shutdown = await __internal.requestDaemonShutdown(baseUrl, 'daemon-1');
+  assert.equal(shutdown, true);
+
+  assert.deepEqual(
+    requests.map((request) => [request.method, request.url]),
+    [
+      ['GET', '/api/health'],
+      ['POST', '/api/admin/shutdown'],
+    ]
+  );
+  assert.deepEqual(JSON.parse(requests[1].body), {
+    source: 'ds-launcher',
+    daemon_id: 'daemon-1',
+  });
 });
 
 test('ensureInitialized honors a valid init stamp without requiring global stage skills', () => {

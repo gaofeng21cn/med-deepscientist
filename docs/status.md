@@ -22,6 +22,7 @@
 - BenchStore 已开放 `catalog -> setup packet -> Start Research / SetupAgent` 的受控入口；`start_setup_patch` 回写与 setup assist 验证已经落到当前主线，但它仍是 fork-local capability / setup aid，不是 MAS-facing product contract
 - BenchStore maintainer docs 已补齐 YAML authoring 与 GitHub Releases packaging contract，文档口径继续停在当前 fork 的 read-only catalog + setup packet 边界
 - DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research，也不升级为 MAS 默认可消费 surface
+- Launcher 管理本地 daemon 的 `health / shutdown / status / restart` HTTP 调用使用 Node core `http/https`，避免 Node 25.x 全局 `fetch` / undici socket 行为影响本机 daemon 管理入口。
 
 ## 当前执行链
 
