@@ -1,0 +1,128 @@
+{
+  "tracked_path_hygiene": {
+    "forbidden_path_fragments": [
+      ".DS_Store",
+      ".agent-contract-baseline.json",
+      ".codex",
+      ".omx",
+      ".runtime-program",
+      "__pycache__",
+      "build",
+      "out",
+      "runtime-state"
+    ],
+    "forbidden_suffixes": [
+      ".egg-info"
+    ],
+    "allowed_tracked_dist_prefixes": [
+      {
+        "path": "src/ui/dist/",
+        "owner": "npm release package source; package.json files includes src/ui/dist and build-release.mjs validates src/ui/dist/index.html"
+      },
+      {
+        "path": "src/tui/dist/",
+        "owner": "npm release package source; package.json files includes src/tui/dist and build-release.mjs validates src/tui/dist/index.js"
+      },
+      {
+        "path": "src/ui/vendor/novel-headless/dist/",
+        "owner": "vendored novel-headless package artifact owned by the UI vendor subtree"
+      }
+    ]
+  },
+  "line_budget": {
+    "max_lines": 1000,
+    "roots": [
+      "assets/connectors/",
+      "bin/",
+      "scripts/",
+      "src/",
+      "tests/"
+    ],
+    "extensions": [
+      ".cjs",
+      ".css",
+      ".js",
+      ".jsx",
+      ".md",
+      ".mjs",
+      ".py",
+      ".pyi",
+      ".ts",
+      ".tsx"
+    ],
+    "exclude_prefixes": [
+      "src/tui/dist/",
+      "src/ui/dist/",
+      "src/ui/node_modules/",
+      "src/ui/public/monaco/",
+      "src/ui/vendor/novel-headless/dist/"
+    ],
+    "legacy_baseline": {
+      "assets/connectors/lingzhu/openclaw-bridge/src/http-handler.ts": 1133,
+      "bin/ds.js": 4580,
+      "src/deepscientist/artifact/metrics.py": 1443,
+      "src/deepscientist/artifact/service.py": 14481,
+      "src/deepscientist/bash_exec/service.py": 1330,
+      "src/deepscientist/bridges/connectors.py": 1271,
+      "src/deepscientist/channels/qq.py": 1105,
+      "src/deepscientist/config/service.py": 2372,
+      "src/deepscientist/daemon/api/handlers.py": 2279,
+      "src/deepscientist/daemon/app.py": 9501,
+      "src/deepscientist/mcp/server.py": 1933,
+      "src/deepscientist/prompts/builder.py": 1793,
+      "src/deepscientist/quest/service.py": 9786,
+      "src/deepscientist/quest/stage_views.py": 1879,
+      "src/deepscientist/runners/codex.py": 1593,
+      "src/deepscientist/runtime_storage.py": 2248,
+      "src/prompts/system.md": 1207,
+      "src/skills/idea/SKILL.md": 1288,
+      "src/skills/optimize/SKILL.md": 1644,
+      "src/skills/write/SKILL.md": 1368,
+      "src/tui/src/app/AppContainer.tsx": 2978,
+      "src/ui/src/components/chat/toolViews/McpBashExecView.tsx": 1083,
+      "src/ui/src/components/git/GitResearchCanvas.tsx": 1659,
+      "src/ui/src/components/onboarding/OnboardingOverlay.tsx": 1122,
+      "src/ui/src/components/projects/CreateProjectDialog.tsx": 2732,
+      "src/ui/src/components/settings/ConnectorSettingsForm.tsx": 4130,
+      "src/ui/src/components/settings/SettingsPage.tsx": 1022,
+      "src/ui/src/components/workspace/CopilotDockOverlay.tsx": 1189,
+      "src/ui/src/components/workspace/MobileQuestWorkspaceShell.tsx": 1253,
+      "src/ui/src/components/workspace/QuestStageSurface.tsx": 1460,
+      "src/ui/src/components/workspace/QuestWorkspaceSurface.tsx": 4762,
+      "src/ui/src/components/workspace/WorkspaceLayout.tsx": 4569,
+      "src/ui/src/demo/adapter.ts": 1711,
+      "src/ui/src/demo/scenarios/quickstart.ts": 2567,
+      "src/ui/src/index.css": 2532,
+      "src/ui/src/lib/acp.ts": 1421,
+      "src/ui/src/lib/api/lab.ts": 5141,
+      "src/ui/src/lib/hooks/useSSESession.ts": 1067,
+      "src/ui/src/lib/i18n/messages/auto_translate.ts": 3172,
+      "src/ui/src/lib/i18n/messages/lab.ts": 1934,
+      "src/ui/src/lib/i18n/messages/workspace.ts": 1045,
+      "src/ui/src/lib/plugins/ai-manus/AiManusChatView.tsx": 9912,
+      "src/ui/src/lib/plugins/ai-manus/components/ChatBoxFiles.tsx": 1193,
+      "src/ui/src/lib/plugins/ai-manus/components/ChatMessage.tsx": 1118,
+      "src/ui/src/lib/plugins/ai-manus/components/ToolUse.tsx": 1331,
+      "src/ui/src/lib/plugins/cli/components/TerminalView.tsx": 1254,
+      "src/ui/src/lib/plugins/lab/components/LabCopilotPanel.tsx": 3734,
+      "src/ui/src/lib/plugins/lab/components/LabOverviewCanvas.tsx": 1541,
+      "src/ui/src/lib/plugins/lab/components/LabQuestGraphCanvas.tsx": 6140,
+      "src/ui/src/lib/plugins/lab/lab.css": 2882,
+      "src/ui/src/lib/plugins/latex/LatexPlugin.tsx": 2238,
+      "src/ui/src/lib/plugins/pdf-viewer/PdfViewerPlugin.tsx": 2583,
+      "src/ui/src/lib/plugins/pdf-viewer/react-pdf-highlighter/components/PdfHighlighter.tsx": 1017,
+      "src/ui/src/lib/stores/file-tree.ts": 1020,
+      "src/ui/src/styles/ai-manus.css": 1965,
+      "src/ui/src/types.ts": 1520,
+      "tests/test_codex_runner.py": 1343,
+      "tests/test_config_testing.py": 1456,
+      "tests/test_daemon_api.py": 10827,
+      "tests/test_git_branch_canvas.py": 1270,
+      "tests/test_init_and_quest.py": 3054,
+      "tests/test_mcp_servers.py": 2676,
+      "tests/test_memory_and_artifact.py": 12807,
+      "tests/test_prompt_builder.py": 1690,
+      "tests/test_runtime_storage.py": 1035
+    }
+  }
+}

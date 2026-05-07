@@ -59,6 +59,7 @@
 5. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
 6. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
 7. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
+8. 保持 repo hygiene / line-budget guard 生效：tracked local/runtime state 由 `scripts/audit_repo_hygiene.py` 拦截，现有超长 legacy source/test 文件先以 baseline 管住增长；资源重复与 UI/branding/source-truth follow-up 记录在 `docs/references/resource_source_truth_audit.md`，不在 hygiene lane 内移动资源。
 
 ## 默认验证
 

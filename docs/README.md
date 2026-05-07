@@ -64,6 +64,7 @@
 
 - [references/upstream_intake.md](references/upstream_intake.md)
 - [references/medical_fork_baseline.md](references/medical_fork_baseline.md)
+- [references/resource_source_truth_audit.md](references/resource_source_truth_audit.md)
 
 ### 文档治理
 

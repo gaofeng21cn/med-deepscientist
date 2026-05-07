@@ -11,11 +11,13 @@ case "$lane" in
       tests/test_skill_contracts.py
     ;;
   contracts)
+    uv run python scripts/audit_repo_hygiene.py
     uv run pytest \
       tests/test_runtime_contract_surface.py \
       tests/test_api_contract_surface.py \
       tests/test_skill_contracts.py \
-      tests/test_startup_contract_ownership.py
+      tests/test_startup_contract_ownership.py \
+      tests/test_repo_hygiene_audit.py
     ;;
   full)
     uv run pytest
