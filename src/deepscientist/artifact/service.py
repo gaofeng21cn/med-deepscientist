@@ -117,6 +117,12 @@ DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS = {
     "submission_delivery_sync_closure",
     "submission_minimal_refresh",
 }
+ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS = {
+    "skipped_duplicate",
+    "same_fingerprint_no_delta",
+    "same_fingerprint_no_artifact_delta",
+    "parked_no_artifact_delta",
+}
 _START_SETUP_FORM_META_KEYS = {"form_patch", "session_patch"}
 
 
@@ -4368,7 +4374,13 @@ class ArtifactService:
 
         lifecycle = controller_auth.get("controller_work_unit_lifecycle")
         if isinstance(lifecycle, str):
-            return normalize_state(lifecycle)
+            lifecycle_reason = normalize_state(lifecycle)
+            if (
+                lifecycle_reason in ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS
+                and cls._controller_authorization_has_redrive_intent(controller_auth)
+            ):
+                return None
+            return lifecycle_reason
         if not isinstance(lifecycle, dict):
             return None
         state = normalize_state(lifecycle.get("lifecycle_state") or lifecycle.get("state"))
@@ -4389,6 +4401,11 @@ class ArtifactService:
             return state
         if latest_event_type in terminal_states:
             return latest_event_type
+        if (
+            {state, block_reason, latest_event_type} & ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS
+            and cls._controller_authorization_has_redrive_intent(controller_auth)
+        ):
+            return None
         if bool(lifecycle.get("delivery_blocked")):
             return block_reason or state or latest_event_type or "controller_work_unit_pending"
         return None
@@ -4443,6 +4460,22 @@ class ArtifactService:
                     if isinstance(item, dict) and cls._mapping_has_actionable_controller_target(dict(item)):
                         return True
         return False
+
+    @classmethod
+    def _controller_authorization_has_redrive_intent(cls, controller_auth: dict[str, Any]) -> bool:
+        if any(
+            str(controller_auth.get(key) or "").strip()
+            for key in (
+                "control_intent",
+                "controller_intent",
+                "redrive_intent",
+                "dedupe_key",
+                "control_dedupe_key",
+                "redrive_key",
+            )
+        ):
+            return True
+        return cls._mapping_has_actionable_controller_target(controller_auth)
 
     @classmethod
     def _controller_auth_blockers(

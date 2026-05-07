@@ -121,6 +121,12 @@ EXECUTION_GATE_TERMINAL_REASONS = {
     "terminal_consumed",
     "current_package_freshness_required",
 }
+ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS = {
+    "skipped_duplicate",
+    "same_fingerprint_no_delta",
+    "same_fingerprint_no_artifact_delta",
+    "parked_no_artifact_delta",
+}
 DOWNSTREAM_PACKAGE_FRESHNESS_WORK_UNIT_IDS = {
     "publication_gate_replay",
     "submission_authority_sync_closure",
@@ -3073,6 +3079,7 @@ class DaemonApp:
             source="_run_quest_turn",
         ):
             return
+        snapshot = self.quest_service.snapshot(quest_id)
 
         runner_name = self._runner_name_for(snapshot)
         runner_cfg = self.runners_config.get(runner_name, {})
@@ -3760,7 +3767,13 @@ class DaemonApp:
 
         lifecycle = controller_auth.get("controller_work_unit_lifecycle")
         if isinstance(lifecycle, str):
-            return normalize_state(lifecycle)
+            lifecycle_reason = normalize_state(lifecycle)
+            if (
+                lifecycle_reason in ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS
+                and DaemonApp._controller_authorization_has_redrive_intent(controller_auth)
+            ):
+                return None
+            return lifecycle_reason
         if not isinstance(lifecycle, dict):
             return None
         state = normalize_state(lifecycle.get("lifecycle_state") or lifecycle.get("state"))
@@ -3773,6 +3786,11 @@ class DaemonApp:
             return state
         if latest_event_type in terminal_states:
             return latest_event_type
+        if (
+            {state, block_reason, latest_event_type} & ANTI_SPIN_REDRIVE_LIFECYCLE_REASONS
+            and DaemonApp._controller_authorization_has_redrive_intent(controller_auth)
+        ):
+            return None
         if bool(lifecycle.get("terminal_consumed")):
             return "terminal_consumed"
         if bool(lifecycle.get("delivery_blocked")):
@@ -3829,6 +3847,22 @@ class DaemonApp:
                     if isinstance(item, dict) and DaemonApp._mapping_has_actionable_controller_target(dict(item)):
                         return True
         return False
+
+    @staticmethod
+    def _controller_authorization_has_redrive_intent(controller_auth: dict) -> bool:
+        if any(
+            str(controller_auth.get(key) or "").strip()
+            for key in (
+                "control_intent",
+                "controller_intent",
+                "redrive_intent",
+                "dedupe_key",
+                "control_dedupe_key",
+                "redrive_key",
+            )
+        ):
+            return True
+        return DaemonApp._mapping_has_actionable_controller_target(controller_auth)
 
     @staticmethod
     def _controller_auth_blockers(snapshot: dict, controller_auth: dict) -> set[str]:
@@ -4177,6 +4211,15 @@ class DaemonApp:
             quest_root = Path(str(snapshot.get("quest_root") or self.home / "quests" / quest_id))
             if not self._active_run_has_recent_external_activity(quest_root, active_run_id):
                 reconciled = self._reconcile_stale_active_turn(quest_id, snapshot=snapshot)
+                if (
+                    self._has_executable_controller_work_unit_authorization(reconciled)
+                    and self._controller_authorization_has_redrive_intent(
+                        dict(reconciled.get("last_controller_decision_authorization") or {})
+                        if isinstance(reconciled.get("last_controller_decision_authorization"), dict)
+                        else {}
+                    )
+                ):
+                    return None
                 return self._record_execution_gate_skipped_attempt(
                     quest_id,
                     snapshot=reconciled,
@@ -5582,6 +5625,7 @@ class DaemonApp:
         runtime_updates: dict[str, Any] = {
             "status": normalized_status,
             "active_run_id": None,
+            "worker_running": False,
             "retry_state": None,
         }
         current_fingerprint = self._stage_state_fingerprint(finished_snapshot)

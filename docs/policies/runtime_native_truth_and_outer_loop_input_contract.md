@@ -109,6 +109,12 @@ P0 需要覆盖以下原生迁移：
 它只负责把 quest-owned runtime 真相先稳定写出来。
 `MedAutoScience` outer loop 后续应当以 native event 为输入，再做 study-owned 决策与监管产物。
 
+### 5.1 Stale active run 与 anti-spin redrive
+
+`active_run_id` 只表示当前 quest 是否存在可证实的 live runner handle；若 daemon 无法从 worker 或近期 durable run activity 证明它仍然 live，必须先清空 stale handle，再按当前 controller authorization 判断是否可继续执行。
+
+publication-gate anti-spin 产生的 `skipped_duplicate`、`same_fingerprint_no_artifact_delta` 或同类 lifecycle 只阻断重复的无新信息 auto-continue。若 `MedAutoScience` redrive 提供新的 `dedupe_key` / `control_intent` / `redrive_intent` 或 concrete specificity targets，MDS 应把它视为新的可执行 controller intent，并允许 runner 重新启动；硬终态如 `closed`、`gate_needs_specificity`、`platform_repair_required` 仍按 controller lifecycle 阻断。
+
 ## 6. Fail-closed 要求
 
 - 没有 native runtime event 时，transport/outer loop 不得假定“没有异常”。
