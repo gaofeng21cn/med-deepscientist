@@ -7,6 +7,7 @@ import pytest
 from deepscientist.strangler_registry import (
     MAS_OWNER_AUTHORITIES,
     RUNTIME_PROTOCOL_REF,
+    TRANSITION_CONTRACT_REF,
     boundary_guard_report,
     default_strangler_registry,
     mas_consumption_contract_report,
@@ -39,7 +40,7 @@ def test_surface_boundary_read_model_distinguishes_all_owner_boundary_states() -
             "target_owner": "MedDeepScientist controlled backend",
             "strangler_stage": "retain_in_mds_backend",
             "mas_consumable_contract": False,
-            "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+            "promotion_gate": TRANSITION_CONTRACT_REF,
             "parity_proof": "runtime backend regression",
             "rollback_surface": "quest-local backend fixture",
         },
@@ -49,7 +50,7 @@ def test_surface_boundary_read_model_distinguishes_all_owner_boundary_states() -
             "target_owner": "MedAutoScience parity oracle",
             "strangler_stage": "oracle_only",
             "mas_consumable_contract": False,
-            "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+            "promotion_gate": TRANSITION_CONTRACT_REF,
             "parity_proof": "prompt oracle regression",
             "rollback_surface": "prompt fixture",
         },
@@ -69,7 +70,7 @@ def test_surface_boundary_read_model_distinguishes_all_owner_boundary_states() -
             "target_owner": "MedAutoScience product owner",
             "strangler_stage": "mas_owned_or_absorbed",
             "mas_consumable_contract": False,
-            "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+            "promotion_gate": TRANSITION_CONTRACT_REF,
             "parity_proof": "MAS publication gate proof",
             "rollback_surface": "MDS oracle fixture only",
             "owner_authority": "publication_readiness",
@@ -101,7 +102,7 @@ def test_surface_record_requires_runtime_protocol_for_mas_consumable_promotion()
                 "target_owner": "MedAutoScience runtime adapter",
                 "strangler_stage": "promote_to_runtime_protocol",
                 "mas_consumable_contract": True,
-                "promotion_gate": "docs/policies/other.md",
+                "promotion_gate": "human_doc:other_policy",
                 "parity_proof": "targeted regression",
                 "rollback_surface": "quest-local fixture",
             }
@@ -120,6 +121,22 @@ def test_surface_record_requires_runtime_protocol_for_mas_consumable_promotion()
         }
     )
     assert record["strangler_stage"] == "promote_to_runtime_protocol"
+
+
+def test_surface_record_rejects_repo_doc_paths_as_runtime_promotion_gates() -> None:
+    with pytest.raises(ValueError, match="human_doc"):
+        normalize_surface_record(
+            {
+                "surface": "doc_path_runtime_gate",
+                "current_owner": "MedDeepScientist",
+                "target_owner": "MedAutoScience parity oracle",
+                "strangler_stage": "oracle_only",
+                "mas_consumable_contract": False,
+                "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+                "parity_proof": "targeted regression",
+                "rollback_surface": "quest-local fixture",
+            }
+        )
 
 
 def test_mas_consumption_contract_report_lists_required_fields_for_each_surface() -> None:
@@ -153,7 +170,7 @@ def test_mas_consumption_contract_report_fail_closes_missing_runtime_gate_or_par
             "target_owner": "MedAutoScience runtime adapter",
             "strangler_stage": "promote_to_runtime_protocol",
             "mas_consumable_contract": True,
-            "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+            "promotion_gate": TRANSITION_CONTRACT_REF,
             "parity_proof": "targeted runtime regression",
             "rollback_surface": "quest-local fixture",
         },
@@ -219,7 +236,7 @@ def test_mas_owner_authority_tags_fail_closed_unless_mas_owned_or_absorbed(owner
                 "target_owner": "MedDeepScientist backend",
                 "strangler_stage": "oracle_only",
                 "mas_consumable_contract": False,
-                "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+                "promotion_gate": TRANSITION_CONTRACT_REF,
                 "parity_proof": "owner boundary regression",
                 "rollback_surface": "MDS oracle fixture only",
                 "owner_authority": owner_authority,
@@ -242,7 +259,7 @@ def test_multiple_owner_authority_tags_fail_closed_together() -> None:
                 "target_owner": "MedDeepScientist backend",
                 "strangler_stage": "retain_in_mds_backend",
                 "mas_consumable_contract": False,
-                "promotion_gate": "docs/policies/mas_mds_transition_contract.md",
+                "promotion_gate": TRANSITION_CONTRACT_REF,
                 "parity_proof": "owner boundary regression",
                 "rollback_surface": "MDS oracle fixture only",
                 "owner_authorities": [

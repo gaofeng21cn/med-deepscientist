@@ -5,8 +5,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-RUNTIME_PROTOCOL_REF = "docs/policies/runtime_protocol.md"
-TRANSITION_CONTRACT_REF = "docs/policies/mas_mds_transition_contract.md"
+RUNTIME_PROTOCOL_REF = "human_doc:runtime_protocol"
+TRANSITION_CONTRACT_REF = "human_doc:mas_mds_transition_contract"
 
 PROMOTION_LADDER_STAGES = (
     "retain_in_mds_backend",
@@ -224,6 +224,11 @@ def normalize_surface_record(record: Mapping[str, Any]) -> dict[str, Any]:
     normalized["strangler_stage"] = validate_promotion_ladder_stage(
         str(normalized["strangler_stage"]),
         runtime_protocol_ref=str(normalized["promotion_gate"]),
+    )
+    _reject_repo_doc_path_reference(
+        str(normalized["promotion_gate"]),
+        field="promotion_gate",
+        surface=str(normalized["surface"]),
     )
     if normalized["mas_consumable_contract"] and normalized["strangler_stage"] != "promote_to_runtime_protocol":
         raise ValueError("MAS-consumable MDS surfaces must be promoted through the runtime protocol.")
@@ -509,6 +514,15 @@ def _mas_consumable_status(entry: Mapping[str, Any], issues: Sequence[Mapping[st
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _reject_repo_doc_path_reference(value: str, *, field: str, surface: str) -> None:
+    normalized = value.strip()
+    if normalized in {"README.md", "README.zh-CN.md"} or normalized.startswith("docs/"):
+        raise ValueError(
+            f"Strangler surface `{surface}` field `{field}` must use a machine surface or human_doc:* semantic id, "
+            "not a repo documentation path."
+        )
 
 
 def _owner_authorities(record: Mapping[str, Any]) -> tuple[str, ...]:

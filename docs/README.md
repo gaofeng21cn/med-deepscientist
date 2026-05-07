@@ -50,6 +50,8 @@
 
 `MedDeepScientist` 是 `MedAutoScience` 下的 runtime substrate / compatibility surface，不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
 
+`README*` 与 `docs/**` 是人读面。运行时 report、测试、脚本和 dashboard 可以使用 `human_doc:*` 语义 ID 指向人类可读上下文，但不应把 `docs/**/*.md` 路径当作稳定机读 contract、promotion gate 或兼容性约束。
+
 ### 公开用户文档
 
 - [docs/en/README.md](en/README.md)

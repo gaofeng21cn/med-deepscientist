@@ -6,6 +6,7 @@ import pytest
 
 from deepscientist.artifact.service_parts import artifact_inventory
 from deepscientist.shared import read_json
+from deepscientist.strangler_registry import RUNTIME_PROTOCOL_REF
 
 
 def test_artifact_inventory_surface_audit_keeps_baseline_inventory_oracle_only() -> None:
@@ -15,7 +16,7 @@ def test_artifact_inventory_surface_audit_keeps_baseline_inventory_oracle_only()
     assert audit["current_owner"] == "MedDeepScientist"
     assert audit["strangler_stage"] == "oracle_only"
     assert audit["mas_consumable_contract"] is False
-    assert audit["promotion_gate"] == "docs/policies/runtime_protocol.md"
+    assert audit["promotion_gate"] == RUNTIME_PROTOCOL_REF
     assert audit["parity_proof"] == "targeted artifact inventory regression tests"
     assert audit["owner_authority"] == "behavior_oracle"
 
