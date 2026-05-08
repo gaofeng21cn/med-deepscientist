@@ -1,12 +1,12 @@
 # MedDeepScientist Runtime Protocol (Stable Minimal Surface)
 
-Status: `stable`  
+Status: `stable legacy diagnostic / historical fixture surface`
 Version: `v1`  
-Applies to: `MedAutoScience -> MedDeepScientist` runtime adapter contract
+Applies to: `MedAutoScience -> MedDeepScientist` legacy diagnostic and historical fixture contract
 
 ## 1. Scope
 
-This document defines the only stable runtime surface that `MedAutoScience` may depend on by default:
+This document defines the stable fork-local surface that `MedAutoScience` may inspect only for explicit legacy diagnostic, historical fixture, or upstream intake work:
 
 - daemon API shape (minimal subset)
 - quest/worktree filesystem layout
@@ -15,11 +15,10 @@ This document defines the only stable runtime surface that `MedAutoScience` may 
 Anything not listed here is non-stable product surface.
 
 The MAS/MDS transition boundary is further constrained by
-`docs/policies/mas_mds_transition_contract.md`: `MedDeepScientist` is a
-controlled backend, behavior oracle, and upstream intake buffer. This document
-remains the stable runtime authority; the transition contract explains how MAS
-may consume that authority without treating MDS prompt, UI, product, or
-experimental surfaces as stable MAS-facing product contracts.
+`docs/policies/mas_mds_transition_contract.md`: `MedDeepScientist` is now a
+frozen source archive, historical fixture, explicit legacy diagnostic target,
+and upstream intake reference. This document remains the stable fork-local
+legacy surface; it no longer defines MAS default runtime dependency.
 The MDS `strangler_registry` runtime/substrate guard is a fail-closed
 read-model for this boundary. It prevents MAS owner authority from refluxing
 into MDS runtime/substrate surfaces; it does not create a new MAS product

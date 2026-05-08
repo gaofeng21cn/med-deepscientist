@@ -1,9 +1,15 @@
 # MedDeepScientist 硬约束
 
+## MAS functional monolith 边界
+
+- `MedDeepScientist` 不再是 `MedAutoScience` 默认 runtime backend、default diagnostic dependency、WebUI dependency 或医学研究产品入口。
+- 本仓只允许作为 frozen source archive、historical fixture、explicit legacy restore/import/backend-audit diagnostic target 与 upstream intake reference。
+- 任何未来吸收到 MAS 的能力都必须在 MAS 侧记录 source ref/hash、capability classification、MAS owner、authority boundary、parity proof、tests 和 no-history contributor audit。
+
 ## Runtime 协议
 
-- `docs/policies/runtime_protocol.md` 是 `MedAutoScience -> MedDeepScientist` 的稳定协议入口。
-- 未被该协议显式列出的 surface，不得默认视为稳定 adapter contract。
+- `docs/policies/runtime_protocol.md` 是本仓 fork-local legacy diagnostic / behavior fixture 的稳定协议入口。
+- 未被该协议显式列出的 surface，不得默认视为 stable diagnostic fixture 或 MAS intake reference。
 
 ## Quest durable surface
 

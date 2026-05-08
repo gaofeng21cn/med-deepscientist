@@ -49,7 +49,7 @@
 
 ## 当前边界提醒
 
-`MedDeepScientist` 是 `MedAutoScience` 控制下的 runtime/backend companion，承担 controlled backend、behavior oracle 和 upstream intake buffer 职责。它不是 OPL 默认 active domain agent，也不是独立医学研究产品入口。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、parity oracle 或 intake 参考；只有写入 `docs/policies/runtime_protocol.md` 并带 targeted regression 后，才能成为 MAS 默认可消费 runtime contract。
+`MedDeepScientist` 已不再是 `MedAutoScience` 的默认 runtime/backend 依赖。MAS functional monolith closeout 后，它只承担 frozen source archive、historical fixture、explicit legacy restore/import/backend-audit diagnostic 与 upstream intake reference 职责。它不是 OPL 默认 active domain agent，也不是独立医学研究产品入口；MAS 默认运行、诊断、进度、质量、artifact 和 Progress Portal 不应要求本仓 checkout、daemon、runtime root 或 WebUI。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、historical fixture、parity oracle 或 intake 参考；后续若要进入 MAS，必须通过 MAS 侧 source provenance、capability classification、parity proof、no-history author audit 和 MAS-owned implementation。
 
 `README*` 与 `docs/**` 是人读面。运行时 report、测试、脚本和 dashboard 可以使用 `human_doc:*` 语义 ID 指向人类可读上下文，但不应把 `docs/**/*.md` 路径当作稳定机读 contract、promotion gate 或兼容性约束。
 

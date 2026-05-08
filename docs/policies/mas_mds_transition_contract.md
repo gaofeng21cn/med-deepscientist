@@ -1,16 +1,17 @@
 # MAS/MDS 迁移收缩契约
 
-Status: `active contract`  
-Applies to: `MedAutoScience -> MedDeepScientist` transition boundary  
+Status: `archive/reference contract after MAS functional monolith`
+Applies to: `MedAutoScience -> MedDeepScientist` legacy diagnostic and upstream intake boundary
 Authority: `docs/policies/runtime_protocol.md`
 
 ## 1. 角色收缩
 
-`MedDeepScientist` 在 MAS 单项目演进线中的当前角色收缩为三类后端责任：
+`MedDeepScientist` 在 MAS 单项目演进线中的当前角色已经收缩为四类非默认责任：
 
-- controlled backend：只通过稳定 daemon API、quest durable layout、startup/turn contract 与 native runtime event surface 被 `MedAutoScience` 调用。
-- behavior oracle：保留 quest 生命周期、branch/worktree、artifact、memory、runtime liveness 与 runner dispatch 的可回归行为，作为 MAS 吸收能力时的 parity oracle。
-- upstream intake buffer：审计 upstream DeepScientist 变化，把确实增强 MAS runtime contract 的改动吸收到 MDS；其余变化保持在 intake 记录或 oracle 参考层。
+- frozen source archive：保留 source、license/provenance、snapshot 与 attribution 背景。
+- historical fixture：保留 quest 生命周期、branch/worktree、artifact、memory、runtime liveness 与 runner dispatch 的可回归行为，作为 MAS 吸收能力时的 parity fixture。
+- explicit legacy diagnostic：只在用户或维护者显式请求 legacy restore/import/backend-audit 时读取本仓语义。
+- upstream intake reference：审计 upstream DeepScientist 变化，把确实增强 MAS 的方法或能力记录为 intake reference；真正进入 MAS 时必须由 MAS-owned/no-history implementation 承接。
 
 这些角色不产生新的产品入口，也不把医学研究 owner 权限迁回 MDS。
 

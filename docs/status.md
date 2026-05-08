@@ -2,8 +2,8 @@
 
 ## 当前定位
 
-- 仓库角色：`MedAutoScience` 的稳定 runtime substrate，当前通过受控 fork 形态维护
-- MAS/MDS 迁移收缩角色：`controlled backend`、`behavior oracle`、`upstream intake buffer`
+- 仓库角色：`MedAutoScience` 旧 MAS/MDS 分层后的 frozen source archive、historical fixture、explicit legacy diagnostic target 与 upstream intake reference
+- MAS/MDS functional monolith 后角色：不再是 MAS 默认 runtime backend、default diagnostic dependency、WebUI dependency 或独立 product entry
 - 论文质量边界：MDS `paper_contract_health` 是 `backend_preflight`，coverage 是 `mechanical_oracle`；existing draft、coverage complete、contract ok 不能越权成为 MAS medical manuscript quality ready
 - 当前开发口径：收紧 runtime protocol、收窄 adapter 依赖、谨慎吸收 upstream
 - 长线方向：把 runtime surface 收敛成 family 级稳定合同，repo 边界保持可演进
@@ -11,7 +11,7 @@
 - 当前 opt-in proof lane：显式 `executor_kind = hermes_native_proof` 时，可路由到 `HermesNativeProofRunner -> run_agent.AIAgent.run_conversation`；它只接受真实 full agent loop proof，不接受 chat-only relay
 - 当前 `claude` / `opencode` 只保留为 reserved experimental runner ids；当前 release 只维护 config / doc / test contract，不开放真实 runner 产品面
 - OMX 状态：已退场，仅允许历史残留
-- 用户入口边界：医学研究任务继续从 `MedAutoScience` 进入；MDS 只承担 runtime substrate / compatibility surface，不成为独立医学研究产品入口。
+- 用户入口边界：医学研究任务继续从 `MedAutoScience` 进入；MDS 只承担 archive / fixture / explicit diagnostic / intake reference，不成为独立医学研究产品入口。
 
 ## 当前主线
 
@@ -24,9 +24,9 @@
 - DeepXiv authoring 继续停留在 Settings surface；当前支持 `base_url`、直接 token、`token_env` env-only lookup，不挂进 Start Research，也不升级为 MAS 默认可消费 surface
 - Launcher 管理本地 daemon 的 `health / shutdown / status / restart` HTTP 调用使用 Node core `http/https`，避免 Node 25.x 全局 `fetch` / undici socket 行为影响本机 daemon 管理入口。
 
-## 当前执行链
+## Fork-local execution chain
 
-- `MedAutoScience` 通过稳定 runtime protocol 驱动 `MedDeepScientist`
+- MAS default execution no longer drives this repo. When a maintainer explicitly runs this fork for legacy diagnostic, historical fixture, or upstream intake work, the fork-local chain is:
 - `src/deepscientist/daemon/api/handlers.py` 会构造 `RunRequest`
 - 默认 runner 是 `src/deepscientist/runners/codex.py::CodexRunner`
 - `CodexRunner._build_command()` 负责组装真实的 `codex exec` 命令
@@ -53,13 +53,13 @@
 
 ## 当前优先事项
 
-1. 保持 `MedAutoScience -> MedDeepScientist` 兼容性清晰且可验证。
-2. 按 `controlled backend / behavior oracle / upstream intake buffer` 收缩 MDS 角色，避免把 MDS 扩成第二个 MAS product owner。
+1. 保持 `MedAutoScience` functional monolith 与 MDS archive/reference 边界清晰且可验证。
+2. 按 `frozen source archive / historical fixture / explicit legacy diagnostic / upstream intake reference` 收缩 MDS 角色，避免把 MDS 扩成第二个 MAS product owner 或 default runtime dependency。
 3. 保持 paper health / coverage / prompt skill 只消费结构化 authority 字段；MAS AI preflight、prose review、publication_eval 才能驱动医学论文质量 readiness。
 4. 减少 quest layout、prompt/skill、daemon API 上的隐式耦合。
 5. 保持根级 docs、公开用户文档与真实执行链同步，不把 repo-local 模型 pin 写回 family 默认 truth。
 6. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
-7. 让 README、docs index、status/project 文档对齐“runtime substrate + 协议收敛 + 可演进 repo 边界”的当前定位。
+7. 让 README、docs index、status/project 文档对齐“archive/reference + explicit diagnostic + upstream intake”的当前定位。
 8. 保持 repo hygiene / line-budget guard 生效：tracked local/runtime state 由 `scripts/audit_repo_hygiene.py` 拦截，现有超长 legacy source/test 文件先以 baseline 管住增长；资源重复与 UI/branding/source-truth follow-up 记录在 `docs/references/resource_source_truth_audit.md`，不在 hygiene lane 内移动资源。
 
 ## 默认验证

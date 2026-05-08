@@ -1,91 +1,78 @@
 # MedDeepScientist
 
-MedDeepScientist (`med-deepscientist` repo) is the stable runtime substrate that `MedAutoScience` uses for long-running autonomous medical research execution.
+MedDeepScientist (`med-deepscientist` repo) is no longer the default runtime dependency for `MedAutoScience`.
 
-The repository started from a controlled DeepScientist fork. Today it serves a broader and clearer role: it is the audited runtime surface where we preserve durable quest execution, tighten the `MedAutoScience -> MedDeepScientist` contract, and selectively absorb upstream improvements that carry clear runtime value.
+The repository started from a controlled DeepScientist fork. After the 2026-05-08 MAS functional monolith closeout, its current role is frozen source archive, historical fixture, explicit legacy diagnostic target, and upstream intake reference. MAS default study operation, status/progress/cockpit, diagnostics, artifact/quality parity, Progress Portal, and OPL handoff are now owned by `med-autoscience` and must not require this checkout, daemon, runtime root, or WebUI.
 
-The long-line target is a family runtime surface with lower compatibility cost, clearer ownership boundaries, and less adapter debt. This repository remains the current delivery vehicle for that work.
+This repo remains useful when maintainers need source provenance, behavior fixture comparison, legacy restore/import diagnostics, or a fresh upstream DeepScientist intake review.
 
 ## What It Is Now
 
 MedDeepScientist currently carries four responsibilities:
 
-- provide the stable quest / daemon / durable workspace runtime that `MedAutoScience` depends on
-- preserve the long-horizon execution loop inherited from DeepScientist
-- narrow the runtime protocol and document it as an explicit compatibility contract
-- absorb useful upstream changes through audited intake, focused regression, and fast closeout
+- preserve the frozen MDS source snapshot and attribution/license context
+- provide historical quest / daemon / durable workspace behavior fixtures
+- support explicit legacy restore/import or backend-audit diagnostics when requested
+- absorb or document useful upstream changes only as MAS source intake/reference material
 
 ## Why It Exists
 
-Upstream DeepScientist moves quickly across prompts, skills, workflows, connectors, and product surfaces. `MedAutoScience` needs a steadier runtime seam so medical workspaces can keep running without paying a migration cost every time the upstream product shifts.
+Upstream DeepScientist moves quickly across prompts, skills, workflows, connectors, and product surfaces. `MedAutoScience` now owns the default runtime, progress, quality, artifact, and diagnostic surfaces in one monolith; this repo remains the controlled place to inspect or compare upstream-derived behavior without bringing upstream history or contributor footprint into MAS.
 
 MedDeepScientist gives the stack a place to:
 
-- keep runtime truth durable and inspectable
-- retire implicit adapter assumptions with tests and policy docs
-- preserve useful upstream capabilities without sweeping in broad product churn
-- make every absorbed change auditable and reversible
+- keep the frozen source and legacy behavior inspectable
+- run explicit diagnostic checks against old MDS semantics when needed
+- preserve useful upstream lessons without sweeping in broad product churn
+- make every future source intake auditable and reversible
 
 ## Stack Relationship
 
 - `DeepScientist`: upstream capability source
-- `MedDeepScientist`: runtime substrate and audited intake surface
-- `MedAutoScience`: orchestration, policy, controller, and medical entrypoint
+- `MedDeepScientist`: frozen source archive, historical fixture, legacy diagnostic target, and audited intake reference
+- `MedAutoScience`: default monolith for runtime, orchestration, policy, controller, progress, quality, artifact, and medical entrypoint
 
-Medical users should enter through `MedAutoScience`. This repository is the runtime and compatibility layer underneath.
+Medical users should enter through `MedAutoScience`. This repository is not the default runtime layer underneath MAS.
 
 ```text
 human / automation
         ->
 MedAutoScience
         ->
-runtime protocol / runtime transport
+MAS Runtime OS / Artifact OS / Quality OS
         ->
-MedDeepScientist
-        ->
-quest runtime / daemon / worktrees / artifact surfaces
+optional legacy diagnostic / historical fixture reference
 ```
 
 ## Current Execution Truth
 
-The current default execution chain is:
+The current MAS default execution truth is in `med-autoscience`: `mas_runtime_core` implements the controller-facing runtime backend contract and records MAS-owned local runtime state/events. It does not start the MDS daemon.
 
-`daemon API -> RunRequest -> CodexRunner -> codex exec autonomous agent loop`
-
-Current runtime facts:
-
-- default runner: `codex`
-- default model / reasoning: inherit from the local Codex configuration
-- opt-in proof lane: `hermes_native_proof`
-- reserved experimental runner ids: `claude`, `opencode`
-- stable compatibility spec: [`docs/policies/runtime_protocol.md`](docs/policies/runtime_protocol.md)
-
-This means the repo tracks a stable runtime contract first, then selected execution surfaces that fit that contract.
+This repository can still run its own fork-local daemon and UI for maintenance or legacy inspection, but that is no longer MAS default operation or diagnostic truth.
 
 ## What This Repo Owns
 
 The repository is responsible for keeping these surfaces explicit and auditable:
 
 - runtime identity and fork metadata
-- daemon API shape used by `MedAutoScience`
-- quest layout and durable workspace layout
-- runtime-owned artifact truth
-- runner metadata and executor contract boundaries
+- legacy daemon API shape and behavior fixtures
+- legacy quest layout and durable workspace layout fixtures
+- source provenance, license, and upstream intake records
 - controlled upstream intake workflow
 
 ## Long-Line Direction
 
-The long-line target is more specific than “keep a frozen fork alive”.
+The long-line target is specific: keep this repo as a frozen/reference lane unless a future source intake produces a bounded MAS-owned capability.
 
 We are converging toward:
 
-- a narrow and explicit family runtime protocol
-- fewer repo-local adapter assumptions in `MedAutoScience`
-- clearer ownership split: runtime truth stays here, orchestration and product behavior live higher in the stack
-- compatibility shells that can retire on evidence instead of guesswork
-- a flexible repo boundary: this repository can remain the audited runtime surface, or later fold into a family mainline when that creates a cleaner operational model
+- no MAS default dependency on this checkout, daemon, runtime root, or WebUI
+- explicit source provenance and behavior fixture references
+- no upstream DeepScientist contributor history imported into `med-autoscience`
+- future upstream intake flowing into MAS only through no-history, MAS-authored capability proof
+- compatibility shells that retire on evidence instead of guesswork
 
-The engineering goal is steady contract convergence, lower maintenance cost, and selective capability absorption.
+The engineering goal is lower maintenance cost, clear provenance, and selective MAS-owned capability absorption.
 
 ## Upstream Intake
 
@@ -142,7 +129,7 @@ These names stay in place while the runtime contract and family entrypoints cont
 
 Start from `MedAutoScience`.
 
-MedDeepScientist is the runtime substrate and maintainer-facing compatibility surface under it.
+MedDeepScientist is a maintainer-facing archive / diagnostic / upstream intake reference.
 
 ## License and Attribution
 

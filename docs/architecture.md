@@ -2,8 +2,9 @@
 
 ## 主链路
 
-`MedAutoScience` 通过稳定 runtime protocol 驱动 `MedDeepScientist`。
-这里的关键链路不是“聊天应用 -> agent”，而是：
+历史上 `MedAutoScience` 通过稳定 runtime protocol 驱动 `MedDeepScientist`。MAS functional monolith closeout 后，默认 MAS 运行链路已迁到 `med-autoscience` 的 MAS Runtime OS；本仓保留的是旧 runtime behavior fixture、legacy diagnostic target 与 upstream intake reference。
+
+本仓内部仍可用的 fork-local 链路不是“MAS 默认运行链路”，而是维护者做 legacy inspection / diagnostic / intake 时的链路：
 
 `controller / adapter -> daemon API -> quest runtime -> durable quest/worktree layout -> artifact surfaces`
 
@@ -13,9 +14,9 @@
 
 ## MAS/MDS 迁移边界
 
-当前 MDS 在 MAS 单项目演进线中只承担 `controlled backend`、`behavior oracle`、`upstream intake buffer` 三类职责。MAS owner 消费的是 `docs/policies/runtime_protocol.md` 中列出的 stable runtime surface；MDS 额外保留的 prompt/skill、UI/TUI、BenchStore、DeepXiv、experimental runner 或 upstream 行为，只能作为 parity/oracle 或 intake 参考，不能默认升级为 MAS product contract。
+当前 MDS 在 MAS 单项目演进线中只承担 `frozen source archive`、`historical fixture`、`explicit legacy diagnostic`、`upstream intake reference` 四类职责。MAS owner 不再把本仓 checkout、daemon、runtime root 或 WebUI 当作默认可消费 runtime dependency；MDS 额外保留的 prompt/skill、UI/TUI、BenchStore、DeepXiv、experimental runner 或 upstream 行为，只能作为 parity/oracle 或 intake 参考，不能默认升级为 MAS product contract。
 
-稳定收缩契约见 `docs/policies/mas_mds_transition_contract.md`。该契约不触发 physical migration，不新增产品入口，也不把医学研究设计、publication gate、submission authority 从 MAS 下沉到 MDS。
+稳定收缩契约见 `docs/policies/mas_mds_transition_contract.md`。该契约不新增产品入口，也不把医学研究设计、publication gate、submission authority、runtime truth、artifact truth 或用户可见进度从 MAS 下沉到 MDS。
 
 MDS 侧的 `strangler_registry` 是 runtime/substrate 防回流 guard：它把 MDS surface 显式投影到 `retain backend`、`oracle only`、`promote runtime protocol`、`MAS-owned or absorbed` 四档，并对 MAS owner authority 做 fail-closed 检查。它不是新的 MAS 产品入口，也不授权 MDS 生成 publication readiness、submission authority、医学研究设计、医学证据解释或用户可见研究进度。
 
@@ -86,7 +87,7 @@ MDS 侧的 `strangler_registry` 是 runtime/substrate 防回流 guard：它把 M
 - MAS/MDS 迁移收缩以 `docs/policies/mas_mds_transition_contract.md` 为边界说明，但 stable runtime authority 仍以 runtime protocol 为准。
 - Quest 仍遵循“一题一仓”的 durable layout。
 - `quest.yaml`、`brief.md`、`plan.md`、`status.md`、`SUMMARY.md` 属于稳定 durable surface。
-- `MedAutoScience` 依赖的是协议与 durable surface，不是 prompt 细节或 UI 呈现细节。
+- `MedAutoScience` 默认不依赖本仓协议、daemon、runtime root 或 UI；后续仅在 explicit diagnostic / historical fixture / upstream intake 场景引用本仓 durable surface。
 - `paper_contract_health` 与 coverage 字段只能作为 controlled backend / mechanical oracle 输入，不能成为第二套 paper-quality authority。
 - 当前最底层 AI 调用装配面是 `CodexRunner._build_command()`，不是 daemon API body 里的 repo-local 模型 pin。
 - 默认 `model = "inherit"` 与空的 `model_reasoning_effort` 表示跟随本机 `Codex` 默认配置；只有显式 override 才会改变这一点。

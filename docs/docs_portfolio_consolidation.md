@@ -2,9 +2,9 @@
 
 ## Current Truth
 
-`MedDeepScientist` is the MAS-controlled runtime/backend companion for long-running quest execution, runtime compatibility, behavior-oracle checks, and audited upstream intake.
+`MedDeepScientist` is the frozen source archive, historical fixture, explicit legacy diagnostic target, and audited upstream intake reference for the former MAS/MDS split.
 
-It is not an OPL default active domain agent, and it is not the default medical research product entry. Medical study intake, publication readiness, submission authority, medical evidence interpretation, and user-visible study progress remain owned by `MedAutoScience`.
+It is not an OPL default active domain agent, not the default MAS runtime backend, and not the default medical research product entry. Medical study intake, runtime status/progress, publication readiness, submission authority, medical evidence interpretation, artifact truth, and user-visible study progress are owned by `MedAutoScience`.
 
 ## Portfolio Tiers
 
@@ -14,7 +14,7 @@ It is not an OPL default active domain agent, and it is not the default medical 
 - History: `docs/history/`, including completed intake rounds and retired process records.
 - User-facing guide corpus: `docs/en/` and `docs/zh/`, inherited from upstream-facing documentation and kept for operator/user workflows.
 
-Repo-specific MAS/MDS transition truth belongs in core, policies, and references. The bilingual `docs/en/` and `docs/zh/` trees may mention current runtime behavior, but they do not define MAS/MDS ownership or promotion authority.
+Repo-specific MAS/MDS transition truth belongs in core, policies, and references. The bilingual `docs/en/` and `docs/zh/` trees preserve fork-local user/operator guide corpus, but they do not define MAS/MDS ownership, MAS default runtime dependency, or promotion authority.
 
 ## Root Docs Governance Allowlist
 

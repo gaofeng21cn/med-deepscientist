@@ -2,22 +2,22 @@
 
 ## 项目是什么
 
-`MedDeepScientist` 是面向 `MedAutoScience` 的稳定 runtime substrate。
-当前它仍以受控 DeepScientist fork 的形态维护，同时承担 runtime contract 收敛、上游 intake 审计、以及 durable execution truth 维护。
-它不是独立医学研究产品入口，也不持有 MAS 的研究设计、publication readiness、submission authority 或用户可见进度 owner。
+`MedDeepScientist` 是 `MedAutoScience` 旧 MAS/MDS 分层后的 frozen source archive、historical fixture、explicit legacy diagnostic target 与 upstream intake reference。
+当前它仍以受控 DeepScientist fork 的形态维护，但不再是 MAS 默认 runtime substrate，也不承担 MAS 默认 operation、diagnostic、progress、quality、artifact 或 WebUI 依赖。
+它不是独立医学研究产品入口，也不持有 MAS 的研究设计、publication readiness、submission authority、runtime truth、artifact truth 或用户可见进度 owner。
 
 ## 项目目标
 
-- 为 `MedAutoScience` 提供稳定的 quest / daemon / durable workspace runtime。
-- 把 `MedAutoScience` 真实依赖的 runtime surface 压缩成清晰、可验证的最小协议。
-- 在不破坏下游兼容性的前提下，持续吸收有价值的 upstream 变化。
+- 保存旧 MDS source、license/provenance、quest / daemon / durable workspace behavior fixture。
+- 支持显式 legacy restore/import/backend-audit diagnostic。
+- 在不污染 MAS default-branch contributor footprint 的前提下，为 MAS 后续 upstream intake 提供审计参考。
 
 ## 长线目标
 
-- 把 `MedDeepScientist` 收敛成 family 级稳定 runtime surface。
-- 让 product entry、controller、policy 与 medical orchestration 继续上移到 `MedAutoScience`。
+- 保持 MDS repo 作为 archive/reference lane，而不是 MAS 默认运行 lane。
+- 让 product entry、controller、policy、medical orchestration、runtime status、progress portal、artifact 和 quality surfaces 保持在 `MedAutoScience`。
 - 让兼容壳在有证据的前提下逐步退役。
-- 让 repo 边界保持可演进：继续独立维护或后续吸收到 family mainline，取决于哪种形态更利于协议清晰和运维收口。
+- 后续 upstream intake 只能通过 source ref/hash、capability classification、MAS owner、parity proof 和 no-history MAS-authored implementation 进入 MAS。
 
 ## 非目标
 
