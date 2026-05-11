@@ -11,6 +11,18 @@ This docs index is for the archive / diagnostic / intake repository itself. Medi
 - how upstream `DeepScientist` changes are reviewed safely
 - which inherited runtime behaviors are retained only for maintenance, parity, or intake reference
 
+## Corpus Boundary
+
+`docs/en/` is an upstream/user-facing guide corpus for fork-local operator workflows. It can explain inherited `DeepScientist` behavior, compatibility names, maintenance commands, and legacy diagnostic surfaces, but it does not define MAS owner truth, MAS default runtime dependency, MAS product entry semantics, publication authority, artifact authority, or user-visible study progress.
+
+Use these owner surfaces instead:
+
+- MAS owner truth and medical product entry semantics: `MedAutoScience`
+- MDS archive/reference boundary: [Project Overview](../project.md), [Current Status](../status.md), and [Architecture](../architecture.md)
+- Stable legacy diagnostic protocol: [Stable Runtime Protocol](../policies/runtime_protocol.md)
+- MAS/MDS boundary contraction: [MAS/MDS Transition Contract](../policies/mas_mds_transition_contract.md)
+- Upstream intake procedure: [Upstream Intake Guide](../references/upstream_intake.md)
+
 Compatibility names currently remain:
 
 - Python package: `deepscientist`
