@@ -5,6 +5,7 @@
 `MedDeepScientist` 是 `MedAutoScience` 旧 MAS/MDS 分层后的 frozen source archive、historical fixture、explicit legacy diagnostic target 与 upstream intake reference。
 当前它仍以受控 DeepScientist fork 的形态维护，但不再是 MAS 默认 runtime substrate，也不承担 MAS 默认 operation、diagnostic、progress、quality、artifact 或 WebUI 依赖。
 它不是独立医学研究产品入口，也不持有 MAS 的研究设计、publication readiness、submission authority、runtime truth、artifact truth 或用户可见进度 owner。
+在 OPL Codex-first、stage-led family framework 中，MDS 也不作为 active domain agent 或 stage adapter 进入当前 family runtime；它只可被 MAS 显式引用为 backend audit、source provenance、historical fixture、explicit archive import、upstream intake 或 parity oracle。
 
 ## 项目目标
 
@@ -16,6 +17,7 @@
 
 - 保持 MDS repo 作为 archive/reference lane，而不是 MAS 默认运行 lane。
 - 让 product entry、controller、policy、medical orchestration、runtime status、progress portal、artifact 和 quality surfaces 保持在 `MedAutoScience`。
+- 不跟进 OPL 当前 MAS/MAG/RCA shared release pin 作为 active adapter 要求；MDS 的较早 shared pin 只服务 legacy diagnostic / archive reference。
 - 让兼容壳在有证据的前提下逐步退役。
 - 后续 upstream intake 只能通过 source ref/hash、capability classification、MAS owner、parity proof 和 no-history MAS-authored implementation 进入 MAS。
 

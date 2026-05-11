@@ -12,6 +12,9 @@
 - 当前 `claude` / `opencode` 只保留为 reserved experimental runner ids；当前 release 只维护 config / doc / test contract，不开放真实 runner 产品面
 - OMX 状态：已退场，仅允许历史残留
 - 用户入口边界：医学研究任务继续从 `MedAutoScience` 进入；MDS 只承担 archive / fixture / explicit diagnostic / intake reference，不成为独立医学研究产品入口。
+- OPL stage-led 对齐边界：MDS 不是 OPL 当前 active domain agent，也不是 MAS/MAG/RCA 同级的 admitted stage adapter；它不需要跟进当前 OPL `family_action_catalog` / `family_stage_control_plane` / provider-backed attempt lifecycle。仓内较早的 `opl-harness-shared` pin 只保留为 legacy diagnostic / archive reference 语义，不代表 MDS 参与当前 OPL family shared release。
+- OPL framework 总入口：涉及 OPL stage-led framework、Temporal provider、执行语言和跨仓旧面退役的判断，先读 `/Users/gaofeng/workspace/one-person-lab/docs/references/runtime-substrate/opl-stage-led-agent-framework-roadmap.zh-CN.md`。MDS 本仓只负责 archive/reference/diagnostic/upstream-intake，不承接 OPL active provider 或 stage adapter 实现。
+- 旧面退役状态：MDS 的 daemon、WebUI、quest layout、connector docs、`ds` launcher、`~/DeepScientist` runtime home、fork-local runner 和兼容 namespace 仍作为本仓 archive / diagnostic / fixture surface 存在，但它们已经退出 MAS 默认运行、OPL 默认安装、医学研究 product entry 与 publication quality authority。后续只在 MAS 已有 source provenance、behavior fixture、explicit restore/import 或 upstream intake 替代面后，才做物理删除；删除前不得把这些兼容面重新提升成默认路径。
 
 ## 当前主线
 
