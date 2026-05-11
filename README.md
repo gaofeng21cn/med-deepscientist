@@ -112,6 +112,7 @@ These names stay in place while the runtime contract and family entrypoints cont
 
 ## Documentation
 
+- [中文 README](README.zh-CN.md)
 - [Docs index](docs/README.md)
 - [Project overview](docs/project.md)
 - [Current status](docs/status.md)

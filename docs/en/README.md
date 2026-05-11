@@ -1,15 +1,15 @@
 # MedDeepScientist Docs
 
-MedDeepScientist (`med-deepscientist` repo) is the stable runtime substrate that `MedAutoScience` uses as its execution engine.
+MedDeepScientist (`med-deepscientist` repo) is no longer the default runtime substrate for `MedAutoScience`.
 
-This repository began as a controlled runtime fork and now serves a clearer long-line role: it preserves a known-good execution seam, narrows the runtime contract, and absorbs selected upstream improvements through audited intake so `MedAutoScience` can keep moving without repeated compatibility churn.
+This repository began as a controlled runtime fork and now serves a narrower role: frozen source archive, historical fixture, explicit legacy diagnostic target, and audited upstream intake reference. `MedAutoScience` owns the default runtime, progress, quality, artifact, and medical product entry surfaces after the MAS functional monolith closeout.
 
-This docs index is for the runtime repository itself. Most medical users should start from `MedAutoScience`. This repository matters when you need to understand:
+This docs index is for the archive / diagnostic / intake repository itself. Medical users should start from `MedAutoScience`. This repository matters when maintainers need to understand:
 
-- why the runtime is forked
-- what compatibility contract the fork preserves
-- how upstream `DeepScientist` changes are absorbed safely
-- how the inherited runtime still works underneath
+- why the old runtime fork is still inspectable
+- what legacy diagnostic and behavior-fixture boundaries remain
+- how upstream `DeepScientist` changes are reviewed safely
+- which inherited runtime behaviors are retained only for maintenance, parity, or intake reference
 
 Compatibility names currently remain:
 
@@ -20,7 +20,7 @@ Compatibility names currently remain:
 ## Start Here
 
 - [Stable Runtime Protocol](../policies/runtime_protocol.md)
-  The authoritative minimal protocol that `MedAutoScience` depends on.
+  The authoritative fork-local protocol for legacy diagnostic and behavior-fixture work.
 - [Repository README](../../README.md)
   Project positioning, fork rationale, architecture, and compatibility policy.
 - [Fork Baseline](../references/medical_fork_baseline.md)
@@ -49,7 +49,7 @@ Compatibility names currently remain:
 
 ## Inherited Runtime Surfaces
 
-These documents still describe the underlying runtime behavior that this fork currently preserves:
+These documents still describe fork-local runtime behavior preserved for maintenance and legacy inspection:
 
 - [05 TUI Guide](./05_TUI_GUIDE.md)
 - [06 Runtime and Canvas](./06_RUNTIME_AND_CANVAS.md)
@@ -77,4 +77,4 @@ These documents still describe the underlying runtime behavior that this fork cu
 
 This repository stays narrower than upstream `DeepScientist`.
 
-Its role is stable runtime guardianship, contract convergence, and audited capability intake. The long-line target is a family runtime surface with lower adapter cost and clearer ownership boundaries, while `MedAutoScience` continues to own orchestration and medical product entry.
+Its role is archive/reference guardianship, legacy diagnostic clarity, and audited capability intake. It is not an active OPL domain agent, not a MAS default dependency, and not the medical research product entry. OPL's current Codex-first, stage-led framework work only treats this repo as a MAS-declared optional provenance, oracle, or intake reference.

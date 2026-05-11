@@ -15,8 +15,8 @@
 - quest_layout_preserved: `true`
 - worktree_layout_preserved: `true`
 
-MedDeepScientist (`med-deepscientist` 仓库) is a controlled fork used as the stable runtime layer under `MedAutoScience`.
-It exists to preserve long-running quest execution, daemon compatibility, and auditable runtime behavior while upstream `DeepScientist` continues to evolve on its own cadence.
+MedDeepScientist (`med-deepscientist` 仓库) is a controlled fork kept as frozen source archive, historical behavior fixture, explicit legacy diagnostic target, and upstream intake reference after MAS functional monolith closeout.
+It exists to preserve long-running quest execution, daemon compatibility, auditable runtime behavior, and source provenance while upstream `DeepScientist` continues to evolve on its own cadence. It is not the MAS default runtime layer and should not be treated as an OPL active domain agent or default dependency.
 
 Remote semantics are explicit:
 
@@ -199,4 +199,4 @@ Remote semantics are explicit:
 
 ## Intake Policy
 
-Future upstream absorption must follow the controlled intake procedure documented in [`docs/references/upstream_intake.md`](./upstream_intake.md).
+Future upstream absorption must follow the controlled intake procedure documented in [`docs/references/upstream_intake.md`](./upstream_intake.md). Any capability meant for current MAS behavior must be re-owned by MAS through source provenance, capability classification, parity proof, tests, and no-history MAS-authored implementation.

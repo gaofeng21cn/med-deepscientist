@@ -15,9 +15,9 @@
 3. [架构](architecture.md)
 4. [硬约束](invariants.md)
 5. [关键决策](decisions.md)
-6. [最小稳定 runtime protocol](policies/runtime_protocol.md)
-7. [MAS/MDS 迁移收缩契约](policies/mas_mds_transition_contract.md)
-8. [Docs portfolio consolidation](docs_portfolio_consolidation.md)
+6. [MAS/MDS 迁移收缩契约](policies/mas_mds_transition_contract.md)
+7. [Docs portfolio consolidation](docs_portfolio_consolidation.md)
+8. [最小稳定 runtime protocol](policies/runtime_protocol.md)
 9. [English docs index](en/README.md)
 10. [中文文档索引](zh/README.md)
 11. [Windows WSL2 deployment guide](en/22_WINDOWS_WSL2_DEPLOYMENT_GUIDE.md)
@@ -49,7 +49,7 @@
 
 ## 当前边界提醒
 
-`MedDeepScientist` 已不再是 `MedAutoScience` 的默认 runtime/backend 依赖。MAS functional monolith closeout 后，它只承担 frozen source archive、historical fixture、explicit legacy restore/import/backend-audit diagnostic 与 upstream intake reference 职责。它不是 OPL 默认 active domain agent，也不是独立医学研究产品入口；MAS 默认运行、诊断、进度、质量、artifact 和 Progress Portal 不应要求本仓 checkout、daemon、runtime root 或 WebUI。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、historical fixture、parity oracle 或 intake 参考；后续若要进入 MAS，必须通过 MAS 侧 source provenance、capability classification、parity proof、no-history author audit 和 MAS-owned implementation。
+`MedDeepScientist` 已不再是 `MedAutoScience` 的默认 runtime/backend 依赖。MAS functional monolith closeout 后，它只承担 frozen source archive、historical fixture、explicit legacy restore/import/backend-audit diagnostic 与 upstream intake reference 职责。它不是 OPL 默认 active domain agent、默认安装依赖或 stage adapter，也不是独立医学研究产品入口；OPL 的 Codex-first、stage-led framework 只会在 MAS 显式声明时把本仓作为 provenance、oracle 或 intake reference 消费。MAS 默认运行、诊断、进度、质量、artifact 和 Progress Portal 不应要求本仓 checkout、daemon、runtime root 或 WebUI。BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 和 upstream product docs 只能作为 fork-local capability、historical fixture、parity oracle 或 intake 参考；后续若要进入 MAS，必须通过 MAS 侧 source provenance、capability classification、parity proof、no-history author audit 和 MAS-owned implementation。
 
 `README*` 与 `docs/**` 是人读面。运行时 report、测试、脚本和 dashboard 可以使用 `human_doc:*` 语义 ID 指向人类可读上下文，但不应把 `docs/**/*.md` 路径当作稳定机读 contract、promotion gate 或兼容性约束。
 

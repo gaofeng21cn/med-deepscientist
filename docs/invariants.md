@@ -4,7 +4,8 @@
 
 - `MedDeepScientist` 不再是 `MedAutoScience` 默认 runtime backend、default diagnostic dependency、WebUI dependency 或医学研究产品入口。
 - 本仓只允许作为 frozen source archive、historical fixture、explicit legacy restore/import/backend-audit diagnostic target 与 upstream intake reference。
-- 本仓不得作为 OPL 默认安装依赖、active domain agent、family stage adapter 或 MAS/MAG/RCA 同级 product module 回流；OPL 当前 shared contract / provider-backed attempt lifecycle 只可把本仓当作 MAS-declared optional companion provenance / oracle / intake reference。
+- 本仓不得作为 OPL 默认安装依赖、active domain agent、family stage adapter、default runtime provider 或 MAS/MAG/RCA 同级 product module 回流；OPL 当前 shared contract / provider-backed attempt lifecycle 只可把本仓当作 MAS-declared optional companion provenance / oracle / intake reference。
+- `Codex CLI` 是 OPL stage attempt 的最小执行单元，但这不把 MDS 重新提升为 OPL 执行入口、默认 provider 或 MAS 默认依赖。
 - 任何未来吸收到 MAS 的能力都必须在 MAS 侧记录 source ref/hash、capability classification、MAS owner、authority boundary、parity proof、tests 和 no-history contributor audit。
 
 ## Runtime 协议

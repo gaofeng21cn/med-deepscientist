@@ -1,10 +1,10 @@
 # Upstream Intake Guide
 
-This document defines how MedDeepScientist (`med-deepscientist` 仓库) absorbs upstream `DeepScientist` changes without losing runtime stability for `MedAutoScience`.
+This document defines how MedDeepScientist (`med-deepscientist` 仓库) reviews upstream `DeepScientist` changes as archive/reference intake without reintroducing a default runtime dependency for `MedAutoScience`.
 
 ## Core Rule
 
-Upstream changes must enter through a dedicated intake worktree, pass fork-level regression and `MedAutoScience` compatibility regression, then be recorded in the medical fork audit surface before they can reach `main`.
+Upstream changes must enter through a dedicated intake worktree, pass fork-level regression, and be recorded in the medical fork audit surface before they can reach `main`. If a change is intended to affect current MAS behavior, it must also pass MAS-owned compatibility/provenance gates and land in MAS through a no-history MAS-authored implementation or explicit MAS contract update.
 
 This workflow exists to filter occasional upstream changes. It is not the primary development loop for this repository.
 
@@ -25,12 +25,12 @@ Do not overload `origin` to mean upstream. Controlled-fork auditing in `MedAutoS
 
 ## Why This Exists
 
-MedDeepScientist (`med-deepscientist` 仓库) is not a mirror. It is a controlled fork whose job is to stabilize execution truth while `MedAutoScience` converges runtime protocol and retires implicit adapter assumptions.
+MedDeepScientist (`med-deepscientist` 仓库) is not a mirror. It is a controlled fork whose current job is to preserve source provenance, historical behavior fixtures, explicit legacy diagnostics, and upstream intake lessons while `MedAutoScience` owns default runtime/product authority.
 
 That means upstream changes are only useful when they satisfy all of these:
 
-- they solve a real runtime problem we care about
-- they preserve the compatibility contract that `MedAutoScience` depends on
+- they solve a real legacy diagnostic, behavior fixture, or MAS intake-reference problem we care about
+- they preserve the archive/reference boundary and do not recreate a default MAS dependency
 - they leave a durable audit trail in this repository
 
 ## Intake Cadence
@@ -44,7 +44,7 @@ By default, upstream intake should happen only when at least one of these is tru
 - a specific upstream PR / commit bundle has already been identified as valuable
 - a local bug or migration blocker points to a bounded upstream fix worth absorbing
 
-When the maintainer says “学习一下 `DeepScientist` 的最新更新”, “看看 `DeepScientist` 最近更新有什么值得吸收”, or a similar periodic-learning phrase, treat it as an explicit upstream review round. The expected outcome is not a read-only summary: audit the fresh upstream delta, classify candidates, land bounded valuable slices in isolated worktrees, verify both fork-local and `MedAutoScience` contract surfaces, merge back to `main`, and clean temporary worktrees / branches.
+When the maintainer says “学习一下 `DeepScientist` 的最新更新”, “看看 `DeepScientist` 最近更新有什么值得吸收”, or a similar periodic-learning phrase, treat it as an explicit upstream review round. The expected outcome is not a read-only summary: audit the fresh upstream delta, classify candidates, land only bounded archive/diagnostic/intake-reference slices in isolated worktrees, verify fork-local surfaces, run MAS compatibility/provenance checks when MAS behavior is implicated, merge back to `main`, and clean temporary worktrees / branches.
 
 The `MedAutoScience` owner-side trigger protocol lives in:
 
@@ -54,9 +54,9 @@ Use that protocol to decide whether a change should become an `MDS` code slice, 
 
 The main delivery stream remains:
 
-- improving `MedAutoScience -> MedDeepScientist` compatibility
-- converging the runtime protocol and transport boundary
-- reducing adapter and layout coupling
+- preserving explicit legacy diagnostic and behavior fixture value
+- keeping the runtime protocol and transport boundary narrow for fork-local inspection
+- reducing adapter and layout coupling without restoring MDS as a MAS default dependency
 
 ## Intake Policy
 

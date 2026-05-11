@@ -4,7 +4,7 @@
 
 `MedDeepScientist` is the frozen source archive, historical fixture, explicit legacy diagnostic target, and audited upstream intake reference for the former MAS/MDS split.
 
-It is not an OPL default active domain agent, not the default MAS runtime backend, and not the default medical research product entry. Medical study intake, runtime status/progress, publication readiness, submission authority, medical evidence interpretation, artifact truth, and user-visible study progress are owned by `MedAutoScience`.
+It is not an OPL default active domain agent, not an OPL default dependency, not an OPL stage adapter, not the default MAS runtime backend, and not the default medical research product entry. Medical study intake, runtime status/progress, publication readiness, submission authority, medical evidence interpretation, artifact truth, and user-visible study progress are owned by `MedAutoScience`.
 
 ## Portfolio Tiers
 
@@ -36,3 +36,7 @@ The legacy root paths remain as human-readable compatibility pointers only. They
 ## Human And Machine Surfaces
 
 `README*` and `docs/**` are human-readable surfaces. Tests, runtime reports, schemas, dashboards, and controllers may point to them with human-context identifiers, but machine contracts must use structured surfaces, schemas, reports, or explicit policy IDs. They must not pin prose wording, Markdown section text, or `docs/**/*.md` paths as compatibility contracts.
+
+## Lifecycle Rule
+
+Classify documents by content, not by filename. Any guide that still describes MedDeepScientist as the MAS default runtime substrate must be read as upstream/user-facing guide corpus or historical diagnostic context unless a core truth document explicitly promotes it. Current public and maintainer entry points must say that MAS owns default runtime/product authority, OPL is the Codex-first stage-led framework with Codex CLI as the minimum execution unit, and this repo is archive/reference/diagnostic/intake only.

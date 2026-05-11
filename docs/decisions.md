@@ -1,5 +1,13 @@
 # MedDeepScientist 关键决策
 
+## 2026-05-11
+
+### 决策：MDS 对 OPL 新定位保持 archive/reference 边界
+
+- `OPL` 当前按 Codex-first、stage-led 的完整智能体运行框架理解，可作为外部依赖托管 active domain agent；`Codex CLI` 是 stage attempt 的最小执行单元。
+- `MedDeepScientist` 不进入 OPL active domain agent、默认安装依赖、stage adapter 或 default runtime provider 列表。
+- MAS 可以显式把 MDS 作为 backend audit、source provenance、historical fixture、explicit archive import、upstream intake 或 parity oracle reference；这不产生 MAS 默认 runtime dependency，也不产生新的医学研究 product entry。
+
 ## 2026-05-08
 
 ### 决策：MedDeepScientist 退为 MAS functional monolith 的 archive/reference lane

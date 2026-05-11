@@ -5,7 +5,7 @@
 `MedDeepScientist` 是 `MedAutoScience` 旧 MAS/MDS 分层后的 frozen source archive、historical fixture、explicit legacy diagnostic target 与 upstream intake reference。
 当前它仍以受控 DeepScientist fork 的形态维护，但不再是 MAS 默认 runtime substrate，也不承担 MAS 默认 operation、diagnostic、progress、quality、artifact 或 WebUI 依赖。
 它不是独立医学研究产品入口，也不持有 MAS 的研究设计、publication readiness、submission authority、runtime truth、artifact truth 或用户可见进度 owner。
-在 OPL Codex-first、stage-led family framework 中，MDS 也不作为 active domain agent 或 stage adapter 进入当前 family runtime；它只可被 MAS 显式引用为 backend audit、source provenance、historical fixture、explicit archive import、upstream intake 或 parity oracle。
+在 OPL Codex-first、stage-led 完整智能体运行框架中，MDS 也不作为 active domain agent、默认安装依赖或 stage adapter 进入当前 family runtime；`Codex CLI` 是 OPL stage attempt 的最小执行单元，但 MDS 当前不承接这条执行入口。它只可被 MAS 显式引用为 backend audit、source provenance、historical fixture、explicit archive import、upstream intake 或 parity oracle reference。
 
 ## 项目目标
 
@@ -26,6 +26,7 @@
 - 不做 upstream `DeepScientist` 的镜像同步分支。
 - 不把 prompt/skill 体系重新改造成新的产品主入口。
 - 不把 BenchStore、DeepXiv、UI/TUI、Hermes-native proof lane 或 upstream product docs 默认升级成 MAS-facing product contract。
+- 不把本仓改造成 OPL active domain agent、stage adapter、默认 runtime provider 或 MAS 默认依赖。
 - 不为了兼容旧入口放松已经明确的 runtime protocol。
 
 ## 默认入口
