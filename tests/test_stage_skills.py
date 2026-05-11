@@ -29,14 +29,6 @@ EXPECTED_COMPANION_SKILLS = {
     "rebuttal",
 }
 
-INTERACTION_CONTRACT_SKILLS = EXPECTED_STAGE_SKILLS | {
-    "paper-plot",
-    "intake-audit",
-    "review",
-    "rebuttal",
-}
-
-
 def test_src_stage_skills_exist_and_are_nontrivial() -> None:
     root = repo_root() / "src" / "skills"
     for skill_id in EXPECTED_STAGE_SKILLS:
@@ -117,45 +109,6 @@ def test_write_skill_venue_templates_exist_and_sync(temp_home: Path) -> None:
     assert (synced_root / "DEEPSCIENTIST_NOTES.md").exists()
     assert (synced_root / "iclr2026" / "iclr2026_conference.tex").exists()
     assert (synced_root / "acl" / "acl_latex.tex").exists()
-
-
-def test_idea_skill_requires_memory_first_literature_survey() -> None:
-    idea_skill = repo_root() / "src" / "skills" / "idea" / "SKILL.md"
-    text = idea_skill.read_text(encoding="utf-8")
-    assert "memory.search(...)" in text
-    assert "arXiv" in text
-    assert "artifact.arxiv(" in text
-    assert "literature survey report" in text
-    assert "at least `5` and usually `5-10`" in text
-    assert "task-modeling-related" in text
-    assert "Treat that literature floor as a hard gate" in text
-    assert "standard citation format" in text
-    assert "`References` or `Bibliography` section" in text
-
-    template = repo_root() / "src" / "skills" / "idea" / "references" / "literature-survey-template.md"
-    assert template.exists()
-    template_text = template.read_text(encoding="utf-8")
-    assert "hard floor of at least `5` and usually `5-10` usable papers" in template_text
-    assert "standard citation string or citation key" in template_text
-    assert "Citation-ready shortlist for the selected idea" in template_text
-
-    gate_template = repo_root() / "src" / "skills" / "idea" / "references" / "selection-gate.md"
-    gate_text = gate_template.read_text(encoding="utf-8")
-    assert "the literature survey must already durably cover at least `5` and usually `5-10` related and usable papers" in gate_text
-    assert "`references` or `bibliography` in a standard citation format" in gate_text
-
-
-def test_scout_skill_requires_memory_first_literature_report() -> None:
-    scout_skill = repo_root() / "src" / "skills" / "scout" / "SKILL.md"
-    text = scout_skill.read_text(encoding="utf-8")
-    assert "memory.search(...)" in text
-    assert "arXiv" in text
-    assert "artifact.arxiv(" in text
-    assert "literature scouting report" in text
-
-    template = repo_root() / "src" / "skills" / "scout" / "references" / "literature-scout-template.md"
-    assert template.exists()
-
 
 
 def test_global_skill_sync_is_disabled(temp_home: Path) -> None:
@@ -258,142 +211,27 @@ def test_skill_resync_refreshes_existing_worktree_skill_copies(temp_home: Path) 
     repaired = figure_skill.read_text(encoding="utf-8")
     assert "AutoFigure-Edit" not in repaired
     assert "src/skills/" not in repaired
-    assert "Do not append tooling disclosures" in repaired
-    assert "MedAutoScience-controlled programmatic drawing" in repaired
 
 
-def test_paper_reading_stage_skills_use_artifact_arxiv_and_legacy_skill_is_removed() -> None:
+def test_legacy_alpharxiv_skill_is_removed() -> None:
     root = repo_root() / "src" / "skills"
-    for skill_id in ("baseline", "scout", "idea", "write", "finalize"):
-        text = (root / skill_id / "SKILL.md").read_text(encoding="utf-8")
-        assert "artifact.arxiv(" in text
-        assert "alpharxiv-paper-loopup" not in text
 
     assert not (root / "alpharxiv-paper-loopup" / "SKILL.md").exists()
 
 
-def test_write_skill_requires_mas_medical_prose_blueprint_before_full_draft() -> None:
+def test_write_skill_keeps_medical_preflight_reference_assets_available() -> None:
     root = repo_root() / "src" / "skills" / "write"
-    text = (root / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "medical_prose_style_contract" in text
-    assert "medical_manuscript_blueprint" in text
-    assert "medical_journal_style_corpus" in text
-    assert "medical_prose_review_request.json" in text
-    assert "retrospective_medical_prose_audit" in text
-    assert "medical_prose_review" in text
-    assert "artifact.get_paper_contract_health(detail='full')" in text
-    assert "mas_medical_writing_preflight_ready=true" in text
-    assert "medical_quality_ready_from_mds=false" in text
-    assert "backend_preflight" in text
-    assert "Existing draft files, complete manuscript coverage, and `contract_ok=true`" in text
-    assert "paper/results_narrative_map.json" in text
-    assert "paper/claim_evidence_map.json" in text
-    assert "paper/figure_semantics_manifest.json" in text
-    assert "route-back plan only" in text
-    assert "run logs" in text
-    assert "controller checklists" in text
-    assert "packaging metadata" in text
-    assert "representative rewrites" in text
-    assert "subjective manuscript-style authority" in text
-    assert "NF-PitNET 003, DPCC 003" in text
-    assert "clinical problem -> evidence gap -> objective" in text
-    assert "clinical finding as the sentence subject" in text
-    assert "figure or table as the grammatical" in text
-    assert "subject of a Results finding sentence" in text
 
     reference = root / "references" / "medical-journal-prose.md"
     assert reference.exists()
-    reference_text = reference.read_text(encoding="utf-8")
-    assert "JAMA/NEJM/BMJ/Lancet-style original research voice" in reference_text
-    assert "AI-owned" in reference_text
-    assert "representative rewrites" in reference_text
-    assert "Zeiger" in reference_text
-    assert "Gopen and Swan" in reference_text
-    assert "old-to-new information flow" in reference_text
-    assert "unsupported no-difference" in reference_text
-    assert "Mechanical checks are safety rails" in reference_text
 
 
-def test_baseline_skill_documents_confirm_or_waive_gate() -> None:
-    text = (repo_root() / "src" / "skills" / "baseline" / "SKILL.md").read_text(encoding="utf-8")
-    assert "artifact.confirm_baseline(...)" in text
-    assert "artifact.waive_baseline(...)" in text
-    assert "do not open the downstream gate" in text
-    assert "requested_baseline_ref" in text
-    assert "default to reuse-and-verify" in text
-
-
-def test_baseline_skill_documents_uv_first_python_setup() -> None:
-    text = (repo_root() / "src" / "skills" / "baseline" / "SKILL.md").read_text(encoding="utf-8")
-    assert "environment setup should be standardized around `uv`" in text
-    assert "### Python environment rule: use `uv`" in text
-    assert "uv sync" in text
-    assert "uv venv" in text
-    assert "uv pip install" in text
-    assert "uv run python" in text
-    assert "only accept a non-`uv` route" in text
-
-
-def test_baseline_skill_has_compact_file_by_file_contract() -> None:
-    text = (repo_root() / "src" / "skills" / "baseline" / "SKILL.md").read_text(encoding="utf-8")
-    assert "## File-by-file contract" in text
-    assert "`PLAN.md` or compatibility alias `analysis_plan.md`" in text
-    assert "`CHECKLIST.md` or compatibility alias `REPRO_CHECKLIST.md`" in text
-    assert "`setup.md` is optional unless environment or layout choices are non-trivial" in text
-    assert "`execution.md` is optional unless the run is long, multi-step, or rerun-heavy" in text
-    assert "`verification.md` is optional as a filename but required in substance" in text
-    assert "`attachment.yaml` is required for attached or imported baselines" in text
-    assert "`<baseline_root>/json/metric_contract.json` is the canonical accepted comparison contract" in text
-
-
-def test_decision_skill_requires_reuse_baseline_to_land_on_attach_and_confirm() -> None:
-    text = (repo_root() / "src" / "skills" / "decision" / "SKILL.md").read_text(encoding="utf-8")
-    assert "artifact.attach_baseline(...)" in text
-    assert "artifact.confirm_baseline(...)" in text
-    assert "explicit blocker or waiver" in text
-
-
-def test_experiment_and_decision_skills_document_activate_branch_and_analysis_cost_gate() -> None:
-    experiment_text = (repo_root() / "src" / "skills" / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    decision_text = (repo_root() / "src" / "skills" / "decision" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "artifact.activate_branch(...)" in experiment_text
-    assert "clear academic or claim-level value" in experiment_text
-    assert "artifact.activate_branch(...)" in decision_text
-    assert "extra resource cost" in decision_text
-
-
-def test_decision_and_finalize_skills_document_checkpoint_memory_handoff() -> None:
+def test_checkpoint_memory_reference_files_exist() -> None:
     root = repo_root() / "src" / "skills"
-    decision_text = (root / "decision" / "SKILL.md").read_text(encoding="utf-8")
-    finalize_text = (root / "finalize" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "no new durable evidence" in decision_text
-    assert "what is genuinely new since the last route judgment" in decision_text
-    assert "references/checkpoint-memory-template.md" in decision_text
-    assert "checkpoint-style quest memory card" in decision_text
-    assert "continue-later / pause-ready" in finalize_text
-    assert "references/checkpoint-memory-template.md" in finalize_text
-    assert "stable stopping point and a clean resume path" in finalize_text
 
     assert (root / "decision" / "references" / "checkpoint-memory-template.md").exists()
     assert (root / "finalize" / "references" / "checkpoint-memory-template.md").exists()
-    resume_packet_text = (root / "finalize" / "references" / "resume-packet-template.md").read_text(encoding="utf-8")
-    assert "### 1A. Current node history" in resume_packet_text
-    assert "authoritative resume point" in resume_packet_text
-
-
-def test_write_and_finalize_skills_park_after_delivered_submission_package_milestone() -> None:
-    root = repo_root() / "src" / "skills"
-    write_text = (root / "write" / "SKILL.md").read_text(encoding="utf-8")
-    finalize_text = (root / "finalize" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "milestone review package has been delivered" in write_text
-    assert "do not continue auto-writing" in write_text
-    assert "external submission metadata or administrative handoff" in write_text
-    assert "pause-ready closure state" in finalize_text
-    assert "stop further automatic rebuilds or gate-refresh loops" in finalize_text
+    assert (root / "finalize" / "references" / "resume-packet-template.md").exists()
 
 
 def test_prompt_builder_skill_paths_only_reference_existing_files(temp_home: Path) -> None:
@@ -414,144 +252,31 @@ def test_prompt_builder_skill_paths_only_reference_existing_files(temp_home: Pat
     assert f"- finalize: primary={finalize_primary}" in prompt
 
 
-def test_shared_interaction_contract_covers_blocking_and_mailbox_rules() -> None:
-    text = (repo_root() / "src" / "prompts" / "contracts" / "shared_interaction.md").read_text(encoding="utf-8")
-    assert "1 to 3 concrete options" in text
-    assert "wait up to 1 day" in text
-    assert "missing external credential or secret" in text
-    assert "sleep 3600" in text
-    assert "sleep 1800" in text
-    assert "publication gate currently owns progression" in text
-    assert "highest-priority user instruction bundle" in text
-    assert "Immediately follow any non-empty mailbox poll" in text
-    assert "real user-visible progress" in text
-    assert "roughly 12 tool calls or about 8 minutes" in text
-    assert "first 3 tool calls of substantial work" in text
-    assert "5 consecutive tool calls on reading" in text or "5 consecutive tool calls on reading, searching" in text
-
-
-def test_stage_and_companion_skills_reference_shared_interaction_contract() -> None:
-    root = repo_root() / "src" / "skills"
-    for skill_id in INTERACTION_CONTRACT_SKILLS:
-        text = (root / skill_id / "SKILL.md").read_text(encoding="utf-8")
-        assert "Follow the shared interaction contract injected by the system prompt." in text
-
-
-def test_all_stage_skills_require_stage_start_memory_retrieval_and_stage_end_memory_write() -> None:
-    root = repo_root() / "src" / "skills"
-    for skill_id in ("scout", "baseline", "idea", "experiment", "analysis-campaign", "write", "finalize"):
-        text = (root / skill_id / "SKILL.md").read_text(encoding="utf-8")
-        assert "Stage-start requirement:" in text
-        assert "memory.list_recent(scope='quest', limit=5)" in text
-        assert "memory.search(...)" in text
-        assert "Stage-end requirement:" in text
-        assert "memory.write(...)" in text
-
-    baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
-    assert "fast-path exception:" in baseline_text
-
-
-def test_experiment_skill_requires_outcome_status_in_memory_writes() -> None:
-    text = (repo_root() / "src" / "skills" / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    assert "`success`, `partial`, or `failure`" in text
-    assert "`idea_id`, `branch`, and `run_id`" in text
-
-
-def test_long_running_skills_require_next_reply_time_reporting() -> None:
-    root = repo_root() / "src" / "skills"
-    experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "estimated next reply time" in experiment_text
-    assert "next_reply_at" in experiment_text
-    assert "estimated next reply time" in campaign_text
-
-
-def test_stage_skills_document_palette_requirements_for_connector_and_paper_outputs() -> None:
-    root = repo_root() / "src" / "skills"
-    experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
-    write_text = (root / "write" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "sage-clay" in experiment_text
-    assert "mist-stone" in experiment_text
-    assert "dust-rose" in experiment_text
-    assert "Connector-facing chart requirements" in experiment_text
-
-    assert "sage-clay" in campaign_text
-    assert "mist-stone" in campaign_text
-    assert "Connector-facing campaign chart requirements" in campaign_text
-
-    assert "mist-stone" in write_text
-    assert "sage-clay" in write_text
-    assert "Paper-figure requirements" in write_text
-    assert "#F3EEE8" in experiment_text
-    assert "#7F8F84" in campaign_text
-    assert "#B88C8C" in write_text
-    assert "system prompt" in experiment_text
-    assert "system prompt" in campaign_text
-    assert "system prompt Morandi plotting template" in write_text
-
-
-def test_write_skill_documents_reviewer_first_reader_first_contract_and_references() -> None:
+def test_write_skill_paper_reference_files_exist() -> None:
     root = repo_root() / "src" / "skills" / "write"
-    text = (root / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "reviewer-first pass" in text
-    assert "reader-centered" in text
-    assert "paper experiment matrix" in text
-    assert "paper/reviewer_first_pass.md" in text
-    assert "paper/section_contracts.md" in text
-    assert "paper/figure_storyboard.md" in text
-    assert "paper/related_work_map.md" in text
-    assert "paper/paper_experiment_matrix.md" in text
-    assert "paper/proofing/language_issues.md" in text
     assert (root / "references" / "paper-experiment-matrix-template.md").exists()
     assert (root / "references" / "reviewer-first-writing.md").exists()
     assert (root / "references" / "section-contracts.md").exists()
     assert (root / "references" / "sentence-level-proofing.md").exists()
 
 
-def test_experiment_and_analysis_references_cover_evidence_ladder_and_campaign_design() -> None:
+def test_experiment_and_analysis_reference_files_exist() -> None:
     root = repo_root() / "src" / "skills"
-    experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
 
-    assert "references/evidence-ladder.md" in experiment_text
-    assert "auxiliary/dev" in experiment_text
-    assert "main/test" in experiment_text
-    assert "minimum -> solid -> maximum" in experiment_text
     assert (root / "experiment" / "references" / "evidence-ladder.md").exists()
-
-    assert "references/campaign-design.md" in campaign_text
-    assert "claim-carrying" in campaign_text
-    assert "supporting" in campaign_text
     assert (root / "analysis-campaign" / "references" / "campaign-design.md").exists()
 
 
 def test_figure_polish_skill_requires_render_inspect_revise_workflow_and_style_asset() -> None:
-    text = (repo_root() / "src" / "skills" / "figure-polish" / "SKILL.md").read_text(encoding="utf-8")
     style_asset = repo_root() / "src" / "skills" / "figure-polish" / "assets" / "deepscientist-academic.mplstyle"
 
-    assert "render-inspect-revise" in text
-    assert "open the rendered file yourself" in text
-    assert "Do not treat a figure as final" in text
-    assert "main message obvious" in text
-    assert "color-vision-deficient" in text
-    assert "Do not append tooling disclosures" in text
-    assert "MedAutoScience-controlled programmatic drawing" in text
     assert style_asset.exists()
 
 
-def test_paper_plot_skill_requires_template_copy_and_figure_polish_handoff() -> None:
-    text = (repo_root() / "src" / "skills" / "paper-plot" / "SKILL.md").read_text(encoding="utf-8")
+def test_paper_plot_skill_agent_metadata_exists() -> None:
     openai_yaml = (repo_root() / "src" / "skills" / "paper-plot" / "agents" / "openai.yaml").read_text(encoding="utf-8")
 
-    assert "Trae1ounG/paper-plot-skills" in text
-    assert "Follow the shared interaction contract injected by the system prompt." in text
-    assert "keep the bundled template immutable" in text
-    assert "hand the result to `figure-polish`" in text
-    assert "bar, line, scatter, and radar" in text
     assert 'display_name: "Paper Plot"' in openai_yaml
 
 
@@ -569,66 +294,3 @@ def test_figure_polish_skill_and_synced_copy_stay_manuscript_safe(temp_home: Pat
         assert "https://deepscientist" not in text
         assert "src/skills/" not in text
         assert "src/prompts/system.md" not in text
-        assert "Do not append tooling disclosures" in text
-        assert "MedAutoScience-controlled programmatic drawing" in text
-
-
-def test_idea_skill_requires_review_of_prior_ideas_and_experiment_outcomes() -> None:
-    text = (repo_root() / "src" / "skills" / "idea" / "SKILL.md").read_text(encoding="utf-8")
-    assert "review prior quest idea records and experiment outcomes" in text
-    assert "reference material, not as the active idea contract" in text
-
-
-def test_stage_skills_document_new_branch_lineage_semantics() -> None:
-    idea_text = (repo_root() / "src" / "skills" / "idea" / "SKILL.md").read_text(encoding="utf-8")
-    experiment_text = (repo_root() / "src" / "skills" / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    decision_text = (repo_root() / "src" / "skills" / "decision" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "lineage_intent='continue_line'" in idea_text
-    assert "lineage_intent='branch_alternative'" in idea_text
-    assert "new canvas node" in idea_text
-    assert "maintenance-only compatibility" in idea_text
-
-    assert "new durable idea branch" in experiment_text
-    assert "fixed round node" in experiment_text
-    assert "accepted idea -> `artifact.submit_idea(mode='create', lineage_intent='continue_line'|'branch_alternative', ...)`" in decision_text
-
-
-def test_analysis_campaign_skill_requires_one_slice_campaign_for_single_extra_experiment() -> None:
-    text = (repo_root() / "src" / "skills" / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
-    assert "one-slice campaign" in text
-    assert "current workspace/result node" in text
-
-
-def test_research_stage_skills_document_upstream_aligned_baseline_and_campaign_contracts() -> None:
-    root = repo_root() / "src" / "skills"
-    baseline_text = (root / "baseline" / "SKILL.md").read_text(encoding="utf-8")
-    experiment_text = (root / "experiment" / "SKILL.md").read_text(encoding="utf-8")
-    campaign_text = (root / "analysis-campaign" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "## Fast-path first" in baseline_text
-    assert "`requested_baseline_ref` or `confirmed_baseline_ref`" in baseline_text
-    assert "default to reuse-and-verify" in baseline_text
-
-    assert "## Required plan and checklist" in experiment_text
-    assert "selected idea summarized in `1-2` sentences" in experiment_text
-    assert "artifact.record_main_experiment(...)" in experiment_text
-
-    assert "artifact.record_analysis_slice(...)" in campaign_text
-    assert "one-slice campaign" in campaign_text
-    assert "current workspace/result node" in campaign_text
-
-
-def test_review_and_rebuttal_skills_route_extra_evidence_into_shared_campaign_protocol() -> None:
-    review_text = (repo_root() / "src" / "skills" / "review" / "SKILL.md").read_text(encoding="utf-8")
-    rebuttal_text = (repo_root() / "src" / "skills" / "rebuttal" / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "shared supplementary-experiment protocol" in review_text
-    assert "one-slice campaign" in review_text
-    assert "Do not invent a separate review-only experiment workflow." in review_text
-    assert "paper/paper_experiment_matrix.md" in review_text
-
-    assert "shared supplementary-experiment protocol" in rebuttal_text
-    assert "do not invent a rebuttal-only experiment system" in rebuttal_text
-    assert "artifact.resolve_runtime_refs(...)" in rebuttal_text
-    assert "paper/paper_experiment_matrix.md" in rebuttal_text

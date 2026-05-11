@@ -22,7 +22,7 @@ def _make_builder(temp_home: Path) -> tuple[PromptBuilder, dict]:
     return PromptBuilder(repo_root(), temp_home), snapshot
 
 
-def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> None:
+def test_prompt_builder_includes_runtime_context_and_stable_tool_surface(temp_home: Path) -> None:
     builder, snapshot = _make_builder(temp_home)
     prompt = builder.build(
         quest_id=snapshot["quest_id"],
@@ -31,45 +31,23 @@ def test_prompt_builder_includes_layered_runtime_context(temp_home: Path) -> Non
         model="gpt-5.4",
     )
 
-    assert "# DeepScientist Core System Prompt" in prompt
-    assert "# Shared Interaction Contract" in prompt
     assert "## Runtime Context" in prompt
-    assert "## Active Communication Surface" in prompt
-    assert "## Continuation Guard" in prompt
     assert "## Quest Context" in prompt
     assert "## Recent Durable State" in prompt
     assert "## Paper And Evidence Snapshot" in prompt
-    assert "## Priority Memory For This Turn" in prompt
-    assert "## Recent Conversation Window" in prompt
-    assert "## Current Turn Attachments" in prompt
     assert f"quest_root: {snapshot['quest_root']}" in prompt
     assert f"active_branch: {snapshot['branch']}" in prompt
     assert f"conversation_id: quest:{snapshot['quest_id']}" in prompt
     assert "research_head_branch:" in prompt
     assert "current_workspace_root:" in prompt
     assert "built_in_mcp_namespaces: memory, artifact, bash_exec" in prompt
-    assert "this runner does not mount a `skills` MCP server" in prompt
-    assert "do not call `skills.read_mcp_resource`" in prompt
-    assert "read the relevant quest-local or canonical SKILL.md path with bash_exec" in prompt
     assert "artifact.arxiv(paper_id=..., full_text=False)" in prompt
     assert "artifact.activate_branch(...)" in prompt
     assert "artifact.confirm_baseline(...)" in prompt
     assert "artifact.complete_quest(...)" in prompt
-    assert "Canonical stage skills root:" in prompt
-    assert "Standard stage skill paths:" in prompt
-    assert "Companion skill paths:" in prompt
-    assert "paper-plot" in prompt
-    assert "figure-polish" in prompt
-    assert "intake-audit" in prompt
-    assert "review" in prompt
-    assert "rebuttal" in prompt
     assert "## Current User Message" in prompt
     assert "requested_skill_rule:" in prompt
     assert "stage-specific execution detail lives in the requested skill" in prompt
-    assert "#F3EEE8" in prompt
-    assert "plt.rcParams.update" in prompt
-    assert "caption_cleanliness_rule" in prompt
-    assert "decision_action_rule" in prompt
     assert "managed_python_env_rule" in prompt
     assert "AutoFigure-Edit" not in prompt
     assert len(prompt.splitlines()) < 1800
@@ -869,7 +847,9 @@ def test_prompt_builder_ignores_legacy_publishability_gate_mode(temp_home: Path,
     assert "publishability_stop_loss_rule:" in prompt
 
 
-def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) -> None:
+def test_publishability_gate_followthrough_defaults_do_not_reintroduce_legacy_prompt_tokens(
+    temp_home: Path,
+) -> None:
     builder, snapshot = _make_builder(temp_home)
 
     prompt = builder.build(
@@ -883,12 +863,6 @@ def test_publishability_gate_followthrough_defaults_and_guides(temp_home: Path) 
     assert "publishability_gate_rule:" not in prompt
     assert "paper_branch_admission_rule:" not in prompt
     assert "review_gate_rule:" in prompt
-
-    english_guide = (repo_root() / "docs" / "en" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
-    chinese_guide = (repo_root() / "docs" / "zh" / "02_START_RESEARCH_GUIDE.md").read_text(encoding="utf-8")
-
-    assert "publishability_gate_mode" not in english_guide
-    assert "publishability_gate_mode" not in chinese_guide
 
 
 def test_prompt_builder_strengthens_standard_optimization_entry_guidance(temp_home: Path) -> None:

@@ -64,6 +64,7 @@
 6. 让 upstream intake 继续通过审计与验证推进，只吸收能强化 runtime contract、parity oracle 或兼容性证明的变化。
 7. 让 README、docs index、status/project 文档对齐“archive/reference + explicit diagnostic + upstream intake”的当前定位。
 8. 保持 repo hygiene / line-budget guard 生效：tracked local/runtime state 由 `scripts/audit_repo_hygiene.py` 拦截，现有超长 legacy source/test 文件先以 baseline 管住增长；资源重复与 UI/branding/source-truth follow-up 记录在 `docs/references/resource_source_truth_audit.md`，不在 hygiene lane 内移动资源。
+9. 测试清理口径：测试继续覆盖 runtime protocol、schema、CLI/API、generated artifact、污染 guard 与 archive/reference fixture；不再固定 README/docs/guide/SKILL prose、旧 active product/WebUI/daemon 默认语义，口径见 `docs/references/test_retirement_boundary.md`。
 
 ## 默认验证
 
@@ -78,4 +79,5 @@
 - workspace-mode / continuation 语义说明：`docs/zh/20_WORKSPACE_MODES_GUIDE.md`、`docs/en/20_WORKSPACE_MODES_GUIDE.md`
 - 五个核心 skill owner split 参考：`docs/references/upstream_skill_owner_split_2026_04_20.md`
 - baseline / 审计说明：`docs/references/medical_fork_baseline.md`
+- 测试退役边界：`docs/references/test_retirement_boundary.md`
 - 公开用户文档：`docs/en/`、`docs/zh/`
